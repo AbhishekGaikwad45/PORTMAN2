@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Vessel Hatch Master - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Vessel Hatch Master</h2>
+    <span class="module-code">VHM01</span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+</div>
+
+<div id="table"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('VHM01', 'Vessel Hatch Master');
+
+    const permissions = {
+        can_add: {{ permissions.can_add|default(0) }},
+        can_edit: {{ permissions.can_edit|default(0) }},
+        can_delete: {{ permissions.can_delete|default(0) }}
+    };
+
+    let table = new Tabulator("#table", {
+        height: "calc(100vh - 160px)",
+        layout: "fitColumns",
+        pagination: true,
+        paginationMode: "remote",
+        paginationSize: 20,
+        ajaxURL: "/api/module/VHM01/data",
+        columns: [
+            {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+            {title: "ID", field: "id", width: 70},
+            {title: "Hatch Name", field: "name", editor: permissions.can_edit || permissions.can_add ? "input" : false}
+        ],
+        selectable: true
+    });
+
+    if (localStorage.getItem('theme') === 'dark') {
+        document.getElementById('table').classList.add('tabulator-dark');
+    }
+
+    function addRow() {
+        table.addRow({}, false);
+    }
+
+    function deleteSelected() {
+        const selected = table.getSelectedRows();
+        if (selected.length === 0) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+        selected.forEach(row => {
+            const id = row.getData().id;
+            if (id) {
+                fetch("/api/module/VHM01/delete", {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: id})
+                });
+            }
+            row.delete();
+        });
+    }
+
+    async function saveAll() {
+        const rows = table.getRows();
+        for (const row of rows) {
+            const data = row.getData();
+            const res = await fetch("/api/module/VHM01/save", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if (result.id) row.update({id: result.id});
+        }
+        table.setData("/api/module/VHM01/data");
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveAll(); }
+    });
+</script>
+{% endblock %}

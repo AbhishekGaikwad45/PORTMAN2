@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Access Denied - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="no-access-page">
+    <div class="no-access-content">
+        <h2>Access Denied</h2>
+        <p>You do not have permission to access this module.</p>
+        <p>Please contact your administrator to request access.</p>
+        <a href="/home" class="btn btn-add">Return to Home</a>
+    </div>
+</div>
+
+<style>
+.no-access-page {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+}
+.no-access-content {
+    text-align: center;
+    padding: 40px;
+}
+.no-access-content h2 {
+    font-size: 18px;
+    margin-bottom: 12px;
+    color: #e53e3e;
+}
+.no-access-content p {
+    margin-bottom: 8px;
+    color: #718096;
+}
+.no-access-content .btn {
+    margin-top: 16px;
+}
+</style>
+{% endblock %}

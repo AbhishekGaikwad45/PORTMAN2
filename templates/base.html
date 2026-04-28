@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}PORTBIRD DPPL{% endblock %}</title>
+    <link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Frozen columns — z-index + opaque background so scrolling cells never bleed through */
+        /* Dark gradient header only on main tables (not sub-tabulators) */
+        .tabulator:not(.sub-tabulator) .tabulator-header .tabulator-col.tabulator-frozen {
+            z-index: 11 !important;
+            background: linear-gradient(180deg, #4a5568 0%, #2d3748 100%) !important;
+        }
+        /* Sub-table frozen headers: just z-index, keep their natural background */
+        .sub-tabulator .tabulator-header .tabulator-col.tabulator-frozen {
+            z-index: 11 !important;
+        }
+        .tabulator .tabulator-row .tabulator-cell.tabulator-frozen {
+            z-index: 10 !important;
+            background-color: #ffffff;
+        }
+        .tabulator .tabulator-row.tabulator-row-even .tabulator-cell.tabulator-frozen {
+            background-color: #f7fafc;
+        }
+        .tabulator .tabulator-row:hover .tabulator-cell.tabulator-frozen {
+            background-color: #edf2f7;
+        }
+        /* Dark theme frozen cells */
+        .dark-theme .tabulator:not(.sub-tabulator) .tabulator-header .tabulator-col.tabulator-frozen {
+            background: linear-gradient(180deg, #4a5568 0%, #2d3748 100%) !important;
+        }
+        .dark-theme .tabulator .tabulator-row .tabulator-cell.tabulator-frozen {
+            background-color: #2d3748;
+        }
+        .dark-theme .tabulator .tabulator-row.tabulator-row-even .tabulator-cell.tabulator-frozen {
+            background-color: #1a202c;
+        }
+        .dark-theme .tabulator .tabulator-row:hover .tabulator-cell.tabulator-frozen {
+            background-color: #4a5568;
+        }
+
+        /* Accordion Styles */
+        .accordion-section {
+            margin-bottom: 2px;
+        }
+        .accordion-header {
+            background: transparent;
+            color: var(--text-primary);
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border: none;
+            transition: all 0.2s ease;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .accordion-header:hover {
+            background: var(--hover-bg);
+        }
+        .accordion-header .icon {
+            width: 22px;
+            height: 22px;
+            transition: all 0.2s ease;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
+        }
+        .accordion-header:hover .icon {
+            transform: scale(1.3);
+            filter: drop-shadow(0 3px 6px rgba(0,0,0,0.35));
+        }
+        .accordion-header .arrow {
+            margin-left: auto;
+            transition: transform 0.2s ease;
+            font-size: 10px;
+            opacity: 0.5;
+        }
+        .accordion-header.active .arrow {
+            transform: rotate(90deg);
+        }
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            background: var(--bg-secondary);
+        }
+        .accordion-content.open {
+            max-height: 1000px;
+            overflow-y: auto;
+        }
+        .accordion-content .module-item {
+            padding: 6px 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .accordion-content .module-item:hover {
+            background: var(--hover-bg);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+            transform: translateY(-1px);
+        }
+        .accordion-content .module-item:last-child {
+            border-bottom: none;
+        }
+        .accordion-content .module-item .code {
+            background: #3498db;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 600;
+            min-width: 50px;
+            text-align: center;
+        }
+        .accordion-content .module-item .name {
+            font-size: 11px;
+            color: var(--text-primary);
+        }
+
+        /* Consistent styling for all accordions */
+        .accordion-section .module-item .code {
+            background: #4a90d9;
+        }
+
+        /* Sidebar divider */
+        .sidebar-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 10px 0;
+        }
+
+        /* Module navigation title */
+        .nav-title {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            padding: 8px 12px 6px;
+            font-weight: 600;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="light-theme">
+    <div class="header">
+        <div class="header-left">
+            <a href="/home"><img src="{{ url_for('static', filename='img/logopb.png') }}" alt="DPPL PMS" style="height: 40px; margin-left: 20px; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.35));"></a>
+
+            
+        </div>
+        <div class="header-right">
+            <span class="user">{{ (session.get('email') or session.get('username') or '').split('@')[0] }}</span>
+            {% if session.is_admin %}
+            <a href="/admin" class="admin-btn">Admin</a>
+            {% endif %}
+            <button class="theme-toggle" onclick="toggleTheme()">Theme</button>
+            <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="sidebar-logo" style="text-align: center; padding: 0px 0 8px 0;">
+                <img src="{{ url_for('static', filename='img/logo31.png') }}" alt="Logo" style="max-width: 85%; height: auto;">
+            </div>
+
+            <!-- Collapsed-only icons for search and recent -->
+            <div class="sidebar-collapsed-icons">
+                <div class="collapsed-icon-item" title="Search">
+                    <img src="{{ url_for('static', filename='img/search.png') }}" alt="Search" class="icon">
+                    <span>Search</span>
+                </div>
+                <div class="collapsed-icon-item" title="Recent">
+                    <img src="{{ url_for('static', filename='img/recent.png') }}" alt="Recent" class="icon">
+                    <span>Recent</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="search-box">
+                    <input type="text" id="moduleSearch" placeholder="Search modules..." autocomplete="off">
+                    <div id="suggestions" class="suggestions"></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title">Recent</div>
+                <div id="recentModules" class="module-list"></div>
+            </div>
+
+            <div class="sidebar-divider"></div>
+            <div class="nav-title">Module Navigation</div>
+
+            <!-- Marine Accordion -->
+            <div class="accordion-section marine">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/Marine1.png') }}" alt="Marine" class="icon">
+                    <span>Marine</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('VC01', 'Vessel Creation')">
+                        <span class="code">VC01</span>
+                        <span class="name">Vessel Creation</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VCN01', 'Vessel Call Number')">
+                        <span class="code">VCN01</span>
+                        <span class="name">Vessel Call Number</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operations Accordion -->
+            <div class="accordion-section operations">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/Operations1.png') }}" alt="Operations" class="icon">
+                    <span>Operations</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('LDUD01', 'Loading Unloading')">
+                        <span class="code">LDUD01</span>
+                        <span class="name">Loading Unloading</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('MBC01', 'MBC Operation')">
+                        <span class="code">MBC01</span>
+                        <span class="name">MBC Operation</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('LUEU01', 'Load Unload Equipment Utilization')">
+                        <span class="code">LUEU01</span>
+                        <span class="name">Load Unload Equipment Utilization</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Services Accordion -->
+            <div class="accordion-section services">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/services.png') }}" alt="Services" class="icon">
+                    <span>Services</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('SRV01', 'Service Recording')">
+                        <span class="code">SRV01</span>
+                        <span class="name">Service Recording</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Doc Series Accordion -->
+            <div class="accordion-section docseries">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/Doc_series1.png') }}" alt="Doc Series" class="icon">
+                    <span>Doc Series</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('VCDS01', 'VCN Doc Series')">
+                        <span class="code">VCDS01</span>
+                        <span class="name">VCN Doc Series</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('MBCDS01', 'MBC Doc Series')">
+                        <span class="code">MBCDS01</span>
+                        <span class="name">MBC Doc Series</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('INVDS01', 'Invoice Doc Series')">
+                        <span class="code">INVDS01</span>
+                        <span class="name">Invoice Doc Series</span>
+                    </div>
+                    <div class="module-item" onclick="addToRecent('FDCN01','DN/CN Doc Series');window.location.href='/module/FDCN01/doc-series'">
+                        <span class="code">FDCN01</span>
+                        <span class="name">DN/CN Doc Series</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Accounts Accordion -->
+            <div class="accordion-section accounts">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/Accounts1.png') }}" alt="Accounts" class="icon">
+                    <span>Accounts</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('FIN01', 'Billing')">
+                        <span class="code">FIN01</span>
+                        <span class="name">Billing</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FINV01', 'Invoicing')">
+                        <span class="code">FINV01</span>
+                        <span class="name">Invoicing</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FCAM01', 'Customer Agreements')">
+                        <span class="code">FCAM01</span>
+                        <span class="name">Customer Agreements</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FSTM01', 'Service Type Master')">
+                        <span class="code">FSTM01</span>
+                        <span class="name">Service Type Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FGRM01', 'GST Rate Master')">
+                        <span class="code">FGRM01</span>
+                        <span class="name">GST Rate Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FCRM01', 'Currency Master')">
+                        <span class="code">FCRM01</span>
+                        <span class="name">Currency Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FDCN01', 'Debit / Credit Note')" style="border-top:1px solid rgba(255,255,255,0.1)">
+                        <span class="code">FDCN01</span>
+                        <span class="name">Debit / Credit Note</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FSAP01', 'SAP Financial Integration')">
+                        <span class="code">FSAP01</span>
+                        <span class="name">SAP Financial Integration</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('FLOG01', 'Integration Logs')">
+                        <span class="code">FLOG01</span>
+                        <span class="name">Integration Logs</span>
+                    </div>
+                    {% if session.is_admin %}
+                    <div class="module-item" onclick="goToModule('GSTCFG', 'GST API Configuration')" style="border-top:1px solid rgba(255,255,255,0.1)">
+                        <span class="code">GSTCFG</span>
+                        <span class="name">GST API Config</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Reports Accordion -->
+            <div class="accordion-section reports">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/reports.png') }}" alt="Reports" class="icon">
+                    <span>Reports</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('RP01', 'Reports')">
+                        <span class="code">RP01</span>
+                        <span class="name">Reports</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Masters Accordion -->
+            <div class="accordion-section masters">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/Master1.png') }}" alt="Masters" class="icon">
+                    <span>Masters</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('VTM01', 'Vessel Type Master')">
+                        <span class="code">VTM01</span>
+                        <span class="name">Vessel Type Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VCM01', 'Vessel Country Master')">
+                        <span class="code">VCM01</span>
+                        <span class="name">Vessel Country Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VAM01', 'Vessel Agent Master')">
+                        <span class="code">VAM01</span>
+                        <span class="name">Vessel Agent Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VCUM01', 'Vessel Currency')">
+                        <span class="code">VCUM01</span>
+                        <span class="name">Vessel Currency</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VRT01', 'Run Types')">
+                        <span class="code">VRT01</span>
+                        <span class="name">Run Types</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VDM01', 'Vessel Delay Master')">
+                        <span class="code">VDM01</span>
+                        <span class="name">Vessel Delay Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('PDM01', 'Port Delay Master')">
+                        <span class="code">PDM01</span>
+                        <span class="name">Port Delay Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VCG01', 'Cargo Master')">
+                        <span class="code">VCG01</span>
+                        <span class="name">Cargo Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VQM01', 'Quantity UOM')">
+                        <span class="code">VQM01</span>
+                        <span class="name">Quantity UOM</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VHO01', 'Vessel Holds')">
+                        <span class="code">VHO01</span>
+                        <span class="name">Vessel Holds</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VEM01', 'Equipment Master')">
+                        <span class="code">VEM01</span>
+                        <span class="name">Equipment Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VBM01', 'Barge Master')">
+                        <span class="code">VBM01</span>
+                        <span class="name">Barge Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VSDM01', 'Vessel Stevedore Master')">
+                        <span class="code">VSDM01</span>
+                        <span class="name">Vessel Stevedore Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('MBCM01', 'MBC Master')">
+                        <span class="code">MBCM01</span>
+                        <span class="name">MBC Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('PBM01', 'Port Berth Master')">
+                        <span class="code">PBM01</span>
+                        <span class="name">Port Berth Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('PPL01', 'Port Payloader Master')">
+                        <span class="code">PPL01</span>
+                        <span class="name">Port Payloader Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('CRM01', 'Conveyor Route Master')">
+                        <span class="code">CRM01</span>
+                        <span class="name">Conveyor Route Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VANM01', 'Anchorage Master')">
+                        <span class="code">VANM01</span>
+                        <span class="name">Anchorage Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('VPM01', 'Port Master')">
+                        <span class="code">VPM01</span>
+                        <span class="name">Port Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('TM01', 'Tide Master')">
+                        <span class="code">TM01</span>
+                        <span class="name">Tide Master</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Audit Accordion -->
+            <div class="accordion-section audit">
+                <div class="accordion-header" onclick="toggleAccordion(this)">
+                    <img src="{{ url_for('static', filename='img/audit.png') }}" alt="Audit" class="icon">
+                    <span>Audit</span>
+                    <span class="arrow">&#9654;</span>
+                </div>
+                <div class="accordion-content">
+                    <div class="module-item" onclick="goToModule('AUD01', 'Audit Logs')">
+                        <span class="code">AUD01</span>
+                        <span class="name">Audit Logs</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content-area">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
+    <script>
+        // Redirect to login if session has expired (e.g. after back-button post-logout)
+        function checkSession() {
+            fetch('/api/modules/search?q=__session_check__', {cache: 'no-store'})
+                .then(r => { if (r.status === 401 || r.redirected) window.location.replace('/login'); })
+                .catch(() => {});
+        }
+        // Check on page show (catches back/forward cache)
+        window.addEventListener('pageshow', function(e) {
+            if (e.persisted) checkSession();
+        });
+        // Check when tab regains focus
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) checkSession();
+        });
+    </script>
+    <script>
+        // Accordion toggle
+        function toggleAccordion(header) {
+            header.classList.toggle('active');
+            const content = header.nextElementSibling;
+            content.classList.toggle('open');
+        }
+
+        // Theme toggle
+        function toggleTheme() {
+            document.body.classList.toggle('dark-theme');
+            document.body.classList.toggle('light-theme');
+            localStorage.setItem('theme', document.body.classList.contains('dark-theme') ? 'dark' : 'light');
+            if (typeof updateTableTheme === 'function') updateTableTheme();
+        }
+        if (localStorage.getItem('theme') === 'dark') {
+            document.body.classList.remove('light-theme');
+            document.body.classList.add('dark-theme');
+        }
+
+        // Module search
+        const searchInput = document.getElementById('moduleSearch');
+        const suggestions = document.getElementById('suggestions');
+
+        async function fetchModuleResults(query) {
+            const res = await fetch('/api/modules/search?q=' + encodeURIComponent(query));
+            return await res.json();
+        }
+
+        searchInput.addEventListener('input', async function() {
+            const q = this.value.trim();
+            if (q.length < 1) {
+                suggestions.style.display = 'none';
+                return;
+            }
+            const data = await fetchModuleResults(q);
+            if (data.length > 0) {
+                suggestions.innerHTML = data.map(m =>
+                    `<div class="suggestion-item" data-code="${m.code}" data-name="${m.name}">
+                        <span class="code">${m.code}</span>
+                        <span class="name">${m.name}</span>
+                        <span class="add-quick" onclick="event.stopPropagation(); addToQuickAccess('${m.code}', '${m.name}')" title="Add to Quick Access">+</span>
+                    </div>`
+                ).join('');
+                suggestions.style.display = 'block';
+            } else {
+                suggestions.innerHTML = '<div class="no-results">No modules found</div>';
+                suggestions.style.display = 'block';
+            }
+        });
+
+        searchInput.addEventListener('keydown', async function(e) {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+
+            const q = this.value.trim();
+            if (q.length < 1) return;
+
+            const data = await fetchModuleResults(q);
+            if (data.length > 0) {
+                suggestions.style.display = 'none';
+                goToModule(data[0].code, data[0].name);
+            }
+        });
+
+        suggestions.addEventListener('click', function(e) {
+            const item = e.target.closest('.suggestion-item');
+            if (item && !e.target.classList.contains('add-quick')) {
+                const code = item.dataset.code;
+                const name = item.dataset.name;
+                addToRecent(code, name);
+                window.location.href = '/module/' + code + '/';
+            }
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!searchInput.contains(e.target) && !suggestions.contains(e.target)) {
+                suggestions.style.display = 'none';
+            }
+        });
+
+
+
+        // Recent modules
+        function getRecent() {
+            return JSON.parse(localStorage.getItem('recentModules') || '[]');
+        }
+
+        function addToRecent(code, name) {
+            let items = getRecent().filter(i => i.code !== code);
+            items.unshift({code, name});
+            if (items.length > 5) items.pop();
+            localStorage.setItem('recentModules', JSON.stringify(items));
+            renderRecent();
+        }
+
+        function renderRecent() {
+            const container = document.getElementById('recentModules');
+            const items = getRecent();
+            if (items.length === 0) {
+                container.innerHTML = '<div class="empty-message">No recent modules</div>';
+                return;
+            }
+            container.innerHTML = items.map(m =>
+                `<div class="module-item" onclick="goToModule('${m.code}', '${m.name}')">
+                    <span class="code">${m.code}</span>
+                    <span class="name">${m.name}</span>
+                </div>`
+            ).join('');
+        }
+
+        function goToModule(code, name) {
+            addToRecent(code, name);
+            window.location.href = '/module/' + code + '/';
+        }
+
+        // Initialize
+
+        renderRecent();
+
+        // ── Global date/time formatting helpers (DD-MM-YYYY HH:MM IST) ──
+        function formatDateTime(val) {
+            if (!val) return '';
+            // Parse directly from string - data is stored as naive IST datetimes
+            var s = String(val).replace(' ', 'T');
+            var parts = s.split('T');
+            if (parts.length < 2) return val;
+            var dateParts = parts[0].split('-');
+            if (dateParts.length !== 3) return val;
+            var timeParts = parts[1].split(':');
+            if (timeParts.length < 2) return val;
+            var dd = dateParts[2];
+            var mm = dateParts[1];
+            var yyyy = dateParts[0];
+            var hh = timeParts[0].padStart(2, '0');
+            var min = timeParts[1].padStart(2, '0');
+            return dd + '-' + mm + '-' + yyyy + ' ' + hh + ':' + min + ' IST';
+        }
+        function formatDate(val) {
+            if (!val) return '';
+            var parts = String(val).split('-');
+            if (parts.length === 3) return parts[2] + '-' + parts[1] + '-' + parts[0];
+            return val;
+        }
+        // Tabulator cell formatters for reuse
+        function datetimeCellFormatter(cell) { return formatDateTime(cell.getValue()); }
+        function dateCellFormatter(cell) { return formatDate(cell.getValue()); }
+
+        // ── Global Tabulator custom editors (text-based, DD-MM-YYYY HH:MM) ──
+
+        // Convert stored YYYY-MM-DDTHH:MM to display DD-MM-YYYY HH:MM
+        function _dbToDisplay(val) {
+            if (!val) return '';
+            var s = String(val).replace('T', ' ');
+            var parts = s.split(' ');
+            if (parts.length < 2) return '';
+            var d = parts[0].split('-');
+            var t = parts[1].split(':');
+            if (d.length !== 3 || t.length < 2) return '';
+            return d[2] + '-' + d[1] + '-' + d[0] + ' ' + t[0].padStart(2,'0') + ':' + t[1].padStart(2,'0');
+        }
+        // Convert display DD-MM-YYYY HH:MM back to YYYY-MM-DDTHH:MM for storage
+        function _displayToDb(val) {
+            if (!val) return '';
+            var s = String(val).trim();
+            // Expect DD-MM-YYYY HH:MM
+            var parts = s.split(' ');
+            if (parts.length < 2) return '';
+            var d = parts[0].split('-');
+            var t = parts[1].split(':');
+            if (d.length !== 3 || t.length < 2) return '';
+            var yyyy = d[2], mm = d[1], dd = d[0], hh = t[0], min = t[1];
+            if (yyyy.length !== 4 || isNaN(yyyy) || isNaN(mm) || isNaN(dd) || isNaN(hh) || isNaN(min)) return '';
+            return yyyy + '-' + mm.padStart(2,'0') + '-' + dd.padStart(2,'0') + 'T' + hh.padStart(2,'0') + ':' + min.padStart(2,'0');
+        }
+        // Convert stored YYYY-MM-DD to display DD-MM-YYYY
+        function _dbDateToDisplay(val) {
+            if (!val) return '';
+            var d = String(val).split('-');
+            if (d.length !== 3) return '';
+            return d[2] + '-' + d[1] + '-' + d[0];
+        }
+        // Convert display DD-MM-YYYY back to YYYY-MM-DD
+        function _displayDateToDb(val) {
+            if (!val) return '';
+            var d = String(val).trim().split('-');
+            if (d.length !== 3 || d[2].length !== 4) return '';
+            return d[2] + '-' + d[1].padStart(2,'0') + '-' + d[0].padStart(2,'0');
+        }
+
+        // Auto-format as user types: inserts dashes, space, colon for DD-MM-YYYY HH:MM
+        function _maskDatetime(input) {
+            input.addEventListener('input', function(e) {
+                var raw = input.value.replace(/[^\d]/g, '');
+                var out = '';
+                for (var i = 0; i < raw.length && i < 12; i++) {
+                    if (i === 2 || i === 4) out += '-';
+                    if (i === 8) out += ' ';
+                    if (i === 10) out += ':';
+                    out += raw[i];
+                }
+                input.value = out;
+            });
+        }
+        // Auto-format for DD-MM-YYYY
+        function _maskDate(input) {
+            input.addEventListener('input', function(e) {
+                var raw = input.value.replace(/[^\d]/g, '');
+                var out = '';
+                for (var i = 0; i < raw.length && i < 8; i++) {
+                    if (i === 2 || i === 4) out += '-';
+                    out += raw[i];
+                }
+                input.value = out;
+            });
+        }
+
+        var datetimeEditor = function(cell, onRendered, success, cancel) {
+            var cellValue = cell.getValue() || '';
+            var input = document.createElement("input");
+            input.type = "text";
+            input.placeholder = "DD-MM-YYYY HH:MM";
+            input.maxLength = 16;
+            input.value = _dbToDisplay(cellValue);
+            input.style.width = "100%";
+            input.style.boxSizing = "border-box";
+            input.style.padding = "4px";
+            input.style.fontFamily = "monospace";
+            input.style.fontSize = "12px";
+            var resolved = false;
+
+            _maskDatetime(input);
+
+            function complete() {
+                if (resolved) return;
+                resolved = true;
+                var dbVal = _displayToDb(input.value);
+                success(dbVal);
+            }
+
+            onRendered(function() { input.focus(); input.select(); input.style.height = "100%"; });
+            input.addEventListener("blur", function() { complete(); });
+            input.addEventListener("keydown", function(e) {
+                if (e.key === "Enter") complete();
+                if (e.key === "Escape") { resolved = true; cancel(); }
+            });
+            return input;
+        };
+
+        var dateEditor = function(cell, onRendered, success, cancel) {
+            var cellValue = cell.getValue() || '';
+            var input = document.createElement("input");
+            input.type = "text";
+            input.placeholder = "DD-MM-YYYY";
+            input.maxLength = 10;
+            input.value = _dbDateToDisplay(cellValue);
+            input.style.width = "100%";
+            input.style.boxSizing = "border-box";
+            input.style.padding = "4px";
+            input.style.fontFamily = "monospace";
+            input.style.fontSize = "12px";
+            var resolved = false;
+
+            _maskDate(input);
+
+            function complete() {
+                if (resolved) return;
+                resolved = true;
+                var dbVal = _displayDateToDb(input.value);
+                success(dbVal);
+            }
+
+            onRendered(function() { input.focus(); input.select(); input.style.height = "100%"; });
+            input.addEventListener("blur", function() { complete(); });
+            input.addEventListener("keydown", function(e) {
+                if (e.key === "Enter") complete();
+                if (e.key === "Escape") { resolved = true; cancel(); }
+            });
+            return input;
+        };
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

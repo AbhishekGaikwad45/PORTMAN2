@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>{{ 'Debit Note' if header.doc_type == 'DN' else 'Credit Note' }} {{ header.doc_number }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        @page { size: A4; margin: 6mm; }
+        @media print {
+            .no-print { display: none !important; }
+            body { background: #fff; }
+            .invoice-set { page-break-after: always; }
+            .invoice-set:last-child { page-break-after: avoid; }
+            .invoice-copy { page-break-after: auto; margin: 0 !important; border: none !important; }
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 9px;
+            color: #000;
+            background: #fff;
+        }
+
+        .no-print {
+            background: #333;
+            padding: 8px 16px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .no-print button {
+            padding: 6px 14px;
+            font-size: 11px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .btn-print { background: #3498db; color: #fff; }
+        .btn-back  { background: #95a5a6; color: #fff; }
+
+        /* ── Invoice copy wrapper ── */
+        .invoice-copy {
+            width: 100%;
+            min-height: 281mm;
+            margin: 0;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+        }
+        .inv-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .inv-footer-block {
+            margin-top: auto;
+        }
+
+        /* ── Cancelled banner ── */
+        .cancelled-banner {
+            border: 2px solid #c0392b;
+            background: #fdf0f0;
+            color: #c0392b;
+            padding: 4px 8px;
+            font-size: 9px;
+            font-weight: 700;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+
+        /* ── Single outer border — all sections inside ── */
+        .inv-outer {
+            border: 1px solid #000;
+        }
+        .inv-header,
+        .inv-title-row,
+        .irn-row,
+        .ack-row,
+        .parties-row,
+        .vessel-section,
+        .items-section,
+        .bottom-row,
+        .words-row,
+        .payment-row,
+        .corp-footer {
+            border-left: none !important;
+            border-right: none !important;
+        }
+
+        /* ── Header: Logo | Copy type + Rule text + QR ── */
+        .inv-header {
+            border-bottom: 1px solid #000;
+            display: flex;
+        }
+        .header-logo {
+            flex: 1;
+            padding: 4px 8px;
+            border-right: 1px solid #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        .header-logo img {
+            max-height: 52px;
+            width: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        .header-right {
+            width: 155px;
+            padding: 5px 7px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+        .copy-type {
+            font-size: 8px;
+            font-weight: 700;
+            text-align: right;
+        }
+        .rule-text {
+            font-size: 7px;
+            text-align: right;
+            color: #333;
+            line-height: 1.4;
+        }
+        .qr-area { text-align: right; }
+        .qr-area img { width: 60px; height: 60px; }
+        .qr-placeholder {
+            width: 60px; height: 60px;
+            border: 1px dashed #999;
+            display: inline-flex;
+            align-items: center; justify-content: center;
+            font-size: 6px; color: #999; text-align: center;
+        }
+
+        /* ── Title row ── */
+        .inv-title-row {
+            border-bottom: 1px solid #000;
+            text-align: center;
+            padding: 4px;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+
+        /* ── IRN row ── */
+        .irn-row {
+            border-bottom: 1px solid #000;
+            padding: 3px 6px;
+            font-size: 7.5px;
+            word-break: break-all;
+        }
+        .irn-row strong { font-weight: 700; }
+
+        /* ── ACK row ── */
+        .ack-row {
+            border-bottom: 1px solid #000;
+        }
+        .ack-table { width: 100%; border-collapse: collapse; }
+        .ack-table td {
+            padding: 3px 6px;
+            font-size: 8px;
+            border-right: 1px solid #000;
+        }
+        .ack-table td:last-child { border-right: none; }
+        .ack-label { font-weight: 700; }
+
+        /* ── Billed To / Issued By ── */
+        .parties-row {
+            border-bottom: 1px solid #000;
+            display: flex;
+        }
+        .party-col {
+            flex: 1;
+            padding: 5px 7px;
+        }
+        .party-col + .party-col { border-left: 1px solid #000; }
+        .party-heading { font-size: 8.5px; font-weight: 700; margin-bottom: 3px; }
+        .party-name    { font-size: 9px; font-weight: 700; margin-bottom: 1px; }
+        .party-line    { font-size: 8px; line-height: 1.5; }
+        .party-kv      { display: flex; font-size: 8px; line-height: 1.6; }
+        .party-kv .pk  { font-weight: 700; min-width: 90px; }
+
+        /* ── Document metadata grid ── */
+        .vessel-section {
+            border-bottom: 1px solid #000;
+        }
+        .vessel-table { width: 100%; border-collapse: collapse; }
+        .vessel-table td {
+            padding: 3px 6px;
+            font-size: 8px;
+            border-right: 1px solid #000;
+            border-bottom: 1px solid #000;
+            vertical-align: middle;
+        }
+        .vessel-table tr:last-child td { border-bottom: none; }
+        .vessel-table td:last-child { border-right: none; }
+        .vl { font-weight: 700; white-space: nowrap; }
+        .vv { font-size: 8.5px; }
+
+        /* ── Line items ── */
+        .items-section {
+            border-bottom: 1px solid #000;
+        }
+        .items-table { width: 100%; border-collapse: collapse; }
+        .items-table th {
+            background: #ebebeb;
+            padding: 3px 5px;
+            font-size: 8px;
+            font-weight: 700;
+            border-right: 1px solid #000;
+            border-bottom: 1px solid #000;
+            text-align: left;
+        }
+        .items-table th:last-child { border-right: none; }
+        .items-table td {
+            padding: 3px 5px;
+            font-size: 8.5px;
+            border-right: 1px solid #000;
+            border-bottom: 1px solid #ccc;
+            vertical-align: top;
+        }
+        .items-table td:last-child { border-right: none; }
+        .items-table tbody tr:last-child td { border-bottom: 1px solid #000; }
+        .subtotal-row td {
+            font-weight: 700;
+            font-size: 9px;
+            border-top: 1px solid #000 !important;
+            border-bottom: none !important;
+        }
+        .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+        /* ── Bottom: Remarks (left) + Totals (right) ── */
+        .bottom-row {
+            border-bottom: 1px solid #000;
+            display: flex;
+            min-height: 60px;
+        }
+        .remarks-col {
+            flex: 1;
+            padding: 5px 7px;
+            border-right: 1px solid #000;
+            font-size: 8px;
+        }
+        .rem-label { font-weight: 700; margin-bottom: 2px; }
+        .totals-col { width: 230px; }
+        .totals-table { width: 100%; border-collapse: collapse; }
+        .totals-table td {
+            padding: 2px 6px;
+            font-size: 8.5px;
+            border-bottom: 1px solid #e0e0e0;
+            vertical-align: middle;
+        }
+        .totals-table td:last-child {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            border-left: 1px solid #000;
+        }
+        .totals-table .total-row td {
+            font-weight: 700;
+            font-size: 9px;
+            border-top: 1.5px solid #000;
+            border-bottom: 1.5px solid #000;
+            background: #f0f0f0;
+        }
+
+        /* ── Amount in words ── */
+        .words-row {
+            border-bottom: 1px solid #000;
+            padding: 4px 7px;
+            font-size: 8.5px;
+        }
+        .words-label { font-weight: 700; display: block; margin-bottom: 1px; }
+
+        /* ── Payment Details + Signatory ── */
+        .payment-row {
+            border-bottom: 1px solid #000;
+            display: flex;
+        }
+        .payment-col {
+            flex: 1;
+            padding: 5px 7px;
+            border-right: 1px solid #000;
+            font-size: 8px;
+        }
+        .pay-intro {
+            font-weight: 700;
+            font-size: 7.5px;
+            margin-bottom: 4px;
+        }
+        .pay-line {
+            display: flex;
+            line-height: 1.7;
+            font-size: 8px;
+        }
+        .pay-line .pl { font-weight: 700; min-width: 100px; }
+        .sig-col {
+            width: 160px;
+            padding: 5px 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .sig-company { font-size: 8px; font-weight: 700; white-space: nowrap; }
+        .sig-line {
+            border-top: 1px solid #000;
+            padding-top: 3px;
+            font-size: 7.5px;
+            text-align: center;
+        }
+
+        /* ── Corporate footer ── */
+        .corp-footer {
+            padding: 3px 7px;
+            font-size: 7.5px;
+            color: #333;
+            text-align: center;
+        }
+
+        /* ── SAC summary mini-table ── */
+        .sac-table { width: 100%; border-collapse: collapse; font-size: 7.5px; margin-top: 5px; }
+        .sac-table th, .sac-table td { padding: 2px 4px; border: 1px solid #ccc; }
+        .sac-table th { background: #f0f0f0; }
+        .sac-table td:not(:first-child) { text-align: right; }
+    </style>
+</head>
+<body>
+
+<div class="no-print">
+    <button class="btn-print" onclick="window.print()">Print / Save PDF</button>
+    <button class="btn-back" onclick="location.href='/module/FDCN01/list'">Back to List</button>
+</div>
+
+{% set doc_label       = 'DEBIT NOTE' if header.doc_type == 'DN' else 'CREDIT NOTE' %}
+{% set doc_label_short = 'Debit Note' if header.doc_type == 'DN' else 'Credit Note' %}
+{% set reason_map = {
+    'rate_revision': 'Rate revision against agreement',
+    'cancellation':  'Full invoice cancellation',
+    'eu_deletion':   'EU line deletion — credit for removed cargo',
+    'manual':        'Manual adjustment'
+} %}
+
+{# ── MACRO: one full copy ── #}
+{% macro render_copy(copy_label) %}
+
+{% set sub     = header.subtotal|float %}
+{% set cgst_a  = header.cgst_amount|float %}
+{% set sgst_a  = header.sgst_amount|float %}
+{% set igst_a  = header.igst_amount|float %}
+{% set total_a = header.total_amount|float %}
+{% set cgst_pct = ((cgst_a / sub * 100) if sub > 0 else 0)|round(0)|int %}
+{% set sgst_pct = ((sgst_a / sub * 100) if sub > 0 else 0)|round(0)|int %}
+{% set igst_pct = ((igst_a / sub * 100) if sub > 0 else 0)|round(0)|int %}
+
+<div class="invoice-set">
+<div class="invoice-copy">
+
+    {% if header.doc_status == 'Cancelled' %}
+    <div class="cancelled-banner">*** CANCELLED {{ doc_label }} ***</div>
+    {% endif %}
+
+    <div class="inv-outer">
+    <div class="inv-body">
+
+    <!-- 1. Header: Logo | Copy type + Rule + QR -->
+    <div class="inv-header">
+        <div class="header-logo">
+            <img src="/static/img/invoice_header.png" alt="JSW Dharamtar Port Pvt. Ltd.">
+            <div style="font-size:7.5px;color:#2d3748;line-height:1.55;margin-top:4px;text-align:center;">
+                At:Dharamtar, Post:Dolvi, Tal: Pen, Dist:Raigad,<br>
+                Mumbai, Maharashtra, India - 402107<br>
+                Phone: 02143-277620 &nbsp;&nbsp; Fax: 02143-277800<br>
+                Email: jetty.accounts@jsw.in &nbsp;&nbsp; Website: www.jsw.in<br>
+                <strong>GSTIN: 27AACCJ9361Q1ZS</strong>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="copy-type">{{ copy_label }}</div>
+            <div class="rule-text">{{ doc_label }} ISSUED UNDER RULE<br>46 OF CGST RULES 2017</div>
+            <div class="qr-area">
+                {% if header.gst_qr_code %}
+                <img src="{{ header.gst_qr_code }}" alt="QR Code">
+                {% else %}
+                <div class="qr-placeholder">QR Code<br>(after IRN)</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Title -->
+    <div class="inv-title-row">{{ doc_label }}</div>
+
+    <!-- 3. IRN -->
+    <div class="irn-row">
+        <strong>IRN:</strong>
+        {{ header.gst_irn or '(IRN will be generated after e-Invoice posting to IRP)' }}
+    </div>
+
+    <!-- 4. ACK NO / ACK Date -->
+    <div class="ack-row">
+        <table class="ack-table">
+            <tr>
+                <td style="width:60px;"><span class="ack-label">ACK NO</span></td>
+                <td>{{ header.gst_ack_number or '—' }}</td>
+                <td style="width:70px;"><span class="ack-label">ACK Date</span></td>
+                <td>{{ header.gst_ack_date[8:10] ~ '-' ~ header.gst_ack_date[5:7] ~ '-' ~ header.gst_ack_date[0:4] if header.gst_ack_date else '—' }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- 5. Billed To / Issued By -->
+    <div class="parties-row">
+        <div class="party-col">
+            <div class="party-heading">{{ 'Billed To :' if header.doc_type == 'DN' else 'Credit To :' }}</div>
+            <div class="party-name">{{ header.customer_name }}</div>
+            <div class="party-kv"><span class="pk">Place Of Supply:</span><span>Maharashtra</span></div>
+            <div class="party-kv"><span class="pk">State Code:</span><span>{{ header.customer_gst_state_code or '27' }}</span></div>
+            <div class="party-kv"><span class="pk">GSTIN:</span><span>{{ header.customer_gstin or '—' }}</span></div>
+            <div class="party-kv"><span class="pk">GL Code:</span><span>{{ header.customer_gl_code or '—' }}</span></div>
+        </div>
+        <div class="party-col">
+            <div class="party-heading">Issued By :</div>
+            <div class="party-name">{{ port_config.seller_legal_name or 'JSW Dharamtar Port Pvt. Ltd.' }}</div>
+            <div class="party-kv"><span class="pk">GSTIN:</span><span>{{ port_config.seller_gstin or '27AACCJ9361Q1ZS' }}</span></div>
+        </div>
+    </div>
+
+    <!-- 6. Document metadata (4-column grid) -->
+    <div class="vessel-section">
+        <table class="vessel-table">
+            <tr>
+                <td style="width:22%;"><span class="vl">Document No:</span></td>
+                <td style="width:28%;"><span class="vv" style="font-weight:700;">{{ header.doc_number }}</span></td>
+                <td style="width:22%;"><span class="vl">Document Date:</span></td>
+                <td style="width:28%;"><span class="vv">{{ header.doc_date[8:10] ~ '-' ~ header.doc_date[5:7] ~ '-' ~ header.doc_date[0:4] if header.doc_date else '' }}</span></td>
+            </tr>
+            <tr>
+                <td><span class="vl">Financial Year:</span></td>
+                <td><span class="vv">{{ header.financial_year }}</span></td>
+                <td><span class="vl">Status:</span></td>
+                <td><span class="vv">{{ header.doc_status }}</span></td>
+            </tr>
+            <tr>
+                <td><span class="vl">Orig. Invoice No:</span></td>
+                <td><span class="vv">{{ header.original_invoice_number or header.original_invoice_number_display or '—' }}</span></td>
+                <td><span class="vl">Orig. Invoice Date:</span></td>
+                <td><span class="vv">{{ header.original_invoice_date[8:10] ~ '-' ~ header.original_invoice_date[5:7] ~ '-' ~ header.original_invoice_date[0:4] if header.original_invoice_date else '—' }}</span></td>
+            </tr>
+            {% if header.sap_document_number %}
+            <tr>
+                <td><span class="vl">SAP Document:</span></td>
+                <td><span class="vv">{{ header.sap_document_number }}</span></td>
+                <td><span class="vl">SAP Posting Date:</span></td>
+                <td><span class="vv">{{ header.sap_posting_date[8:10] ~ '-' ~ header.sap_posting_date[5:7] ~ '-' ~ header.sap_posting_date[0:4] if header.sap_posting_date else '' }}</span></td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <!-- 7. Line Items -->
+    <div class="items-section">
+        <table class="items-table">
+            <thead>
+                {% if header.creation_type == 'manual' %}
+                <tr>
+                    <th style="width:28px; text-align:center;">Sl.No</th>
+                    <th>Description Of Service</th>
+                    <th style="width:56px;">SAC Code</th>
+                    <th style="width:90px;" class="num">Amount(Rs)</th>
+                </tr>
+                {% else %}
+                <tr>
+                    <th style="width:28px; text-align:center;">Sl.No</th>
+                    <th>Description Of Service</th>
+                    <th style="width:56px;">SAC Code</th>
+                    <th style="width:50px;" class="num">Qty</th>
+                    <th style="width:38px;">UOM</th>
+                    <th style="width:62px;" class="num">Orig. Rate</th>
+                    <th style="width:62px;" class="num">Revised Rate</th>
+                    <th style="width:58px;" class="num">Diff</th>
+                    <th style="width:78px;" class="num">Amount(Rs)</th>
+                </tr>
+                {% endif %}
+            </thead>
+            <tbody>
+                {% for line in lines %}
+                {% if header.creation_type == 'manual' %}
+                <tr>
+                    <td style="text-align:center;">{{ loop.index }}</td>
+                    <td>
+                        {{ line.service_name }}
+                        {% if line.service_description and line.service_description != line.service_name %}
+                        <br><span style="font-size:7px;color:#555;">{{ line.service_description }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ line.sac_code or '—' }}</td>
+                    <td class="num">{{ "%.2f"|format(line.line_amount|float) }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td style="text-align:center;">{{ loop.index }}</td>
+                    <td>
+                        {{ line.service_name }}
+                        {% if line.service_description and line.service_description != line.service_name %}
+                        <br><span style="font-size:7px;color:#555;">{{ line.service_description }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ line.sac_code or '—' }}</td>
+                    <td class="num">{{ "%.2f"|format(line.quantity|float) }}</td>
+                    <td>{{ line.uom or '' }}</td>
+                    <td class="num">{{ "%.2f"|format(line.original_rate|float) }}</td>
+                    <td class="num">{{ "%.2f"|format(line.revised_rate|float) }}</td>
+                    <td class="num">{{ "%.2f"|format(line.rate_difference|float) }}</td>
+                    <td class="num">{{ "%.2f"|format(line.line_amount|float) }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="subtotal-row">
+                    {% if header.creation_type == 'manual' %}
+                    <td colspan="3" style="text-align:right; border-right:1px solid #000;">Sub Total</td>
+                    {% else %}
+                    <td colspan="8" style="text-align:right; border-right:1px solid #000;">Sub Total</td>
+                    {% endif %}
+                    <td class="num">{{ "%.2f"|format(sub) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <!-- 8. Remarks (left) + Totals (right) -->
+    <div class="bottom-row">
+        <div class="remarks-col">
+            <div class="rem-label">Reason for {{ doc_label_short }}:</div>
+            <div>{{ reason_map.get(header.creation_type, 'Rate revision against agreement') }}</div>
+            {% if header.remarks %}
+            <div class="rem-label" style="margin-top:6px;">Remarks :</div>
+            <div>{{ header.remarks }}</div>
+            {% endif %}
+            {% if sac_summary %}
+            <div style="font-weight:700; margin-top:6px; margin-bottom:2px; font-size:8px;">HSN/SAC Summary:</div>
+            <table class="sac-table">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;">SAC</th>
+                        <th>Taxable Value</th>
+                        <th>CGST</th>
+                        <th>SGST</th>
+                        <th>IGST</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sac in sac_summary %}
+                    <tr>
+                        <td>{{ sac.sac_code or '—' }}</td>
+                        <td>{{ "%.2f"|format(sac.taxable_value|float) }}</td>
+                        <td>{{ "%.2f"|format(sac.cgst|float) }}</td>
+                        <td>{{ "%.2f"|format(sac.sgst|float) }}</td>
+                        <td>{{ "%.2f"|format(sac.igst|float) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+        <div class="totals-col">
+            <table class="totals-table">
+                <tr>
+                    <td>CGST {{ cgst_pct }}%</td>
+                    <td>{{ "%.2f"|format(cgst_a) }}</td>
+                </tr>
+                <tr>
+                    <td>SGST {{ sgst_pct }}%</td>
+                    <td>{{ "%.2f"|format(sgst_a) }}</td>
+                </tr>
+                <tr>
+                    <td>IGST {{ igst_pct }}%</td>
+                    <td>{{ "%.2f"|format(igst_a) }}</td>
+                </tr>
+                <tr>
+                    <td>Discount :</td>
+                    <td>0.00</td>
+                </tr>
+                <tr class="total-row">
+                    <td>Total in INR is :</td>
+                    <td>{{ "%.2f"|format(total_a) }}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- 9. Amount in Words -->
+    <div class="words-row">
+        <span class="words-label">Amount in Words :</span>
+        {{ header.amount_in_words or '' }}
+    </div>
+
+    </div><!-- /.inv-body -->
+
+    <div class="inv-footer-block">
+    <!-- 10. Payment Details + Authorised Signatory -->
+    <div class="payment-row">
+        <div class="payment-col">
+            {% if payment_bank %}
+            <div class="pay-intro">Payment should be made through RTGS or Demand Draft as per below details :</div>
+            <div class="pay-line"><span class="pl">Beneficary Name</span><span>: {{ payment_bank.account_holder_name or port_config.seller_legal_name or '—' }}</span></div>
+            <div class="pay-line"><span class="pl">Account Number</span><span>: {{ payment_bank.account_number or '—' }}</span></div>
+            <div class="pay-line"><span class="pl">IFSC Code</span><span>: {{ payment_bank.ifsc_code or '—' }}</span></div>
+            <div class="pay-line"><span class="pl">Bank Name</span><span>: {{ payment_bank.bank_name or '—' }}</span></div>
+            <div class="pay-line"><span class="pl">Bank Branch</span><span>: {{ payment_bank.branch_name or '—' }}</span></div>
+            <div class="pay-line"><span class="pl">PAN</span><span>: {{ payment_bank.pan or '—' }}</span></div>
+            <div class="pay-line"><span class="pl">CIN</span><span>: {{ payment_bank.cin or '—' }}</span></div>
+            {% else %}
+            <div style="font-size:8px;color:#999;font-style:italic;">
+                No bank account configured. Please set up details in Admin &rarr; Port Bank Accounts.
+            </div>
+            {% endif %}
+        </div>
+        <div class="sig-col">
+            <div class="sig-company">For {{ port_config.seller_legal_name or 'JSW Dharamtar Port Pvt. Ltd.' }}</div>
+            <div class="sig-line">Authorised Signatory</div>
+        </div>
+    </div>
+
+    <!-- 11. Corporate office footer -->
+    <div class="corp-footer">
+        {% if payment_bank and payment_bank.corporate_office_address %}
+        Corporate Off: {{ payment_bank.corporate_office_address }}
+        {% else %}
+        Corporate Off: JSW Centre, Bandra Kurla Complex, Bandra(East), Mumbai, Maharashtra, India, 400051, Tel:02242861000, Fax:02242863000
+        {% endif %}
+    </div>
+    </div><!-- /.inv-footer-block -->
+    </div><!-- /.inv-outer -->
+
+</div><!-- /.invoice-copy -->
+</div><!-- /.invoice-set -->
+{% endmacro %}
+
+{# ── Render both copies ── #}
+{{ render_copy("ORIGINAL FOR RECEIPIENT") }}
+{{ render_copy("DUPLICATE FOR SUPPLIER") }}
+
+</body>
+</html>

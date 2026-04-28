@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}GST API Configuration - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .config-tabs { display: flex; gap: 0; margin-bottom: 0; }
+    .config-tab { padding: 8px 20px; font-size: 12px; font-weight: 600; border: 2px solid #bdc3c7; border-bottom: none; background: #ecf0f1; cursor: pointer; border-radius: 4px 4px 0 0; color: #7f8c8d; }
+    .config-tab.active { background: white; color: #2c3e50; border-color: #27ae60; }
+    .config-tab.active-env { position: relative; }
+    .config-tab.active-env::after { content: "ACTIVE"; font-size: 8px; background: #27ae60; color: white; padding: 1px 4px; border-radius: 2px; margin-left: 6px; }
+    .config-panel { border: 2px solid #27ae60; border-radius: 0 4px 4px 4px; padding: 20px; background: white; display: none; }
+    .config-panel.active { display: block; }
+    .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .config-field { display: flex; flex-direction: column; }
+    .config-field label { font-size: 11px; font-weight: 600; color: #34495e; margin-bottom: 4px; text-transform: uppercase; }
+    .config-field input { padding: 8px; font-size: 12px; border: 1px solid #ddd; border-radius: 3px; }
+    .config-field input:focus { border-color: #27ae60; outline: none; }
+    .config-field.full-width { grid-column: 1 / -1; }
+    .config-actions { margin-top: 15px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #ecf0f1; padding-top: 15px; }
+    .btn-activate { background: #27ae60; color: white; }
+    .secret-field { position: relative; }
+    .secret-field input { padding-right: 35px; }
+    .secret-toggle { position: absolute; right: 8px; top: 28px; cursor: pointer; font-size: 14px; color: #95a5a6; }
+</style>
+
+<div class="module-header">
+    <h2>GST API Configuration</h2>
+    <span class="module-code">GSTCFG</span>
+</div>
+
+<div class="config-tabs">
+    {% for cfg in configs %}
+    <div class="config-tab {% if cfg.is_active %}active-env{% endif %}" data-env="{{ cfg.environment }}" onclick="switchTab('{{ cfg.environment }}')">
+        {{ cfg.environment|upper }}
+    </div>
+    {% endfor %}
+    {% if not configs %}
+    <div class="config-tab active" data-env="sandbox" onclick="switchTab('sandbox')">SANDBOX</div>
+    <div class="config-tab" data-env="production" onclick="switchTab('production')">PRODUCTION</div>
+    {% endif %}
+</div>
+
+{% for cfg in configs %}
+<div class="config-panel" id="panel-{{ cfg.environment }}">
+    <input type="hidden" class="cfg-id" value="{{ cfg.id }}">
+    <div class="config-grid">
+        <div class="config-field full-width">
+            <label>API Base URL (IRP)</label>
+            <input type="text" class="cfg-api-url" value="{{ cfg.api_base_url or '' }}" placeholder="https://einv-apisandbox.nic.in or https://einv-api.nic.in">
+        </div>
+        <div class="config-field">
+            <label>ASP ID</label>
+            <input type="text" class="cfg-asp-id" value="{{ cfg.asp_id or '' }}">
+        </div>
+        <div class="config-field secret-field">
+            <label>ASP Secret</label>
+            <input type="password" class="cfg-asp-secret" value="{{ cfg.asp_secret or '' }}">
+            <span class="secret-toggle" onclick="toggleSecret(this)">&#128065;</span>
+        </div>
+        <div class="config-field">
+            <label>GSTIN</label>
+            <input type="text" class="cfg-gstin" value="{{ cfg.gstin or '' }}" placeholder="22AAAAA0000A1Z5" maxlength="15">
+        </div>
+        <div class="config-field">
+            <label>Public Key File Path (RSA)</label>
+            <input type="text" class="cfg-pubkey" value="{{ cfg.public_key_path or '' }}" placeholder="/path/to/irp_public_key.pem">
+        </div>
+    </div>
+    <div class="config-actions">
+        {% if not cfg.is_active %}
+        <button class="btn btn-activate" onclick="setActive('{{ cfg.environment }}')">Set as Active</button>
+        {% endif %}
+        <button class="btn btn-save" onclick="saveConfig('{{ cfg.environment }}')">Save</button>
+    </div>
+</div>
+{% endfor %}
+
+{% if not configs %}
+<div class="config-panel active" id="panel-sandbox">
+    <input type="hidden" class="cfg-id" value="">
+    <div class="config-grid">
+        <div class="config-field full-width">
+            <label>API Base URL (IRP)</label>
+            <input type="text" class="cfg-api-url" value="" placeholder="https://einv-apisandbox.nic.in">
+        </div>
+        <div class="config-field">
+            <label>ASP ID</label>
+            <input type="text" class="cfg-asp-id" value="">
+        </div>
+        <div class="config-field secret-field">
+            <label>ASP Secret</label>
+            <input type="password" class="cfg-asp-secret" value="">
+            <span class="secret-toggle" onclick="toggleSecret(this)">&#128065;</span>
+        </div>
+        <div class="config-field">
+            <label>GSTIN</label>
+            <input type="text" class="cfg-gstin" value="" placeholder="22AAAAA0000A1Z5" maxlength="15">
+        </div>
+        <div class="config-field">
+            <label>Public Key File Path (RSA)</label>
+            <input type="text" class="cfg-pubkey" value="" placeholder="/path/to/irp_public_key.pem">
+        </div>
+    </div>
+    <div class="config-actions">
+        <button class="btn btn-save" onclick="saveConfig('sandbox')">Save</button>
+    </div>
+</div>
+<div class="config-panel" id="panel-production">
+    <input type="hidden" class="cfg-id" value="">
+    <div class="config-grid">
+        <div class="config-field full-width">
+            <label>API Base URL (IRP)</label>
+            <input type="text" class="cfg-api-url" value="" placeholder="https://einv-api.nic.in">
+        </div>
+        <div class="config-field">
+            <label>ASP ID</label>
+            <input type="text" class="cfg-asp-id" value="">
+        </div>
+        <div class="config-field secret-field">
+            <label>ASP Secret</label>
+            <input type="password" class="cfg-asp-secret" value="">
+            <span class="secret-toggle" onclick="toggleSecret(this)">&#128065;</span>
+        </div>
+        <div class="config-field">
+            <label>GSTIN</label>
+            <input type="text" class="cfg-gstin" value="" placeholder="22AAAAA0000A1Z5" maxlength="15">
+        </div>
+        <div class="config-field">
+            <label>Public Key File Path (RSA)</label>
+            <input type="text" class="cfg-pubkey" value="" placeholder="/path/to/irp_public_key.pem">
+        </div>
+    </div>
+    <div class="config-actions">
+        <button class="btn btn-save" onclick="saveConfig('production')">Save</button>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('GSTCFG', 'GST API Configuration');
+
+    function switchTab(env) {
+        document.querySelectorAll('.config-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
+        document.querySelector(`.config-tab[data-env="${env}"]`).classList.add('active');
+        document.getElementById(`panel-${env}`).classList.add('active');
+    }
+
+    function toggleSecret(el) {
+        const input = el.previousElementSibling;
+        input.type = input.type === 'password' ? 'text' : 'password';
+    }
+
+    function getPanelData(env) {
+        const panel = document.getElementById(`panel-${env}`);
+        return {
+            id: panel.querySelector('.cfg-id').value,
+            environment: env,
+            api_base_url: panel.querySelector('.cfg-api-url').value,
+            asp_id: panel.querySelector('.cfg-asp-id').value,
+            asp_secret: panel.querySelector('.cfg-asp-secret').value,
+            gstin: panel.querySelector('.cfg-gstin').value,
+            public_key_path: panel.querySelector('.cfg-pubkey').value
+        };
+    }
+
+    async function saveConfig(env) {
+        const data = getPanelData(env);
+        const res = await fetch('/api/module/GSTCFG/save', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        if (result.success) alert('GST configuration saved!');
+        else alert('Error: ' + (result.error || 'Failed to save'));
+    }
+
+    async function setActive(env) {
+        if (!confirm(`Set ${env.toUpperCase()} as the active GST environment?`)) return;
+        const res = await fetch('/api/module/GSTCFG/set-active', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({environment: env})
+        });
+        const result = await res.json();
+        if (result.success) location.reload();
+    }
+
+    // Auto-select first tab or active env
+    const activeTab = document.querySelector('.config-tab.active-env') || document.querySelector('.config-tab');
+    if (activeTab) switchTab(activeTab.getAttribute('data-env'));
+</script>
+{% endblock %}

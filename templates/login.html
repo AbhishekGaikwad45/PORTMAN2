@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PORTBIRD DPPL</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0f;
+            min-height: 100vh;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* Blob Container */
+        .blob-container {
+            position: absolute;
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .blob {
+            position: absolute;
+            border-radius: 40% 60% 50% 50% / 60% 40% 60% 40%;
+            filter: blur(60px);
+            transition: transform 0.15s ease-out, opacity 0.15s ease-out;
+            will-change: transform, opacity;
+        }
+
+        .blob.blob-1 {
+            width: 500px;
+            height: 500px;
+            background: linear-gradient(135deg, rgba(236, 28, 36, 0.8), rgba(236, 28, 36, 0.4));
+            top: 10%;
+            left: 15%;
+            animation: blob-float-1 12s ease-in-out infinite, blob-morph 8s ease-in-out infinite;
+        }
+
+        .blob.blob-2 {
+            width: 600px;
+            height: 600px;
+            background: linear-gradient(135deg, rgba(37, 68, 167, 0.7), rgba(37, 68, 167, 0.3));
+            top: 50%;
+            left: 60%;
+            animation: blob-float-2 15s ease-in-out infinite, blob-morph 10s ease-in-out infinite reverse;
+        }
+
+        .blob.blob-3 {
+            width: 450px;
+            height: 450px;
+            background: linear-gradient(135deg, rgba(236, 28, 36, 0.6), rgba(37, 68, 167, 0.4));
+            bottom: 15%;
+            left: 25%;
+            animation: blob-float-3 10s ease-in-out infinite, blob-morph 7s ease-in-out infinite;
+        }
+
+        .blob.blob-4 {
+            width: 550px;
+            height: 550px;
+            background: linear-gradient(135deg, rgba(37, 68, 167, 0.8), rgba(236, 28, 36, 0.3));
+            top: 25%;
+            right: 10%;
+            animation: blob-float-4 13s ease-in-out infinite, blob-morph 9s ease-in-out infinite reverse;
+        }
+
+        .blob.blob-5 {
+            width: 480px;
+            height: 480px;
+            background: linear-gradient(135deg, rgba(236, 28, 36, 0.7), rgba(37, 68, 167, 0.5));
+            bottom: 20%;
+            right: 20%;
+            animation: blob-float-5 14s ease-in-out infinite, blob-morph 11s ease-in-out infinite;
+        }
+
+        .blob.blob-6 {
+            width: 520px;
+            height: 520px;
+            background: linear-gradient(135deg, rgba(37, 68, 167, 0.6), rgba(236, 28, 36, 0.4));
+            top: 40%;
+            left: 5%;
+            animation: blob-float-6 11s ease-in-out infinite, blob-morph 8s ease-in-out infinite reverse;
+        }
+
+        @keyframes blob-float-1 {
+            0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+            25% { transform: translate(50px, -80px) rotate(5deg) scale(1.1); }
+            50% { transform: translate(-30px, -120px) rotate(-5deg) scale(0.95); }
+            75% { transform: translate(70px, -60px) rotate(3deg) scale(1.05); }
+        }
+
+        @keyframes blob-float-2 {
+            0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+            25% { transform: translate(-60px, 70px) rotate(-7deg) scale(1.08); }
+            50% { transform: translate(40px, 100px) rotate(6deg) scale(0.92); }
+            75% { transform: translate(-45px, 50px) rotate(-4deg) scale(1.03); }
+        }
+
+        @keyframes blob-float-3 {
+            0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+            25% { transform: translate(80px, 40px) rotate(8deg) scale(1.12); }
+            50% { transform: translate(-50px, 90px) rotate(-6deg) scale(0.98); }
+            75% { transform: translate(60px, 30px) rotate(4deg) scale(1.06); }
+        }
+
+        @keyframes blob-float-4 {
+            0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+            25% { transform: translate(-70px, -50px) rotate(-5deg) scale(1.07); }
+            50% { transform: translate(55px, -110px) rotate(7deg) scale(0.94); }
+            75% { transform: translate(-40px, -70px) rotate(-3deg) scale(1.04); }
+        }
+
+        @keyframes blob-float-5 {
+            0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+            25% { transform: translate(65px, -90px) rotate(6deg) scale(1.09); }
+            50% { transform: translate(-75px, -40px) rotate(-8deg) scale(0.96); }
+            75% { transform: translate(50px, -65px) rotate(5deg) scale(1.02); }
+        }
+
+        @keyframes blob-float-6 {
+            0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+            25% { transform: translate(-55px, 85px) rotate(-6deg) scale(1.1); }
+            50% { transform: translate(70px, 50px) rotate(7deg) scale(0.93); }
+            75% { transform: translate(-65px, 70px) rotate(-4deg) scale(1.05); }
+        }
+
+        @keyframes blob-morph {
+            0%, 100% {
+                border-radius: 40% 60% 50% 50% / 60% 40% 60% 40%;
+            }
+            25% {
+                border-radius: 60% 40% 30% 70% / 50% 60% 40% 50%;
+            }
+            50% {
+                border-radius: 50% 50% 60% 40% / 40% 60% 40% 60%;
+            }
+            75% {
+                border-radius: 45% 55% 40% 60% / 55% 45% 55% 45%;
+            }
+        }
+
+        /* Logo Container */
+        .logo-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, calc(-50% - 240px));
+            text-align: center;
+            z-index: 10;
+        }
+
+        .logo-container img {
+            max-width: 300px;
+            height: auto;
+            filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
+        }
+
+        .beta-text {
+            font-size: 22px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 2px;
+            margin-bottom: 4px;
+        }
+
+        .system-title {
+            font-size: 26px;
+            color: rgba(255, 255, 255, 0.95);
+            font-weight: 700;
+            font-style: italic;
+            margin-top: 0;
+            letter-spacing: 0.5px;
+            margin-bottom: 0;
+        }
+
+        /* Login Box */
+        .login-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, calc(-50% + 60px));
+            z-index: 5;
+        }
+
+        .login-box {
+            background: rgba(255, 255, 255, 0.01);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            width: 360px;
+        }
+
+        .login-box h2 {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 30px;
+            text-align: center;
+            font-weight: 400;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            font-size: 14px;
+            color: #fff;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .form-group input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(236, 28, 36, 0.6);
+            box-shadow: 0 0 20px rgba(236, 28, 36, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, rgba(236, 28, 36, 1) 0%, rgba(37, 68, 167, 1) 100%);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(236, 28, 36, 0.4);
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(236, 28, 36, 0.6);
+        }
+
+        .btn:active {
+            transform: translateY(-1px);
+        }
+
+        .error {
+            background: rgba(236, 28, 36, 0.2);
+            border: 1px solid rgba(236, 28, 36, 0.4);
+            color: #fff;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+            animation: error-shake 0.5s ease-in-out;
+        }
+
+        @keyframes error-shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+
+        /* Glow Effect */
+        .login-box::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, rgba(236, 28, 36, 0.5), rgba(37, 68, 167, 0.5));
+            border-radius: 20px;
+            z-index: -1;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .login-box:hover::before {
+            opacity: 0.5;
+            animation: glow-pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes glow-pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.6; }
+        }
+
+        .forgot-link {
+            display: block;
+            text-align: center;
+            margin-top: 14px;
+            font-size: 12px;
+            color: rgba(255,255,255,0.5);
+            cursor: pointer;
+            letter-spacing: 0.5px;
+            transition: color 0.2s;
+        }
+        .forgot-link:hover { color: rgba(255,255,255,0.85); }
+
+        .fp-step { display: none; }
+        .fp-step.active { display: block; }
+
+        .fp-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.45);
+            cursor: pointer;
+            margin-bottom: 16px;
+            letter-spacing: 0.5px;
+            transition: color 0.2s;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+        .fp-back:hover { color: rgba(255,255,255,0.8); }
+
+        .otp-inputs {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        .otp-inputs input {
+            width: 44px !important;
+            padding: 12px 0 !important;
+            text-align: center;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 0;
+        }
+
+        .fp-title {
+            font-size: 13px;
+            color: rgba(255,255,255,0.9);
+            margin-bottom: 6px;
+            text-align: center;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .fp-subtitle {
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            text-align: center;
+            margin-bottom: 22px;
+            line-height: 1.5;
+        }
+
+        .fp-msg {
+            font-size: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 14px;
+            text-align: center;
+        }
+        .fp-msg.error {
+            background: rgba(236,28,36,0.2);
+            border: 1px solid rgba(236,28,36,0.4);
+            color: #fff;
+        }
+        .fp-msg.success {
+            background: rgba(72,187,120,0.2);
+            border: 1px solid rgba(72,187,120,0.4);
+            color: #fff;
+        }
+
+        /* password strength widget — dark background overrides */
+        #fp-pw-strength .ps-bar { background: rgba(255,255,255,0.12) !important; }
+        #fp-pw-strength .ps-rules li { color: rgba(255,255,255,0.45); font-size: 11px; }
+        #fp-pw-strength .ps-rules li.ps-pass { color: #68d391; }
+        #fp-pw-strength .ps-rules li.ps-fail { color: #fc8181; }
+        #fp-pw-strength .ps-label { font-size: 11px; }
+    </style>
+</head>
+<body>
+    <!-- Animated Blobs Background -->
+    <div class="blob-container">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+        <div class="blob blob-4"></div>
+        <div class="blob blob-5"></div>
+        <div class="blob blob-6"></div>
+    </div>
+
+    <!-- Logo Container -->
+    <div class="logo-container">
+        <img src="{{ url_for('static', filename='img/logopb.png') }}" alt="PORTMAN Logo">
+        <p class="beta-text">DPPL</p>
+   
+    </div>
+
+    <!-- Login / Forgot Password Container -->
+    <div class="login-container">
+        <div class="login-box">
+
+            <!-- Step 0: Login -->
+            <div id="fp-step-0" class="fp-step active">
+                {% if error %}
+                <div class="error">{{ error }}</div>
+                {% endif %}
+                <form method="POST">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="username" placeholder="Enter username" required autofocus>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="password" placeholder="Enter password" required>
+                    </div>
+                    <button type="submit" class="btn">Sign In</button>
+                </form>
+                <span class="forgot-link" onclick="showFP(1)">Forgot Password?</span>
+            </div>
+
+            <!-- Step 1: Enter Email -->
+            <div id="fp-step-1" class="fp-step">
+                <button class="fp-back" onclick="showFP(0)">&#8592; Back to Login</button>
+                <div class="fp-title">Reset Password</div>
+                <div class="fp-subtitle">Enter the email address linked to your account.<br>We'll send you a 6-digit OTP.</div>
+                <div id="fp1-msg" class="fp-msg" style="display:none;"></div>
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="fp-email" placeholder="you@example.com" autocomplete="off">
+                </div>
+                <button class="btn" id="fp1-btn" onclick="fpSendOtp()">Send OTP</button>
+            </div>
+
+            <!-- Step 2: Enter OTP -->
+            <div id="fp-step-2" class="fp-step">
+                <button class="fp-back" onclick="showFP(1)">&#8592; Change Email</button>
+                <div class="fp-title">Enter OTP</div>
+                <div class="fp-subtitle" id="fp2-subtitle">Enter the 6-digit code sent to your email.</div>
+                <div id="fp2-msg" class="fp-msg" style="display:none;"></div>
+                <div class="otp-inputs">
+                    <input type="text" maxlength="1" class="otp-digit" inputmode="numeric" pattern="[0-9]">
+                    <input type="text" maxlength="1" class="otp-digit" inputmode="numeric" pattern="[0-9]">
+                    <input type="text" maxlength="1" class="otp-digit" inputmode="numeric" pattern="[0-9]">
+                    <input type="text" maxlength="1" class="otp-digit" inputmode="numeric" pattern="[0-9]">
+                    <input type="text" maxlength="1" class="otp-digit" inputmode="numeric" pattern="[0-9]">
+                    <input type="text" maxlength="1" class="otp-digit" inputmode="numeric" pattern="[0-9]">
+                </div>
+                <button class="btn" id="fp2-btn" onclick="fpVerifyOtp()">Verify OTP</button>
+                <span class="forgot-link" onclick="fpResendOtp()">Resend OTP</span>
+            </div>
+
+            <!-- Step 3: Set New Password -->
+            <div id="fp-step-3" class="fp-step">
+                <div class="fp-title">Set New Password</div>
+                <div class="fp-subtitle">Choose a strong password for your account.</div>
+                <div id="fp3-msg" class="fp-msg" style="display:none;"></div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" id="fp-pw1" placeholder="Enter new password" autocomplete="new-password">
+                    <div id="fp-pw-strength"></div>
+                </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" id="fp-pw2" placeholder="Re-enter password" autocomplete="new-password">
+                </div>
+                <button class="btn" id="fp3-btn" onclick="fpSetPassword()">Update Password</button>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // ── Forgot Password Flow ──────────────────────────────────────────────
+        let _fpEmail = '';
+        let _fpResetToken = '';
+
+        function showFP(step) {
+            document.querySelectorAll('.fp-step').forEach(el => el.classList.remove('active'));
+            document.getElementById('fp-step-' + step).classList.add('active');
+            if (step === 1) setTimeout(() => document.getElementById('fp-email').focus(), 50);
+            if (step === 2) setTimeout(() => document.querySelectorAll('.otp-digit')[0].focus(), 50);
+        }
+
+        function _fpMsg(stepNum, type, text) {
+            const el = document.getElementById('fp' + stepNum + '-msg');
+            el.className = 'fp-msg ' + type;
+            el.textContent = text;
+            el.style.display = 'block';
+        }
+        function _fpClearMsg(stepNum) {
+            const el = document.getElementById('fp' + stepNum + '-msg');
+            if (el) el.style.display = 'none';
+        }
+        function _setBtnLoading(id, loading, text) {
+            const btn = document.getElementById(id);
+            btn.disabled = loading;
+            btn.textContent = loading ? 'Please wait...' : text;
+        }
+
+        async function fpSendOtp() {
+            const email = document.getElementById('fp-email').value.trim();
+            if (!email) { _fpMsg(1, 'error', 'Please enter your email address.'); return; }
+            _setBtnLoading('fp1-btn', true, 'Send OTP');
+            _fpClearMsg(1);
+            try {
+                const res = await fetch('/auth/send-otp', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email})
+                });
+                const data = await res.json();
+                if (!res.ok) { _fpMsg(1, 'error', data.error || 'Failed to send OTP.'); return; }
+                _fpEmail = email;
+                document.getElementById('fp2-subtitle').textContent =
+                    'Enter the 6-digit code sent to ' + email.replace(/(.{2}).+(@.+)/, '$1…$2');
+                document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+                showFP(2);
+            } catch(e) { _fpMsg(1, 'error', 'Network error. Please try again.'); }
+            finally { _setBtnLoading('fp1-btn', false, 'Send OTP'); }
+        }
+
+        async function fpResendOtp() {
+            if (!_fpEmail) { showFP(1); return; }
+            _fpClearMsg(2);
+            try {
+                const res = await fetch('/auth/send-otp', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email: _fpEmail})
+                });
+                if (res.ok) {
+                    document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+                    _fpMsg(2, 'success', 'A new OTP has been sent.');
+                    setTimeout(() => document.querySelectorAll('.otp-digit')[0].focus(), 50);
+                } else {
+                    _fpMsg(2, 'error', 'Failed to resend OTP. Please try again.');
+                }
+            } catch(e) { _fpMsg(2, 'error', 'Network error.'); }
+        }
+
+        async function fpVerifyOtp() {
+            const digits = [...document.querySelectorAll('.otp-digit')].map(i => i.value.trim());
+            const otp = digits.join('');
+            if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+                _fpMsg(2, 'error', 'Please enter all 6 digits.'); return;
+            }
+            _setBtnLoading('fp2-btn', true, 'Verify OTP');
+            _fpClearMsg(2);
+            try {
+                const res = await fetch('/auth/verify-otp', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email: _fpEmail, otp})
+                });
+                const data = await res.json();
+                if (!res.ok) { _fpMsg(2, 'error', data.error || 'Invalid OTP.'); return; }
+                _fpResetToken = data.reset_token;
+                document.getElementById('fp-pw1').value = '';
+                document.getElementById('fp-pw2').value = '';
+                showFP(3);
+                setTimeout(() => { _initFpStrength(); document.getElementById('fp-pw1').focus(); }, 50);
+            } catch(e) { _fpMsg(2, 'error', 'Network error. Please try again.'); }
+            finally { _setBtnLoading('fp2-btn', false, 'Verify OTP'); }
+        }
+
+        let _fpPwStrength = null;
+
+        function _initFpStrength() {
+            if (_fpPwStrength) _fpPwStrength.destroy();
+            _fpPwStrength = initPasswordStrength(
+                document.getElementById('fp-pw1'),
+                document.getElementById('fp-pw-strength'),
+                () => ''
+            );
+        }
+
+        async function fpSetPassword() {
+            const pw1 = document.getElementById('fp-pw1').value;
+            const pw2 = document.getElementById('fp-pw2').value;
+            if (!pw1) { _fpMsg(3, 'error', 'Password is required.'); return; }
+            if (_fpPwStrength && !_fpPwStrength.validate()) {
+                _fpMsg(3, 'error', 'Password does not meet all requirements. Please check the checklist below.');
+                return;
+            }
+            if (pw1 !== pw2) { _fpMsg(3, 'error', 'Passwords do not match.'); document.getElementById('fp-pw2').value = ''; document.getElementById('fp-pw2').focus(); return; }
+            _setBtnLoading('fp3-btn', true, 'Update Password');
+            _fpClearMsg(3);
+            try {
+                const res = await fetch('/auth/set-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({reset_token: _fpResetToken, password: pw1})
+                });
+                const data = await res.json();
+                if (!res.ok) { _fpMsg(3, 'error', data.error || 'Failed to update password.'); return; }
+                _fpMsg(3, 'success', 'Password updated successfully! Redirecting to login...');
+                setTimeout(() => { _fpEmail = ''; _fpResetToken = ''; showFP(0); }, 2000);
+            } catch(e) { _fpMsg(3, 'error', 'Network error. Please try again.'); }
+            finally { _setBtnLoading('fp3-btn', false, 'Update Password'); }
+        }
+
+        // Auto-open OTP step if ?reset=1 link was clicked
+        document.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('reset') === '1') {
+                const emailFromLink = params.get('email') || '';
+                if (emailFromLink) {
+                    _fpEmail = emailFromLink;
+                    document.getElementById('fp2-subtitle').textContent =
+                        'Enter the 6-digit code sent to ' + emailFromLink.replace(/(.{2}).+(@.+)/, '$1…$2');
+                    document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+                    showFP(2);
+                } else {
+                    showFP(1);
+                }
+                // Clean URL without reload
+                history.replaceState(null, '', window.location.pathname);
+            }
+        });
+
+        // OTP digit auto-advance
+        document.addEventListener('DOMContentLoaded', () => {
+            const digits = document.querySelectorAll('.otp-digit');
+            digits.forEach((inp, idx) => {
+                inp.addEventListener('input', () => {
+                    inp.value = inp.value.replace(/\D/g, '').slice(-1);
+                    if (inp.value && idx < digits.length - 1) digits[idx + 1].focus();
+                });
+                inp.addEventListener('keydown', e => {
+                    if (e.key === 'Backspace' && !inp.value && idx > 0) digits[idx - 1].focus();
+                    if (e.key === 'Enter') fpVerifyOtp();
+                });
+                inp.addEventListener('paste', e => {
+                    e.preventDefault();
+                    const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
+                    [...text.slice(0, 6)].forEach((ch, i) => { if (digits[idx + i]) digits[idx + i].value = ch; });
+                    const next = Math.min(idx + text.length, digits.length - 1);
+                    digits[next].focus();
+                });
+            });
+        });
+
+        // Mouse interaction - blobs get cut through by cursor
+        const blobs = document.querySelectorAll('.blob');
+        let mouseX = 0;
+        let mouseY = 0;
+
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+
+            blobs.forEach(blob => {
+                const rect = blob.getBoundingClientRect();
+                const blobCenterX = rect.left + rect.width / 2;
+                const blobCenterY = rect.top + rect.height / 2;
+
+                // Calculate distance from mouse to blob center
+                const deltaX = blobCenterX - mouseX;
+                const deltaY = blobCenterY - mouseY;
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+                // If mouse is within range, push blob away dramatically
+                const detectionRadius = 500;
+                if (distance < detectionRadius) {
+                    const force = (detectionRadius - distance) / detectionRadius; // 0 to 1
+                    const pushDistance = force * 300; // Max 300px push
+
+                    // Fade out blobs near the cursor
+                    const fadeOpacity = Math.max(0.2, 1 - force * 0.8);
+
+                    // Normalize direction and apply strong push
+                    const dirX = deltaX / distance;
+                    const dirY = deltaY / distance;
+
+                    const pushX = dirX * pushDistance;
+                    const pushY = dirY * pushDistance;
+
+                    blob.style.transform = `translate(${pushX}px, ${pushY}px) scale(${0.8 + force * 0.2})`;
+                    blob.style.opacity = fadeOpacity;
+                } else {
+                    // Reset to original position (animated by CSS)
+                    blob.style.transform = 'translate(0, 0) scale(1)';
+                    blob.style.opacity = '1';
+                }
+            });
+        });
+    </script>
+
+    <script src="{{ url_for('static', filename='js/password-strength.js') }}"></script>
+</body>
+</html>

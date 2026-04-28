@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}MBC Master - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>MBC Master</h2>
+    <span class="module-code">MBCM01</span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save</button>{% endif %}
+</div>
+
+<div id="table"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('MBCM01', 'MBC Master');
+
+    const permissions = {
+        can_edit: {{ permissions.can_edit|default(0) }},
+        can_add: {{ permissions.can_add|default(0) }},
+        can_delete: {{ permissions.can_delete|default(0) }}
+    };
+
+    const canEdit = permissions.can_edit || permissions.can_add;
+    const mbcOwnerOptions = {
+        "JSW INFRA": "JSW INFRA",
+        "JSW SHIPPING": "JSW SHIPPING",
+        "OTHERS": "OTHERS"
+    };
+
+    const table = new Tabulator("#table", {
+        height: "calc(100vh - 160px)",
+        layout: "fitColumns",
+        ajaxURL: "/api/module/MBCM01/data",
+        pagination: true,
+        paginationMode: "remote",
+        paginationSize: 20,
+        ajaxResponse: function(url, params, response) {
+            return response;
+        },
+        columns: [
+            {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+            {title: "ID", field: "id", width: 60},
+            {title: "MBC Name", field: "mbc_name", editor: canEdit ? "input" : false, widthGrow: 1},
+            {title: "DWT", field: "dwt", editor: canEdit ? "number" : false, width: 120, hozAlign: "right",
+                editorParams: {min: 0, step: 0.01}},
+            {title: "MBC Owner Name", field: "mbc_owner_name", editor: canEdit ? "list" : false, width: 180,
+                editorParams: {values: mbcOwnerOptions, autocomplete: false, allowEmpty: true}}
+        ],
+        selectable: true,
+        cellEdited: function(cell) {
+            const id = cell.getRow().getData().id;
+            if (id) dirtyRowIds.add(String(id));
+        }
+    });
+
+    let dirtyRowIds = new Set();
+
+    if (localStorage.getItem('theme') === 'dark') {
+        document.getElementById('table').classList.add('tabulator-dark');
+    }
+
+    function addRow() {
+        table.addRow({}, false);
+    }
+
+    function deleteSelected() {
+        const rows = table.getSelectedRows();
+        if (!rows.length) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${rows.length} row(s)?`)) return;
+        rows.forEach(row => {
+            const id = row.getData().id;
+            if (id) {
+                fetch('/api/module/MBCM01/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id})
+                });
+            }
+            row.delete();
+        });
+    }
+
+    async function saveAll() {
+        let savedCount = 0;
+        for (const row of table.getRows()) {
+            const data = row.getData();
+            if (!data.mbc_name) continue;
+            if (data.id && !dirtyRowIds.has(String(data.id))) continue;
+            const res = await fetch('/api/module/MBCM01/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            row.update({id: result.id});
+            savedCount++;
+        }
+        dirtyRowIds.clear();
+        alert(`Saved ${savedCount} row(s)`);
+    }
+</script>
+{% endblock %}

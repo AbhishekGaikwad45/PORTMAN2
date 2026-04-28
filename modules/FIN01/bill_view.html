@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+
+{% block title %}Bill {{ bill.bill_number }} - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .bill-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #d90429; padding-bottom: 15px; }
+    .bill-info { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+    .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; font-size: 12px; }
+    .info-item label { font-weight: 600; color: #666; display: block; margin-bottom: 3px; }
+    .info-item div { color: #333; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .text-right { text-align: right !important; }
+    .totals-section { width: 400px; margin-left: auto; background: #f8f9fa; padding: 15px; border-radius: 4px; }
+    .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }
+    .total-row.grand { font-weight: bold; font-size: 14px; border-top: 2px solid #333; margin-top: 10px; padding-top: 10px; }
+    .btn { padding: 8px 16px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-primary { background: #3498db; color: white; }
+    .btn-secondary { background: #95a5a6; color: white; }
+    .status-badge { padding: 4px 12px; border-radius: 3px; font-size: 11px; color: white; font-weight: 600; }
+    .status-draft { background: #95a5a6; }
+    .status-pending { background: #f39c12; }
+    .status-approved { background: #27ae60; }
+    .status-rejected { background: #e74c3c; }
+    .btn-approve { background: #27ae60; color: white; }
+    .btn-reject  { background: #e74c3c; color: white; }
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay.show { display:flex; }
+    .modal-box { background:#fff; border-radius:6px; padding:24px; width:420px; max-width:95vw; box-shadow:0 4px 24px rgba(0,0,0,.2); }
+    .modal-box h4 { margin:0 0 14px 0; font-size:14px; }
+    .modal-box textarea { width:100%; box-sizing:border-box; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:12px; resize:vertical; }
+    .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+</style>
+
+<!-- Reject reason modal -->
+<div class="modal-overlay" id="rejectModal">
+    <div class="modal-box">
+        <h4>Reject Bill — {{ bill.bill_number }}</h4>
+        <label style="font-size:12px;font-weight:600;color:#555;">Reason for rejection</label>
+        <textarea id="rejectReason" rows="4" placeholder="Enter rejection reason…"></textarea>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
+            <button class="btn btn-reject"    onclick="confirmReject()">Confirm Reject</button>
+        </div>
+    </div>
+</div>
+
+<div class="bill-header">
+    <div>
+        <h2 style="margin: 0; font-size: 18px;">Bill Details</h2>
+        <p style="margin: 5px 0 0 0; color: #666; font-size: 12px;">Bill Number: <strong>{{ bill.bill_number }}</strong></p>
+    </div>
+    <div>
+        <span class="status-badge status-{{ bill.bill_status|lower|replace(' ', '-') }}">{{ bill.bill_status }}</span>
+    </div>
+</div>
+
+<div class="bill-info">
+    <div class="info-grid">
+        <div class="info-item">
+            <label>Bill Date</label>
+            <div>{{ bill.bill_date[8:10] ~ '-' ~ bill.bill_date[5:7] ~ '-' ~ bill.bill_date[0:4] if bill.bill_date else '' }}</div>
+        </div>
+        <div class="info-item">
+            <label>Bill Series</label>
+            <div>{{ bill.bill_series or 'BILL' }}</div>
+        </div>
+        <div class="info-item">
+            <label>Agreement</label>
+            <div>{{ bill.agreement_display or '-' }}</div>
+        </div>
+        <div class="info-item">
+            <label>Source</label>
+            <div>{{ bill.source_display or 'N/A' }}</div>
+        </div>
+        <div class="info-item">
+            <label>Customer Type</label>
+            <div>{{ bill.customer_type }}</div>
+        </div>
+        <div class="info-item">
+            <label>Customer Name</label>
+            <div>{{ bill.customer_name }}</div>
+        </div>
+        <div class="info-item">
+            <label>GSTIN</label>
+            <div>{{ bill.customer_gstin or 'N/A' }}</div>
+        </div>
+        <div class="info-item">
+            <label>Created By</label>
+            <div>{{ bill.created_by }}</div>
+        </div>
+        <div class="info-item">
+            <label>Created Date</label>
+            <div>{{ bill.created_date[8:10] ~ '-' ~ bill.created_date[5:7] ~ '-' ~ bill.created_date[0:4] if bill.created_date else '' }}</div>
+        </div>
+        {% if bill.approved_by %}
+        <div class="info-item">
+            <label>Approved By</label>
+            <div>{{ bill.approved_by }} on {{ bill.approved_date[8:10] ~ '-' ~ bill.approved_date[5:7] ~ '-' ~ bill.approved_date[0:4] if bill.approved_date else '' }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<h3 style="font-size: 14px; margin: 20px 0 10px 0;">Bill Line Items</h3>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th style="width: 40px;">S.No</th>
+            <th>Service Name</th>
+            <th class="text-right" style="width: 80px;">Quantity</th>
+            <th style="width: 60px;">UOM</th>
+            <th class="text-right" style="width: 100px;">Rate</th>
+            <th class="text-right" style="width: 100px;">Amount</th>
+            <th class="text-right" style="width: 80px;">CGST</th>
+            <th class="text-right" style="width: 80px;">SGST</th>
+            <th class="text-right" style="width: 100px;">Total</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for line in bill_lines %}
+        <tr>
+            <td class="text-right">{{ loop.index }}</td>
+            <td>{{ line.service_name }}</td>
+            <td class="text-right">{{ "%.2f"|format(line.quantity or 0) }}</td>
+            <td>{{ line.uom }}</td>
+            <td class="text-right">{{ "%.2f"|format(line.rate or 0) }}</td>
+            <td class="text-right">{{ "%.2f"|format(line.line_amount or 0) }}</td>
+            <td class="text-right">{{ "%.2f"|format(line.cgst_amount or 0) }}</td>
+            <td class="text-right">{{ "%.2f"|format(line.sgst_amount or 0) }}</td>
+            <td class="text-right">{{ "%.2f"|format(line.line_total or 0) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="totals-section">
+    <div class="total-row">
+        <span>Subtotal:</span>
+        <span>{{ "%.2f"|format(bill.subtotal) }}</span>
+    </div>
+    <div class="total-row">
+        <span>CGST:</span>
+        <span>{{ "%.2f"|format(bill.cgst_amount) }}</span>
+    </div>
+    <div class="total-row">
+        <span>SGST:</span>
+        <span>{{ "%.2f"|format(bill.sgst_amount) }}</span>
+    </div>
+    <div class="total-row">
+        <span>IGST:</span>
+        <span>{{ "%.2f"|format(bill.igst_amount) }}</span>
+    </div>
+    <div class="total-row grand">
+        <span>Total Amount:</span>
+        <span>₹ {{ "%.2f"|format(bill.total_amount) }}</span>
+    </div>
+</div>
+
+<div style="margin-top: 30px;">
+    {% if is_approver and bill.bill_status == 'Pending Approval' %}
+    <button class="btn btn-approve" onclick="openApproveModal()">✓ Approve</button>
+    <button class="btn btn-reject"  onclick="openRejectModal()">✗ Reject</button>
+    {% endif %}
+    <button class="btn btn-secondary" onclick="location.href='/module/FIN01/bills'">Back to Bills</button>
+</div>
+
+<script>
+const BILL_ID = {{ bill.id }};
+
+async function openApproveModal() {
+    const modal    = document.getElementById('approveDocsModal');
+    const list     = document.getElementById('approveDocsList');
+    const checkbox = document.getElementById('approveDocsConfirm');
+    const btn      = document.getElementById('btnConfirmApprove');
+    list.innerHTML = '<span style="color:#718096;font-size:13px;">Loading documents…</span>';
+    checkbox.checked = false;
+    btn.disabled = true;
+    modal.style.display = 'flex';
+
+    const res  = await fetch(`/api/module/FIN01/proof_docs/by_bill/${BILL_ID}`);
+    const data = await res.json();
+    if (!data.docs || !data.docs.length) {
+        list.innerHTML = '<div style="color:#c05621;font-size:13px;padding:8px 0;">⚠ No Proof of Quantity documents found for this bill\'s cargo. You may still approve.</div>';
+        checkbox.checked = true;
+        btn.disabled = false;
+        return;
+    }
+    list.innerHTML = data.docs.map(d => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e2e8f0;">
+            <span style="font-size:18px;">📄</span>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.original_filename}</div>
+                <div style="font-size:11px;color:#718096;">Uploaded by ${d.uploaded_by || '—'} · ${d.uploaded_at || ''}</div>
+            </div>
+            <a href="${d.file_url}" target="_blank"
+               style="padding:4px 12px;background:#2b6cb0;color:white;border-radius:4px;font-size:12px;text-decoration:none;white-space:nowrap;">View</a>
+        </div>
+    `).join('');
+}
+
+async function confirmApprove() {
+    if (!document.getElementById('approveDocsConfirm').checked) return;
+    const res = await fetch('/api/module/FIN01/bill/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: BILL_ID})
+    });
+    const d = await res.json();
+    document.getElementById('approveDocsModal').style.display = 'none';
+    if (d.success) location.reload();
+    else alert('Error: ' + (d.error || 'Unknown error'));
+}
+
+function openRejectModal()  { document.getElementById('rejectModal').classList.add('show'); }
+function closeRejectModal() { document.getElementById('rejectModal').classList.remove('show'); }
+
+function confirmReject() {
+    const reason = document.getElementById('rejectReason').value.trim();
+    if (!reason) { alert('Please enter a rejection reason.'); return; }
+    fetch('/api/module/FIN01/bill/reject', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: BILL_ID, reason})
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.success) location.reload();
+        else alert('Error: ' + (d.error || 'Unknown error'));
+    });
+}
+</script>
+
+<!-- Approve: Proof Docs Review Modal -->
+<div id="approveDocsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:520px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="margin:0;font-size:16px;font-weight:600;">📄 Review Proof of Quantity</h3>
+            <button onclick="document.getElementById('approveDocsModal').style.display='none'"
+                    style="background:#e53e3e;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:13px;">✕</button>
+        </div>
+        <p style="margin:0 0 12px;font-size:13px;color:#4a5568;">Please review the supporting documents before approving this bill.</p>
+        <div id="approveDocsList" style="margin-bottom:16px;"></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px;cursor:pointer;">
+            <input type="checkbox" id="approveDocsConfirm" onchange="document.getElementById('btnConfirmApprove').disabled=!this.checked;">
+            I have reviewed the Proof of Quantity documents
+        </label>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button onclick="document.getElementById('approveDocsModal').style.display='none'"
+                    style="padding:8px 18px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+            <button id="btnConfirmApprove" onclick="confirmApprove()" disabled
+                    style="padding:8px 18px;background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">✓ Approve Bill</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

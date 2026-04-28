@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice Doc Series - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .breadcrumb { font-size: 11px; color: var(--text-secondary); margin-bottom: 20px; }
+    .breadcrumb a { color: #4a90d9; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+
+    .toolbar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
+    .btn { padding: 6px 14px; font-size: 11px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+    .btn-primary { background: #4a90d9; color: #fff; }
+    .btn-primary:hover { background: #2d72c0; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .btn-danger:hover { background: #c0392b; }
+    .btn-sm { padding: 3px 10px; font-size: 10px; }
+
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .data-table th { padding: 8px 12px; text-align: left; font-size: 10px; font-weight: 600;
+        background: var(--border-color); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+    .data-table td { padding: 9px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-primary); vertical-align: middle; }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: var(--hover-bg); }
+
+    .default-badge { background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1000; }
+    .modal-box { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;
+        padding: 20px; width: 360px; z-index: 1001; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+    .modal-box h3 { margin: 0 0 14px 0; font-size: 13px; font-weight: 700; color: var(--text-primary); }
+    .form-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+    .form-field label { font-size: 10px; font-weight: 600; color: var(--text-secondary); }
+    .form-field input { padding: 6px 8px; font-size: 11px; border: 1px solid var(--border-color);
+        border-radius: 3px; background: var(--bg-primary); color: var(--text-primary); }
+    .form-field input:focus { outline: none; border-color: #4a90d9; }
+    .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+    .btn-secondary { background: var(--border-color); color: var(--text-secondary); }
+
+    .info-box { background: var(--bg-primary); border-left: 3px solid #4a90d9;
+        padding: 8px 12px; margin-bottom: 14px; font-size: 11px; color: var(--text-secondary); }
+</style>
+
+<div class="breadcrumb">
+    <a href="/module/FINV01/">Invoicing</a> &rsaquo; Invoice Doc Series
+</div>
+
+<div class="info-box">
+    Invoice numbers are generated as <strong>PREFIX/YYYY-YY/SEQUENCE</strong> — e.g. <strong>DPPL/2025-26/1</strong>.
+    Set one series as default to auto-select it in the generate invoice form.
+</div>
+
+<div class="toolbar">
+    {% if perms.can_add %}
+    <button class="btn btn-primary" onclick="openModal()">+ Add Series</button>
+    {% endif %}
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Series Name</th>
+            <th>Prefix</th>
+            <th>Example Number</th>
+            <th>Default</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="seriesBody">
+        <tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:24px;">Loading…</td></tr>
+    </tbody>
+</table>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
+    <div class="modal-box" onclick="event.stopPropagation()">
+        <h3 id="modalTitle">Add Doc Series</h3>
+        <input type="hidden" id="editId">
+        <div class="form-field">
+            <label>Series Name *</label>
+            <input type="text" id="seriesName" placeholder="e.g. JSW Dharamtar">
+        </div>
+        <div class="form-field">
+            <label>Prefix * <span style="font-weight:400;color:var(--text-secondary);">(used in invoice number)</span></label>
+            <input type="text" id="seriesPrefix" placeholder="e.g. DPPL" style="text-transform:uppercase;"
+                   oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="form-field">
+            <div class="checkbox-row">
+                <input type="checkbox" id="seriesDefault">
+                <label for="seriesDefault" style="font-size:11px;cursor:pointer;">Set as default</label>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveSeries()">Save</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+addToRecent('FINV01', 'Invoicing');
+
+const now = new Date();
+const m = now.getMonth() + 1;
+const y = now.getFullYear();
+const fy = m >= 4 ? `${y}-${String(y+1).slice(2)}` : `${y-1}-${String(y).slice(2)}`;
+
+async function loadSeries() {
+    const res = await fetch('/api/module/FINV01/doc-series');
+    const rows = await res.json();
+    const tbody = document.getElementById('seriesBody');
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:24px;">No doc series configured. Add one to start generating invoices.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td><strong>${r.name}</strong></td>
+            <td><code style="font-size:11px;">${r.prefix}</code></td>
+            <td style="color:var(--text-secondary);">${r.prefix}/${fy}/1</td>
+            <td>${r.is_default ? '<span class="default-badge">Default</span>' : '—'}</td>
+            <td style="text-align:right;white-space:nowrap;">
+                <button class="btn btn-primary btn-sm" onclick='openModal(${JSON.stringify(r)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteSeries(${r.id}, '${r.name}')">Delete</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openModal(row) {
+    document.getElementById('editId').value = row?.id || '';
+    document.getElementById('seriesName').value = row?.name || '';
+    document.getElementById('seriesPrefix').value = row?.prefix || '';
+    document.getElementById('seriesDefault').checked = row?.is_default || false;
+    document.getElementById('modalTitle').textContent = row ? 'Edit Doc Series' : 'Add Doc Series';
+    document.getElementById('modalOverlay').style.display = 'block';
+    document.getElementById('seriesName').focus();
+}
+
+function closeModal() {
+    document.getElementById('modalOverlay').style.display = 'none';
+}
+
+async function saveSeries() {
+    const name   = document.getElementById('seriesName').value.trim();
+    const prefix = document.getElementById('seriesPrefix').value.trim();
+    if (!name || !prefix) { alert('Series name and prefix are required'); return; }
+
+    const payload = {
+        id: document.getElementById('editId').value || null,
+        name, prefix,
+        is_default: document.getElementById('seriesDefault').checked
+    };
+    const res = await fetch('/api/module/FINV01/doc-series/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    const result = await res.json();
+    if (result.success) { closeModal(); loadSeries(); }
+    else alert('Error: ' + (result.error || 'Failed to save'));
+}
+
+async function deleteSeries(id, name) {
+    if (!confirm(`Delete series "${name}"?`)) return;
+    const res = await fetch('/api/module/FINV01/doc-series/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const result = await res.json();
+    if (result.success) loadSeries();
+    else alert('Error: ' + (result.error || 'Failed to delete'));
+}
+
+loadSeries();
+</script>
+{% endblock %}

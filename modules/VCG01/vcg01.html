@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Vessel Cargo Master - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Vessel Cargo Master</h2>
+    <span class="module-code">VCG01</span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+    <button class="btn" onclick="downloadTemplate()" style="background:#17a2b8;color:#fff;">Download Template</button>
+    {% if permissions.can_add %}<button class="btn" onclick="document.getElementById('uploadFile').click()" style="background:#28a745;color:#fff;">Upload CSV</button>
+    <input type="file" id="uploadFile" accept=".csv" style="display:none" onchange="bulkUpload(this)">{% endif %}
+    <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+</div>
+
+<div id="table"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('VCG01', 'Vessel Cargo Master');
+    let table;
+    let cargoTypes = [];
+    let cargoCategories = [];
+    let cargoNames = [];
+    const canEdit = {{ permissions.can_edit|default(0) }} || {{ permissions.can_add|default(0) }};
+
+    async function loadMasterData() {
+        const [typesRes, categoriesRes, namesRes] = await Promise.all([
+            fetch('/api/module/VCG01/types'),
+            fetch('/api/module/VCG01/categories'),
+            fetch('/api/module/VCG01/names')
+        ]);
+        cargoTypes = await typesRes.json();
+        cargoCategories = await categoriesRes.json();
+        cargoNames = await namesRes.json();
+        initTable();
+    }
+
+    function initTable() {
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 160px)",
+            layout: "fitColumns",
+            columns: [
+                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+                {title: "Cargo Type", field: "cargo_type", editor: canEdit ? "input" : false, width: 150},
+                {title: "Cargo Category", field: "cargo_category", editor: canEdit ? "input" : false, width: 150},
+                {title: "Cargo Name", field: "cargo_name", editor: canEdit ? "input" : false, width: 180},
+                {title: "Cargo Category 2", field: "cargo_category_2", editor: canEdit ? "input" : false, width: 150},
+                {title: "Cargo Sub Category", field: "cargo_sub_category", editor: canEdit ? "input" : false, width: 160},
+                {title: "Cargo Sub Category 2", field: "cargo_sub_category_2", editor: canEdit ? "input" : false, width: 170}
+            ],
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 20,
+            ajaxURL: "/api/module/VCG01/data",
+            ajaxResponse: function(url, params, response) {
+                document.getElementById('rowCount').textContent = response.data.length;
+                document.getElementById('totalCount').textContent = response.total;
+                return response;
+            },
+            selectable: true
+        });
+        if (localStorage.getItem('theme') === 'dark') {
+            document.getElementById('table').classList.add('tabulator-dark');
+        }
+    }
+
+    function addRow() { table.addRow({}, false); }
+
+    function deleteSelected() {
+        const selected = table.getSelectedRows();
+        if (selected.length === 0) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+        selected.forEach(row => {
+            const id = row.getData().id;
+            if (id) {
+                fetch("/api/module/VCG01/delete", {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: id})
+                });
+            }
+            row.delete();
+        });
+    }
+
+    async function saveAll() {
+        const rows = table.getRows();
+        for (const row of rows) {
+            const data = row.getData();
+            const res = await fetch("/api/module/VCG01/save", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if (result.id) row.update({id: result.id});
+        }
+        table.setData("/api/module/VCG01/data");
+    }
+
+    function downloadTemplate() {
+        window.location.href = '/api/module/VCG01/template';
+    }
+
+    async function bulkUpload(input) {
+        if (!input.files.length) return;
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        const res = await fetch('/api/module/VCG01/bulk_upload', {method: 'POST', body: fd});
+        const result = await res.json();
+        input.value = '';
+        if (result.error) { alert(result.error); return; }
+        alert(`Successfully imported ${result.inserted} row(s)`);
+        table.setData('/api/module/VCG01/data');
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveAll(); }
+    });
+
+    loadMasterData();
+</script>
+{% endblock %}

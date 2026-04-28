@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Integration Logs - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .log-filters { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .log-filters .field { display: flex; flex-direction: column; }
+    .log-filters label { font-size: 10px; font-weight: 600; color: #34495e; text-transform: uppercase; margin-bottom: 3px; }
+    .log-filters select, .log-filters input { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .status-badge { padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+    .status-Success { background: #d5f5e3; color: #1e8449; }
+    .status-Failed { background: #fadbd8; color: #c0392b; }
+    .status-Pending { background: #fef9e7; color: #7d6608; }
+    .detail-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: none; justify-content: center; align-items: center; }
+    .detail-modal { background: white; border-radius: 8px; padding: 20px; width: 700px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .detail-modal h3 { margin: 0 0 15px 0; font-size: 14px; color: #2c3e50; }
+    .detail-modal pre { background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 11px; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; margin-bottom: 10px; }
+    .detail-grid .label { font-weight: 600; color: #34495e; }
+</style>
+
+<div class="module-header">
+    <h2>Integration Logs</h2>
+    <span class="module-code">FLOG01</span>
+</div>
+
+<div class="log-filters">
+    <div class="field">
+        <label>Type</label>
+        <select id="filterType" onchange="loadLogs()">
+            <option value="">All</option>
+            <option value="SAP_INVOICE">SAP Invoice</option>
+            <option value="SAP_CREDIT_NOTE">SAP Credit Note</option>
+            <option value="SAP_ADVANCE">SAP Advance</option>
+            <option value="GST_EINVOICE">GST e-Invoice</option>
+            <option value="GST_CANCEL">GST Cancel</option>
+        </select>
+    </div>
+    <div class="field">
+        <label>Status</label>
+        <select id="filterStatus" onchange="loadLogs()">
+            <option value="">All</option>
+            <option value="Success">Success</option>
+            <option value="Failed">Failed</option>
+            <option value="Pending">Pending</option>
+        </select>
+    </div>
+    <div class="field">
+        <label>From Date</label>
+        <input type="date" id="filterFrom" onchange="loadLogs()">
+    </div>
+    <div class="field">
+        <label>To Date</label>
+        <input type="date" id="filterTo" onchange="loadLogs()">
+    </div>
+    <div class="field">
+        <button class="btn" style="background:#3498db;color:white;padding:6px 12px" onclick="clearFilters()">Clear</button>
+    </div>
+    <div class="row-info" style="margin-left:auto">Logs: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+</div>
+
+<div id="table"></div>
+
+<!-- Detail Modal -->
+<div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
+    <div class="detail-modal">
+        <h3>Log Detail #<span id="detailId"></span>
+            <button class="btn" style="float:right;background:#95a5a6;color:white;padding:4px 10px;font-size:11px" onclick="closeDetail()">Close</button>
+        </h3>
+        <div class="detail-grid" id="detailGrid"></div>
+        <h4 style="font-size:12px;margin:10px 0 5px">Request Payload</h4>
+        <pre id="detailRequest">-</pre>
+        <h4 style="font-size:12px;margin:10px 0 5px">Response Body</h4>
+        <pre id="detailResponse">-</pre>
+        <h4 style="font-size:12px;margin:10px 0 5px">Error Message</h4>
+        <pre id="detailError" style="color:#c0392b">-</pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('FLOG01', 'Integration Logs');
+    let table;
+
+    function initTable() {
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 210px)",
+            layout: "fitData",
+            columns: [
+                {title: "ID", field: "id", width: 60},
+                {title: "Type", field: "integration_type", width: 130},
+                {title: "Direction", field: "direction", width: 80},
+                {title: "Source Module", field: "source_module", width: 100},
+                {title: "Source ID", field: "source_id", width: 80},
+                {title: "Endpoint", field: "endpoint_url", width: 250},
+                {title: "HTTP", field: "http_status", width: 60, hozAlign: "center",
+                    formatter: function(cell) {
+                        const v = cell.getValue();
+                        if (!v) return '';
+                        const color = v >= 200 && v < 300 ? '#27ae60' : '#e74c3c';
+                        return `<span style="color:${color};font-weight:600">${v}</span>`;
+                    }},
+                {title: "Status", field: "status", width: 80, hozAlign: "center",
+                    formatter: function(cell) {
+                        const v = cell.getValue() || '';
+                        return `<span class="status-badge status-${v}">${v}</span>`;
+                    }},
+                {title: "Duration (ms)", field: "duration_ms", width: 90, hozAlign: "right"},
+                {title: "Date", field: "created_date", width: 140},
+                {title: "User", field: "created_by", width: 100},
+                {title: "", formatter: function(cell) {
+                    const id = cell.getRow().getData().id;
+                    return `<button class="btn" style="background:#3498db;color:white;padding:2px 6px;font-size:10px" onclick="openDetail(${id})">Detail</button>`;
+                }, width: 55, headerSort: false}
+            ],
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 50,
+            ajaxURL: "/api/module/FLOG01/data",
+            ajaxParams: function() { return getFilterParams(); },
+            ajaxResponse: function(url, params, response) {
+                document.getElementById('rowCount').textContent = response.data.length;
+                document.getElementById('totalCount').textContent = response.total;
+                return response;
+            }
+        });
+        if (localStorage.getItem('theme') === 'dark') {
+            document.getElementById('table').classList.add('tabulator-dark');
+        }
+    }
+
+    function getFilterParams() {
+        return {
+            integration_type: document.getElementById('filterType').value,
+            status: document.getElementById('filterStatus').value,
+            date_from: document.getElementById('filterFrom').value,
+            date_to: document.getElementById('filterTo').value
+        };
+    }
+
+    function loadLogs() {
+        table.setData("/api/module/FLOG01/data", getFilterParams());
+    }
+
+    function clearFilters() {
+        document.getElementById('filterType').value = '';
+        document.getElementById('filterStatus').value = '';
+        document.getElementById('filterFrom').value = '';
+        document.getElementById('filterTo').value = '';
+        loadLogs();
+    }
+
+    async function openDetail(logId) {
+        const res = await fetch(`/api/module/FLOG01/detail/${logId}`);
+        const log = await res.json();
+        document.getElementById('detailId').textContent = log.id;
+        document.getElementById('detailGrid').innerHTML = `
+            <div><span class="label">Type:</span> ${log.integration_type || '-'}</div>
+            <div><span class="label">Direction:</span> ${log.direction || '-'}</div>
+            <div><span class="label">Source:</span> ${log.source_module || '-'} #${log.source_id || '-'}</div>
+            <div><span class="label">Status:</span> <span class="status-badge status-${log.status}">${log.status}</span></div>
+            <div><span class="label">HTTP Status:</span> ${log.http_status || '-'}</div>
+            <div><span class="label">Duration:</span> ${log.duration_ms || '-'} ms</div>
+            <div><span class="label">Created:</span> ${log.created_date || '-'}</div>
+            <div><span class="label">User:</span> ${log.created_by || '-'}</div>
+        `;
+        document.getElementById('detailRequest').textContent = log.request_payload ? JSON.stringify(JSON.parse(log.request_payload), null, 2) : '-';
+        document.getElementById('detailResponse').textContent = log.response_body ? JSON.stringify(JSON.parse(log.response_body), null, 2) : '-';
+        document.getElementById('detailError').textContent = log.error_message || '-';
+        document.getElementById('detailOverlay').style.display = 'flex';
+    }
+
+    function closeDetail() {
+        document.getElementById('detailOverlay').style.display = 'none';
+    }
+
+    initTable();
+</script>
+{% endblock %}

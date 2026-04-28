@@ -1,0 +1,1540 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Admin Panel</h2>
+    <span class="module-code">ADMIN</span>
+</div>
+
+<div class="admin-tabs">
+    <button class="tab-btn active" onclick="showTab('users')">User Management</button>
+    <button class="tab-btn" onclick="showTab('permissions')">Module Permissions</button>
+    <button class="tab-btn" onclick="showTab('config')">Module Config</button>
+    <button class="tab-btn" onclick="showTab('vessels')">Vessel Closure</button>
+    <button class="tab-btn" onclick="showTab('mbc')">MBC Approval</button>
+    <button class="tab-btn" onclick="showTab('gst')">GST Config</button>
+    <button class="tab-btn" onclick="showTab('sap')">SAP Config</button>
+    <button class="tab-btn" onclick="showTab('banks')">Bank Accounts</button>
+    <button class="tab-btn" onclick="showTab('mail')">Mail</button>
+    <button class="tab-btn" onclick="showTab('logs')">Logs</button>
+</div>
+
+<!-- User Management Tab -->
+<div id="users-tab" class="tab-content active">
+    <div class="admin-section">
+        <h3>Users</h3>
+        <div class="toolbar">
+            <button class="btn btn-add" onclick="showAddUser()">+ Add User</button>
+        </div>
+        <table class="admin-table" id="usersTable">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Is Admin</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Permissions Tab -->
+<div id="permissions-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Module Permissions</h3>
+        <div class="toolbar" style="align-items:center;flex-wrap:wrap;gap:10px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;">User:
+                <select id="permUserSelect" onchange="loadUserPermissions()" style="padding:5px 8px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;">
+                    <option value="">-- Select User --</option>
+                </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;">
+                <input type="text" id="permModuleFilter" placeholder="Filter modules..." oninput="filterPermTable()" style="padding:5px 8px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;width:180px;">
+            </label>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                <span style="font-size:11px;color:#718096;font-weight:600;">Bulk:</span>
+                <button class="btn" style="font-size:11px;padding:3px 8px;background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="bulkSetPerms(1,0,0,0)">Read Only</button>
+                <button class="btn" style="font-size:11px;padding:3px 8px;background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="bulkSetPerms(1,1,1,0)">Read+Add+Edit</button>
+                <button class="btn" style="font-size:11px;padding:3px 8px;background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="bulkSetPerms(1,1,1,1)">Full Access</button>
+                <button class="btn" style="font-size:11px;padding:3px 8px;background:#fed7d7;color:#c53030;border:1px solid #feb2b2;" onclick="bulkSetPerms(0,0,0,0)">Revoke All</button>
+            </div>
+            <button class="btn btn-save" onclick="saveUserPermissions()">Save Permissions</button>
+            <span id="permSaveStatus" style="font-size:11px;"></span>
+        </div>
+        <div id="permTableWrap" style="display:none;margin-top:8px;">
+            <table class="admin-table" id="permissionsTable">
+                <thead>
+                    <tr>
+                        <th style="width:60px;">Code</th>
+                        <th>Module Name</th>
+                        <th style="width:60px;text-align:center;">Read</th>
+                        <th style="width:60px;text-align:center;">Add</th>
+                        <th style="width:60px;text-align:center;">Edit</th>
+                        <th style="width:60px;text-align:center;">Delete</th>
+                        <th style="width:80px;text-align:center;">All</th>
+                    </tr>
+                </thead>
+                <tbody id="permissionsBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Config Tab -->
+<div id="config-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Module Configuration</h3>
+        <div class="toolbar" style="align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;">
+                <input type="text" id="cfgModuleFilter" placeholder="Filter modules..." oninput="filterConfigTable()" style="padding:5px 8px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;width:180px;">
+            </label>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                <span style="font-size:11px;color:#718096;font-weight:600;">Bulk:</span>
+                <button class="btn" style="font-size:11px;padding:3px 8px;background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="bulkSetConfig('approval_add', true)">Approve All Add</button>
+                <button class="btn" style="font-size:11px;padding:3px 8px;background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="bulkSetConfig('approval_edit', true)">Approve All Edit</button>
+                <button class="btn" style="font-size:11px;padding:3px 8px;background:#fed7d7;color:#c53030;border:1px solid #feb2b2;" onclick="bulkSetConfig('both', false)">Clear All Approvals</button>
+                <label style="font-size:11px;display:flex;align-items:center;gap:4px;margin-left:6px;">Bulk Approver:
+                    <select id="cfgBulkApprover" style="padding:3px 6px;border:1px solid #cbd5e0;border-radius:3px;font-size:11px;">
+                        <option value="">-- None --</option>
+                    </select>
+                    <button class="btn" style="font-size:11px;padding:3px 8px;background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="bulkSetApprover()">Apply</button>
+                </label>
+            </div>
+            <button class="btn btn-save" onclick="saveAllConfigs()">Save Config</button>
+            <span id="cfgSaveStatus" style="font-size:11px;"></span>
+        </div>
+        <div style="margin-top:8px;">
+            <table class="admin-table" id="configTable">
+                <thead>
+                    <tr>
+                        <th style="width:70px;">Code</th>
+                        <th>Module Name</th>
+                        <th style="width:120px;text-align:center;">Approval on Add</th>
+                        <th style="width:120px;text-align:center;">Approval on Edit</th>
+                        <th style="width:160px;">Approver</th>
+                    </tr>
+                </thead>
+                <tbody id="configBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Vessel Closure Tab -->
+<div id="vessels-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Vessel Closure Management</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">Shows all Closed and Partial Close vessels from LDUD01. Use "Open Vessel" to reset a record back to Draft.</p>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="loadLdudVessels()">↻ Refresh</button>
+        </div>
+        <table class="admin-table" id="ldudVesselsTable">
+            <thead>
+                <tr>
+                    <th>Doc Num</th>
+                    <th>Vessel Name</th>
+                    <th>VCN Doc</th>
+                    <th>Operation</th>
+                    <th>Status</th>
+                    <th>Created By</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="ldudVesselsBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- MBC Approval Tab -->
+<div id="mbc-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>MBC Approval Reset</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">Shows all Approved MBC records from MBC01. Use "Reset Approval" to move a record back to Draft.</p>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="loadMbcApprovals()">↻ Refresh</button>
+        </div>
+        <table class="admin-table" id="mbcApprovalsTable">
+            <thead>
+                <tr>
+                    <th>Doc Num</th>
+                    <th>MBC Name</th>
+                    <th>Operation</th>
+                    <th>Cargo Name</th>
+                    <th>Status</th>
+                    <th>Created By</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="mbcApprovalsBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- GST Config Tab -->
+<div id="gst-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Port / Seller GST Details</h3>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="saveGstConfig()">Save GST Config</button>
+        </div>
+        <div class="config-panel" style="display:block;">
+            <div class="config-group">
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <label>Port GST State Code:<br><input type="text" id="gstPortStateCode" placeholder="e.g., 20" maxlength="2" style="width:100%;padding:6px;"></label>
+                    <label>Seller GSTIN:<br><input type="text" id="gstSellerGstin" placeholder="e.g., 20AABCT1234H1Z0" maxlength="15" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row">
+                    <label>Legal Name:<br><input type="text" id="gstSellerLegalName" placeholder="Registered company name" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row">
+                    <label>Address:<br><input type="text" id="gstSellerAddress" placeholder="Registered address" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <label>City / Location:<br><input type="text" id="gstSellerLocation" placeholder="City" style="width:100%;padding:6px;"></label>
+                    <label>Pincode:<br><input type="text" id="gstSellerPincode" placeholder="6-digit" maxlength="6" style="width:100%;padding:6px;"></label>
+                    <label>Phone:<br><input type="text" id="gstSellerPhone" placeholder="Optional" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row">
+                    <label>Email:<br><input type="text" id="gstSellerEmail" placeholder="Optional" style="width:100%;padding:6px;"></label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SAP Config Tab -->
+<div id="sap-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>SAP Integration Config</h3>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="saveSapConfig()">Save SAP Config</button>
+            <button class="btn" style="background:#f39c12;color:white;" onclick="testSapConnection()">Test Connection</button>
+            <span id="sapStatus" style="font-size:11px;margin-left:10px;"></span>
+        </div>
+        <div class="config-panel" style="display:block;">
+            <div class="config-group">
+                <h4>Connection</h4>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <label>Environment:<br>
+                        <select id="sapEnvironment" style="width:100%;padding:6px;">
+                            <option value="production">Production</option>
+                            <option value="quality">Quality</option>
+                            <option value="development">Development</option>
+                        </select>
+                    </label>
+                    <label>Company Code:<br><input type="text" id="sapCompanyCode" placeholder="e.g., 5130" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row">
+                    <label>Base URL:<br><input type="text" id="sapBaseUrl" placeholder="e.g., https://sapapi.jsw.in:54001" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row">
+                    <label>Token URL (OAuth2):<br><input type="text" id="sapTokenUrl" placeholder="e.g., https://sapapi.jsw.in:54001/RESTAdapter/OAuthServer" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <label>Client ID:<br><input type="text" id="sapClientId" placeholder="API client ID" style="width:100%;padding:6px;"></label>
+                    <label>Client Secret:<br><input type="password" id="sapClientSecret" placeholder="API client secret" style="width:100%;padding:6px;"></label>
+                </div>
+            </div>
+            <div class="config-group">
+                <h4>Posting Defaults</h4>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <label>Payment Term:<br><input type="text" id="sapPaymentTerm" placeholder="e.g., 0051" maxlength="4" style="width:100%;padding:6px;"></label>
+                    <label>Plant Code:<br><input type="text" id="sapPlantCode" placeholder="e.g., 5130" style="width:100%;padding:6px;"></label>
+                    <label>Business Place:<br><input type="text" id="sapBusinessPlace" placeholder="e.g., 5130" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <label>Section Code:<br><input type="text" id="sapSectionCode" placeholder="e.g., 5130" style="width:100%;padding:6px;"></label>
+                    <label>Credit Control Area:<br><input type="text" id="sapCreditControlArea" placeholder="e.g., 5123" style="width:100%;padding:6px;"></label>
+                    <label>Profit Center:<br><input type="text" id="sapProfitCenter" placeholder="e.g., 5130000" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <label>Tax Code:<br><input type="text" id="sapTaxCode" placeholder="e.g., V1" maxlength="2" style="width:100%;padding:6px;"></label>
+                    <label>Currency:<br><input type="text" id="sapCurrency" placeholder="INR" value="INR" style="width:100%;padding:6px;"></label>
+                    <label>Active:<br>
+                        <select id="sapIsActive" style="width:100%;padding:6px;">
+                            <option value="1">Active</option>
+                            <option value="0">Inactive</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+            <div class="config-group">
+                <h4>Default GL Accounts</h4>
+                <p style="font-size:11px;color:#718096;margin:0 0 10px;">Used in SAP staging payload when not overridden at service level.</p>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <label>TDS GL:<br><input type="text" id="sapTdsGl" placeholder="e.g. 2400006000" style="width:100%;padding:6px;"></label>
+                    <label>TCS GL:<br><input type="text" id="sapTcsGl" placeholder="e.g. 2400007000" style="width:100%;padding:6px;"></label>
+                    <label>Round-off GL:<br><input type="text" id="sapRoundOffGl" placeholder="e.g. 4200000001" style="width:100%;padding:6px;"></label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bank Accounts Tab -->
+<div id="banks-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Port Bank Accounts</h3>
+        <div class="toolbar">
+            <button class="btn btn-add" onclick="addBankRow()">+ Add Row</button>
+            <button class="btn btn-save" onclick="saveBankAccounts()">Save</button>
+            <button class="btn btn-delete" onclick="deleteSelectedBanks()">Delete Selected</button>
+        </div>
+        <table class="admin-table" id="banksTable">
+            <thead>
+                <tr>
+                    <th style="width:30px;"><input type="checkbox" id="bankSelectAll" onclick="document.querySelectorAll('.bank-sel').forEach(c=>c.checked=this.checked)"></th>
+                    <th>Bank Name</th>
+                    <th>Account Number</th>
+                    <th>IFSC Code</th>
+                    <th>Account Holder Name</th>
+                    <th>Branch</th>
+                    <th>PAN</th>
+                    <th>CIN</th>
+                    <th>Corporate Office Address</th>
+                </tr>
+            </thead>
+            <tbody id="banksTableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Mail Tab -->
+<div id="mail-tab" class="tab-content">
+    <div class="admin-section" style="margin-bottom:16px;">
+        <h3>SMTP Configuration</h3>
+        <div class="toolbar" style="flex-wrap:wrap;gap:10px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;">
+                Mail Enabled:
+                <label class="smtp-toggle">
+                    <input type="checkbox" id="smtpEnabled">
+                    <span class="smtp-slider"></span>
+                </label>
+            </label>
+            <button class="btn btn-save" onclick="saveSmtpConfig()">Save Config</button>
+            <button class="btn" style="background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="sendMailNow()">Send Now</button>
+            <span id="smtpStatus" style="font-size:11px;"></span>
+        </div>
+        <div class="config-panel" style="display:block;margin-top:12px;">
+            <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                <label>Host:<br><input type="text" id="smtpHost" placeholder="smtp-mail.outlook.com" style="width:100%;padding:6px;box-sizing:border-box;"></label>
+                <label>Port:<br><input type="number" id="smtpPort" placeholder="587" style="width:100%;padding:6px;box-sizing:border-box;"></label>
+                <label>Schedule (minutes):<br><input type="number" id="smtpSchedule" min="1" placeholder="5" style="width:100%;padding:6px;box-sizing:border-box;"></label>
+            </div>
+            <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;">
+                <label>Username:<br><input type="text" id="smtpUsername" placeholder="user@domain.com" style="width:100%;padding:6px;box-sizing:border-box;"></label>
+                <label>Password:<br><input type="password" id="smtpPassword" placeholder="••••••••" style="width:100%;padding:6px;box-sizing:border-box;"></label>
+            </div>
+            <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
+                <label>From Email:<br><input type="text" id="smtpFromEmail" placeholder="noreply@domain.com" style="width:100%;padding:6px;box-sizing:border-box;"></label>
+                <label>From Name:<br><input type="text" id="smtpFromName" placeholder="Portbird - DPPL" style="width:100%;padding:6px;box-sizing:border-box;"></label>
+                <label style="display:flex;align-items:center;gap:8px;padding-top:20px;">
+                    <input type="checkbox" id="smtpUseTls"> Use TLS (STARTTLS)
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-section">
+        <h3>Mail Queue</h3>
+        <div class="toolbar" style="gap:8px;flex-wrap:wrap;">
+            <button class="btn" style="background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="loadMailQueue()">&#8635; Refresh</button>
+            <button class="btn" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;" onclick="retryFailed()">Retry Failed</button>
+            <span id="mailQueueCount" style="font-size:11px;color:#718096;margin-left:8px;"></span>
+        </div>
+        <table class="admin-table" id="mailQueueTable" style="margin-top:8px;">
+            <thead>
+                <tr>
+                    <th>ID</th><th>To</th><th>Subject</th>
+                    <th>Status</th><th>Retries</th>
+                    <th>Created</th><th>Sent</th><th>Error</th>
+                </tr>
+            </thead>
+            <tbody id="mailQueueBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Logs Tab -->
+<div id="logs-tab" class="tab-content">
+    <!-- Nginx log path config -->
+    <div class="admin-section" style="margin-bottom:14px;">
+        <h3 style="margin:0 0 12px;">Nginx Access Log Path</h3>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+            <div style="flex:1;min-width:280px;">
+                <label style="font-size:11px;font-weight:600;color:#718096;text-transform:uppercase;display:block;margin-bottom:4px;">Log File Path</label>
+                <input type="text" id="nginxLogPath" placeholder="C:\nginx-1.28.2\logs\access.log"
+                    style="width:100%;padding:7px 10px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;font-family:monospace;box-sizing:border-box;background:var(--bg-primary);color:var(--text-primary);">
+            </div>
+            <button class="btn btn-save" onclick="saveNginxConfig()" style="white-space:nowrap;">Save Path</button>
+            <span id="nginxConfigStatus" style="font-size:11px;"></span>
+        </div>
+    </div>
+
+    <div class="admin-section" style="margin-bottom:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+            <h3 style="margin:0;">Application Logs</h3>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span id="logFileSize" style="font-size:11px;color:#718096;"></span>
+                <button class="btn" style="background:#e2e8f0;color:#2d3748;border:1px solid #cbd5e0;" onclick="loadLogs()">&#8635; Refresh</button>
+                <button class="btn btn-danger" onclick="clearLogs()">&#128465; Clear Log File</button>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div id="logStatsCards" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;"></div>
+
+        <!-- Activity by Date (mini bar chart) -->
+        <div id="logByDate" style="margin-bottom:16px;display:none;">
+            <div style="font-size:11px;font-weight:600;color:#718096;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Activity by Date (last 14 days)</div>
+            <div id="logDateBars" style="display:flex;flex-direction:column;gap:4px;"></div>
+        </div>
+    </div>
+
+    <div class="admin-section">
+        <!-- Filters -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <span style="font-size:11px;font-weight:600;color:#718096;">Filter:</span>
+            <button class="log-filter-btn active" data-status="ALL" onclick="setLogFilter('ALL')">All</button>
+            <span id="logStatusFilters"></span>
+            <input type="text" id="logSearch" placeholder="Search message or source…"
+                oninput="renderLogTable()"
+                style="margin-left:8px;padding:5px 9px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;width:220px;">
+            <span id="logEntryCount" style="font-size:11px;color:#718096;margin-left:4px;"></span>
+        </div>
+
+        <!-- Log Table -->
+        <div style="overflow-x:auto;max-height:520px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:4px;">
+            <table class="admin-table" id="logTable" style="margin-top:0;font-size:12px;">
+                <thead style="position:sticky;top:0;z-index:1;">
+                    <tr>
+                        <th style="width:140px;white-space:nowrap;">Timestamp</th>
+                        <th style="width:80px;">Level</th>
+                        <th style="width:110px;">Source</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody id="logTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div id="resetPwModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <h3>Reset Password</h3>
+        <p id="resetPwUsername" style="font-size:12px;color:#718096;margin-bottom:12px;"></p>
+        <div class="form-group">
+            <label>New Password</label>
+            <input type="password" id="resetPwNew" placeholder="Enter new password" autocomplete="new-password">
+            <div id="resetPwStrength"></div>
+        </div>
+        <div class="form-group">
+            <label>Confirm Password</label>
+            <input type="password" id="resetPwConfirm" placeholder="Re-enter new password" autocomplete="new-password">
+        </div>
+        <p id="resetPwError" style="color:#c53030;font-size:11px;margin-top:4px;display:none;"></p>
+        <div class="modal-actions">
+            <button class="btn" onclick="hideResetPw()">Cancel</button>
+            <button class="btn btn-save" onclick="doResetPassword()">Reset Password</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit User Modal -->
+<div id="editUserModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <h3>Edit User</h3>
+        <input type="hidden" id="editUserId">
+        <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="editUsername" placeholder="Enter username">
+        </div>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="editEmail" placeholder="user@domain.com">
+        </div>
+        <div class="form-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="editIsAdmin"> Is Admin
+            </label>
+        </div>
+        <p id="editUserError" style="color:#c53030;font-size:11px;margin-top:4px;display:none;"></p>
+        <div class="modal-actions">
+            <button class="btn" onclick="hideEditUser()">Cancel</button>
+            <button class="btn btn-save" onclick="doEditUser()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Add User Modal -->
+<div id="addUserModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <h3>Add User</h3>
+        <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="newUsername" placeholder="Enter username">
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="newPassword" placeholder="Enter password" autocomplete="new-password">
+            <div id="newPwStrength"></div>
+        </div>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="newEmail" placeholder="user@domain.com">
+        </div>
+        <div class="form-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="newIsAdmin"> Is Admin
+            </label>
+        </div>
+        <div class="modal-actions">
+            <button class="btn" onclick="hideAddUser()">Cancel</button>
+            <button class="btn btn-add" onclick="addUser()">Add User</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.admin-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+.tab-btn { padding: 8px 16px; border: none; background: #e2e8f0; cursor: pointer; border-radius: 4px 4px 0 0; }
+.tab-btn.active { background: #4299e1; color: white; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.admin-section { background: white; padding: 15px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.admin-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.admin-table th, .admin-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+.admin-table th { background: #f7fafc; font-weight: 600; }
+.admin-table input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+.config-panel { margin-top: 15px; padding: 15px; background: #f7fafc; border-radius: 4px; }
+.config-group { margin-bottom: 15px; }
+.config-group h4 { margin: 0 0 10px 0; color: #4a5568; }
+.config-row { margin-top: 10px; }
+.checkbox-label { display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; }
+.modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-content { background: white; padding: 20px; border-radius: 8px; min-width: 300px; }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; margin-bottom: 4px; font-weight: 500; }
+.form-group input[type="text"], .form-group input[type="password"] { width: 100%; padding: 8px; border: 1px solid #e2e8f0; border-radius: 4px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 15px; }
+.btn-danger { background: linear-gradient(135deg, #fc8181 0%, #e53e3e 100%); color: white; }
+
+body.dark-theme .admin-section { background: #2d3748; }
+body.dark-theme .admin-table th { background: #1a202c; }
+body.dark-theme .admin-table td { border-color: #4a5568; }
+body.dark-theme .config-panel { background: #1a202c; }
+body.dark-theme .modal-content { background: #2d3748; color: #e2e8f0; }
+body.dark-theme .form-group input { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+body.dark-theme .tab-btn { background: #4a5568; color: #e2e8f0; }
+body.dark-theme .tab-btn.active { background: #4299e1; color: white; }
+body.dark-theme #banksTable input[type="text"] { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+
+/* Permissions table */
+#permissionsTable td { text-align: left; vertical-align: middle; }
+#permissionsTable td:nth-child(3),
+#permissionsTable td:nth-child(4),
+#permissionsTable td:nth-child(5),
+#permissionsTable td:nth-child(6),
+#permissionsTable td:nth-child(7) { text-align: center; }
+#permissionsTable .code-badge { background:#4a90d9;color:#fff;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:600; }
+.perm-row-filtered { display: none; }
+
+/* Config table */
+#configTable td { text-align: left; vertical-align: middle; }
+#configTable td:nth-child(3), #configTable td:nth-child(4) { text-align: center; }
+#configTable select { padding:3px 6px;border:1px solid #cbd5e0;border-radius:3px;font-size:11px; }
+body.dark-theme #configTable select { background:#1a202c;border-color:#4a5568;color:#e2e8f0; }
+.cfg-row-filtered { display: none; }
+
+/* SMTP toggle switch */
+.smtp-toggle { position:relative; display:inline-block; width:44px; height:24px; vertical-align:middle; }
+.smtp-toggle input { opacity:0; width:0; height:0; }
+.smtp-slider { position:absolute; cursor:pointer; inset:0; background:#cbd5e0; border-radius:24px; transition:.3s; }
+.smtp-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:.3s; }
+.smtp-toggle input:checked + .smtp-slider { background:#48bb78; }
+.smtp-toggle input:checked + .smtp-slider:before { transform:translateX(20px); }
+body.dark-theme .smtp-slider { background:#4a5568; }
+
+/* Password strength widget */
+.ps-rules li { transition: color .2s; }
+body.dark-theme .ps-bar { background:#4a5568 !important; }
+body.dark-theme .ps-rules li { color:#a0aec0; }
+
+/* Log tab */
+.log-stat-card {
+    background: var(--bg-primary,#fff);
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-align: center;
+}
+.log-stat-num { font-size: 26px; font-weight: 700; color: var(--text-primary,#2c3e50); line-height: 1.1; }
+.log-stat-label { font-size: 10px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+.log-filter-btn {
+    padding: 4px 12px; border-radius: 4px; border: 1px solid #cbd5e0;
+    background: #e2e8f0; color: #4a5568; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.log-filter-btn.active { background: #4a90d9; color: #fff; border-color: #4a90d9; }
+.log-status-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; font-weight: 700; white-space: nowrap; font-family: monospace;
+}
+.log-tb-toggle { cursor: pointer; color: #4a90d9; font-size: 11px; user-select: none; }
+.log-tb-pre {
+    display: none; margin: 4px 0 0; padding: 6px 8px;
+    background: #1a202c; color: #f7fafc; font-size: 10px;
+    border-radius: 4px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow-y: auto;
+}
+.log-date-bar-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.log-date-label { width: 80px; color: #718096; text-align: right; flex-shrink: 0; }
+.log-date-bar-wrap { flex: 1; display: flex; gap: 2px; height: 14px; align-items: stretch; border-radius: 3px; overflow: hidden; }
+.log-date-bar-seg { height: 100%; transition: width .3s; min-width: 0; }
+.log-date-count { width: 36px; color: #4a5568; font-weight: 600; flex-shrink: 0; }
+body.dark-theme .log-stat-card { background: #2d3748; border-color: #4a5568; }
+body.dark-theme .log-filter-btn { background: #4a5568; color: #e2e8f0; border-color: #718096; }
+body.dark-theme .log-date-label { color: #a0aec0; }
+body.dark-theme .log-date-count { color: #e2e8f0; }
+body.dark-theme #logSearch { background:#1a202c; border-color:#4a5568; color:#e2e8f0; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/password-strength.js') }}"></script>
+<script>
+let users = [];
+let modules = [];
+let currentPermissions = [];
+
+async function loadUsers() {
+    const res = await fetch('/admin/api/users');
+    users = await res.json();
+    const tbody = document.querySelector('#usersTable tbody');
+    tbody.innerHTML = users.map(u => `
+        <tr>
+            <td style="font-weight:600;">${u.username}</td>
+            <td style="color:${u.email ? '#2d3748' : '#a0aec0'};font-size:12px;">${u.email || '— no email —'}</td>
+            <td>${u.is_admin ? '<span style="background:#ebf8ff;color:#2b6cb0;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">Admin</span>' : '<span style="background:#f7fafc;color:#718096;padding:2px 8px;border-radius:10px;font-size:11px;">User</span>'}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn" style="font-size:11px;padding:3px 10px;background:#edf2f7;color:#4a5568;border:1px solid #cbd5e0;" onclick="showEditUser(${u.id}, '${u.username.replace(/'/g,"\\'")}', '${(u.email||'').replace(/'/g,"\\'")}', ${u.is_admin ? 1 : 0})">Edit</button>
+                <button class="btn btn-save" style="font-size:11px;padding:3px 10px;" onclick="showResetPw(${u.id}, '${u.username.replace(/'/g,"\\'")}')">Reset PW</button>
+                <button class="btn" style="font-size:11px;padding:3px 10px;background:#e6fffa;color:#276749;border:1px solid #9ae6b4;" onclick="sendResetEmail(${u.id}, '${u.username.replace(/'/g,"\\'")}')">Send Reset Email</button>
+                ${u.username !== 'admin' ? `<button class="btn btn-danger" style="font-size:11px;padding:3px 10px;" onclick="deleteUser(${u.id})">Delete</button>` : ''}
+            </td>
+        </tr>
+    `).join('');
+
+    // Populate user select in permissions tab
+    const permUserSelect = document.getElementById('permUserSelect');
+    const prevVal = permUserSelect.value;
+    permUserSelect.innerHTML = '<option value="">-- Select User --</option>' +
+        users.map(u => `<option value="${u.id}">${u.username}${u.is_admin ? ' (admin)' : ''}</option>`).join('');
+    if (prevVal) permUserSelect.value = prevVal;
+
+    // Populate approver dropdowns in config table + bulk approver
+    const approverOptions = '<option value="">-- None --</option>' +
+        users.map(u => `<option value="${u.id}">${u.username}</option>`).join('');
+    document.querySelectorAll('.cfg-approver-select').forEach(sel => {
+        const cur = sel.value;
+        sel.innerHTML = approverOptions;
+        sel.value = cur;
+    });
+    const bulkApproverSel = document.getElementById('cfgBulkApprover');
+    if (bulkApproverSel) { const cur = bulkApproverSel.value; bulkApproverSel.innerHTML = approverOptions; bulkApproverSel.value = cur; }
+}
+
+async function loadModules() {
+    const res = await fetch('/admin/api/modules');
+    modules = await res.json();
+}
+
+function showTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelector(`[onclick*="showTab('${tab}')"]`).classList.add('active');
+    document.getElementById(`${tab}-tab`).classList.add('active');
+    if (tab === 'vessels') loadLdudVessels();
+    if (tab === 'mbc') loadMbcApprovals();
+    if (tab === 'gst') loadGstConfig();
+    if (tab === 'sap') loadSapConfig();
+    if (tab === 'banks') loadBankAccounts();
+    if (tab === 'config') loadAllConfigs();
+    if (tab === 'mail') { loadSmtpConfig(); loadMailQueue(); }
+    if (tab === 'logs') { loadLogs(); loadNginxConfig(); }
+}
+
+let _newPwStrength = null;
+
+function showAddUser() {
+    document.getElementById('addUserModal').style.display = 'flex';
+    setTimeout(() => {
+        if (_newPwStrength) _newPwStrength.destroy();
+        _newPwStrength = initPasswordStrength(
+            document.getElementById('newPassword'),
+            document.getElementById('newPwStrength'),
+            () => document.getElementById('newUsername').value.trim()
+        );
+        document.getElementById('newUsername').focus();
+    }, 50);
+}
+function hideAddUser() {
+    document.getElementById('addUserModal').style.display = 'none';
+    document.getElementById('newUsername').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('newEmail').value = '';
+    document.getElementById('newIsAdmin').checked = false;
+    if (_newPwStrength) { _newPwStrength.destroy(); _newPwStrength = null; }
+}
+
+async function addUser() {
+    const username = document.getElementById('newUsername').value.trim();
+    const password = document.getElementById('newPassword').value.trim();
+    const email = document.getElementById('newEmail').value.trim();
+    const is_admin = document.getElementById('newIsAdmin').checked;
+
+    if (!username || !password) { alert('Username and password required'); return; }
+    if (_newPwStrength && !_newPwStrength.validate()) {
+        alert('Password does not meet all requirements. Please check the checklist.'); return;
+    }
+
+    const res = await fetch('/admin/api/users/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username, password, email, is_admin})
+    });
+
+    if (res.ok) {
+        hideAddUser();
+        loadUsers();
+    } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to add user');
+    }
+}
+
+function showEditUser(id, username, email, isAdmin) {
+    document.getElementById('editUserId').value = id;
+    document.getElementById('editUsername').value = username;
+    document.getElementById('editEmail').value = email;
+    document.getElementById('editIsAdmin').checked = !!isAdmin;
+    document.getElementById('editUserError').style.display = 'none';
+    document.getElementById('editUserModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('editUsername').focus(), 50);
+}
+function hideEditUser() {
+    document.getElementById('editUserModal').style.display = 'none';
+}
+async function doEditUser() {
+    const id = parseInt(document.getElementById('editUserId').value);
+    const username = document.getElementById('editUsername').value.trim();
+    const email = document.getElementById('editEmail').value.trim();
+    const is_admin = document.getElementById('editIsAdmin').checked;
+    const err = document.getElementById('editUserError');
+    if (!username) { err.textContent = 'Username is required.'; err.style.display = 'block'; return; }
+    const res = await fetch('/admin/api/users/edit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, username, email, is_admin})
+    });
+    if (res.ok) { hideEditUser(); loadUsers(); }
+    else { const d = await res.json(); err.textContent = d.error || 'Failed to save.'; err.style.display = 'block'; }
+}
+
+async function sendResetEmail(id, username) {
+    if (!confirm(`Send password reset OTP email to ${username}?`)) return;
+    const res = await fetch('/admin/api/users/send-reset-email', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (res.ok) alert(data.message || 'Reset email sent successfully.');
+    else alert(data.error || 'Failed to send reset email.');
+}
+
+let _resetPwUserId = null;
+let _resetPwStrength = null;
+let _resetPwUsername = '';
+
+function showResetPw(id, username) {
+    _resetPwUserId = id;
+    _resetPwUsername = username;
+    document.getElementById('resetPwUsername').textContent = 'User: ' + username;
+    document.getElementById('resetPwNew').value = '';
+    document.getElementById('resetPwConfirm').value = '';
+    document.getElementById('resetPwError').style.display = 'none';
+    document.getElementById('resetPwModal').style.display = 'flex';
+    setTimeout(() => {
+        if (_resetPwStrength) _resetPwStrength.destroy();
+        _resetPwStrength = initPasswordStrength(
+            document.getElementById('resetPwNew'),
+            document.getElementById('resetPwStrength'),
+            () => _resetPwUsername
+        );
+        document.getElementById('resetPwNew').focus();
+    }, 50);
+}
+function hideResetPw() {
+    document.getElementById('resetPwModal').style.display = 'none';
+    _resetPwUserId = null;
+    if (_resetPwStrength) { _resetPwStrength.destroy(); _resetPwStrength = null; }
+}
+async function doResetPassword() {
+    const pw = document.getElementById('resetPwNew').value;
+    const pw2 = document.getElementById('resetPwConfirm').value;
+    const err = document.getElementById('resetPwError');
+    if (!pw) { err.textContent = 'Password is required.'; err.style.display = 'block'; return; }
+    if (_resetPwStrength && !_resetPwStrength.validate()) {
+        err.textContent = 'Password does not meet all requirements. Check the checklist.';
+        err.style.display = 'block'; return;
+    }
+    if (pw !== pw2) { err.textContent = 'Passwords do not match.'; err.style.display = 'block'; document.getElementById('resetPwConfirm').value = ''; document.getElementById('resetPwConfirm').focus(); return; }
+    const res = await fetch('/admin/api/users/reset-password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: _resetPwUserId, password: pw})
+    });
+    if (res.ok) { hideResetPw(); }
+    else { const d = await res.json(); err.textContent = d.error || 'Failed to reset password.'; err.style.display = 'block'; }
+}
+
+async function deleteUser(id) {
+    if (!confirm('Delete this user?')) return;
+    const res = await fetch('/admin/api/users/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    if (res.ok) loadUsers();
+    else alert('Failed to delete user');
+}
+
+// ── Permissions (user-centric) ────────────────────────────────────────────────
+let userPermData = [];
+
+async function loadUserPermissions() {
+    const userId = document.getElementById('permUserSelect').value;
+    const wrap = document.getElementById('permTableWrap');
+    if (!userId) { wrap.style.display = 'none'; return; }
+
+    const res = await fetch(`/admin/api/permissions/user/${userId}`);
+    userPermData = await res.json();
+    renderPermTable();
+    wrap.style.display = 'block';
+    document.getElementById('permSaveStatus').textContent = '';
+}
+
+function renderPermTable() {
+    const approverOptions = '<option value="">-- None --</option>' +
+        users.map(u => `<option value="${u.id}">${u.username}</option>`).join('');
+    const tbody = document.getElementById('permissionsBody');
+    tbody.innerHTML = userPermData.map((p, i) => `
+        <tr data-idx="${i}">
+            <td><span class="code-badge">${p.module_code}</span></td>
+            <td>${p.module_name}</td>
+            <td><input type="checkbox" data-idx="${i}" data-perm="can_read" ${p.can_read ? 'checked' : ''}></td>
+            <td><input type="checkbox" data-idx="${i}" data-perm="can_add" ${p.can_add ? 'checked' : ''}></td>
+            <td><input type="checkbox" data-idx="${i}" data-perm="can_edit" ${p.can_edit ? 'checked' : ''}></td>
+            <td><input type="checkbox" data-idx="${i}" data-perm="can_delete" ${p.can_delete ? 'checked' : ''}></td>
+            <td>
+                <input type="checkbox" title="Toggle all" onchange="toggleRowPerms(${i}, this.checked)"
+                    ${p.can_read && p.can_add && p.can_edit && p.can_delete ? 'checked' : ''}>
+            </td>
+        </tr>
+    `).join('');
+
+    tbody.querySelectorAll('input[data-perm]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const idx = parseInt(cb.dataset.idx);
+            userPermData[idx][cb.dataset.perm] = cb.checked ? 1 : 0;
+        });
+    });
+}
+
+function toggleRowPerms(idx, checked) {
+    const val = checked ? 1 : 0;
+    ['can_read','can_add','can_edit','can_delete'].forEach(p => userPermData[idx][p] = val);
+    const row = document.querySelector(`#permissionsBody tr[data-idx="${idx}"]`);
+    row.querySelectorAll('input[data-perm]').forEach(cb => cb.checked = checked);
+}
+
+function bulkSetPerms(r, a, e, d) {
+    // Only apply to visible (non-filtered) rows
+    const visibleIdxs = new Set();
+    document.querySelectorAll('#permissionsBody tr:not(.perm-row-filtered)').forEach(tr => visibleIdxs.add(parseInt(tr.dataset.idx)));
+    userPermData.forEach((p, i) => {
+        if (!visibleIdxs.size || visibleIdxs.has(i)) {
+            p.can_read = r; p.can_add = a; p.can_edit = e; p.can_delete = d;
+        }
+    });
+    renderPermTable();
+}
+
+function filterPermTable() {
+    const q = document.getElementById('permModuleFilter').value.toLowerCase();
+    document.querySelectorAll('#permissionsBody tr').forEach(tr => {
+        const text = tr.textContent.toLowerCase();
+        tr.classList.toggle('perm-row-filtered', q.length > 0 && !text.includes(q));
+    });
+}
+
+async function saveUserPermissions() {
+    const userId = document.getElementById('permUserSelect').value;
+    if (!userId) { alert('Select a user first'); return; }
+    const status = document.getElementById('permSaveStatus');
+    status.textContent = 'Saving...'; status.style.color = '#c05621';
+    const res = await fetch(`/admin/api/permissions/user/${userId}/save`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(userPermData)
+    });
+    if (res.ok) { status.textContent = 'Saved!'; status.style.color = '#276749'; setTimeout(() => status.textContent = '', 2000); }
+    else { status.textContent = 'Failed to save'; status.style.color = '#c53030'; }
+}
+
+// ── Config (all-modules table) ────────────────────────────────────────────────
+let allConfigData = [];
+
+async function loadAllConfigs() {
+    const res = await fetch('/admin/api/config/all');
+    allConfigData = await res.json();
+    const approverOptions = '<option value="">-- None --</option>' +
+        users.map(u => `<option value="${u.id}">${u.username}</option>`).join('');
+    const tbody = document.getElementById('configBody');
+    tbody.innerHTML = allConfigData.map((c, i) => `
+        <tr data-idx="${i}">
+            <td><span class="code-badge">${c.module_code}</span></td>
+            <td>${c.module_name}</td>
+            <td><input type="checkbox" data-idx="${i}" data-cfg="approval_add" ${c.approval_add ? 'checked' : ''}></td>
+            <td><input type="checkbox" data-idx="${i}" data-cfg="approval_edit" ${c.approval_edit ? 'checked' : ''}></td>
+            <td>
+                <select class="cfg-approver-select" data-idx="${i}">
+                    ${approverOptions}
+                </select>
+            </td>
+        </tr>
+    `).join('');
+
+    // Set approver values
+    tbody.querySelectorAll('.cfg-approver-select').forEach(sel => {
+        const idx = parseInt(sel.dataset.idx);
+        sel.value = allConfigData[idx].approver_id || '';
+        sel.addEventListener('change', () => { allConfigData[parseInt(sel.dataset.idx)].approver_id = sel.value || null; });
+    });
+    tbody.querySelectorAll('input[data-cfg]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            allConfigData[parseInt(cb.dataset.idx)][cb.dataset.cfg] = cb.checked;
+        });
+    });
+}
+
+function filterConfigTable() {
+    const q = document.getElementById('cfgModuleFilter').value.toLowerCase();
+    document.querySelectorAll('#configBody tr').forEach(tr => {
+        tr.classList.toggle('cfg-row-filtered', q.length > 0 && !tr.textContent.toLowerCase().includes(q));
+    });
+}
+
+function _visibleCfgIdxs() {
+    const s = new Set();
+    document.querySelectorAll('#configBody tr:not(.cfg-row-filtered)').forEach(tr => s.add(parseInt(tr.dataset.idx)));
+    return s;
+}
+
+function bulkSetConfig(field, val) {
+    const visible = _visibleCfgIdxs();
+    allConfigData.forEach((c, i) => {
+        if (!visible.size || visible.has(i)) {
+            if (field === 'both') { c.approval_add = val; c.approval_edit = val; }
+            else c[field] = val;
+        }
+    });
+    // Sync checkboxes
+    document.querySelectorAll('#configBody tr:not(.cfg-row-filtered) input[data-cfg]').forEach(cb => {
+        if (field === 'both' || cb.dataset.cfg === field) cb.checked = val;
+    });
+}
+
+function bulkSetApprover() {
+    const approver = document.getElementById('cfgBulkApprover').value || null;
+    const visible = _visibleCfgIdxs();
+    allConfigData.forEach((c, i) => {
+        if (!visible.size || visible.has(i)) c.approver_id = approver;
+    });
+    document.querySelectorAll('#configBody tr:not(.cfg-row-filtered) .cfg-approver-select').forEach(sel => {
+        sel.value = approver || '';
+    });
+}
+
+async function saveAllConfigs() {
+    const status = document.getElementById('cfgSaveStatus');
+    status.textContent = 'Saving...'; status.style.color = '#c05621';
+    let failed = 0;
+    for (const c of allConfigData) {
+        const res = await fetch(`/admin/api/config/${c.module_code}/save`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                approval_add: c.approval_add,
+                approval_edit: c.approval_edit,
+                approver_id: c.approver_id || null
+            })
+        });
+        if (!res.ok) failed++;
+    }
+    if (failed === 0) { status.textContent = 'All saved!'; status.style.color = '#276749'; setTimeout(() => status.textContent = '', 2000); }
+    else { status.textContent = `${failed} module(s) failed`; status.style.color = '#c53030'; }
+}
+
+// ── GST Config ─────────────────────────────────────────────────────────────
+async function loadGstConfig() {
+    const res = await fetch('/admin/api/config/FIN01');
+    const config = await res.json();
+    document.getElementById('gstPortStateCode').value = config.port_gst_state_code || '';
+    document.getElementById('gstSellerGstin').value = config.seller_gstin || '';
+    document.getElementById('gstSellerLegalName').value = config.seller_legal_name || '';
+    document.getElementById('gstSellerAddress').value = config.seller_address || '';
+    document.getElementById('gstSellerLocation').value = config.seller_location || '';
+    document.getElementById('gstSellerPincode').value = config.seller_pincode || '';
+    document.getElementById('gstSellerPhone').value = config.seller_phone || '';
+    document.getElementById('gstSellerEmail').value = config.seller_email || '';
+}
+
+async function saveGstConfig() {
+    // Merge with existing FIN01 config to preserve approval fields
+    const existing = await (await fetch('/admin/api/config/FIN01')).json();
+    const config = Object.assign({}, existing, {
+        port_gst_state_code: document.getElementById('gstPortStateCode').value.trim(),
+        seller_gstin: document.getElementById('gstSellerGstin').value.trim(),
+        seller_legal_name: document.getElementById('gstSellerLegalName').value.trim(),
+        seller_address: document.getElementById('gstSellerAddress').value.trim(),
+        seller_location: document.getElementById('gstSellerLocation').value.trim(),
+        seller_pincode: document.getElementById('gstSellerPincode').value.trim(),
+        seller_phone: document.getElementById('gstSellerPhone').value.trim(),
+        seller_email: document.getElementById('gstSellerEmail').value.trim()
+    });
+    const res = await fetch('/admin/api/config/FIN01/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(config)
+    });
+    if (res.ok) alert('GST config saved!');
+    else alert('Failed to save GST config');
+}
+
+// ── Port Bank Accounts ──────────────────────────────────────────────────────
+const bankInputStyle = 'width:100%;padding:4px 6px;font-size:12px;border:1px solid #cbd5e0;border-radius:3px;box-sizing:border-box;';
+
+async function loadBankAccounts() {
+    const res = await fetch('/admin/api/port-banks');
+    const rows = await res.json();
+    const tbody = document.getElementById('banksTableBody');
+    tbody.innerHTML = '';
+    rows.forEach(r => addBankRowWithData(r));
+}
+
+function addBankRow() { addBankRowWithData({}); }
+
+function addBankRowWithData(r) {
+    const tbody = document.getElementById('banksTableBody');
+    const tr = document.createElement('tr');
+    if (r.id) tr.setAttribute('data-bank-id', r.id);
+    const esc = v => (v || '').toString().replace(/"/g, '&quot;');
+    tr.innerHTML = `
+        <td><input type="checkbox" class="bank-sel"></td>
+        <td><input type="text" class="bank-name" value="${esc(r.bank_name)}" placeholder="Bank name" style="${bankInputStyle}"></td>
+        <td><input type="text" class="bank-acct" value="${esc(r.account_number)}" placeholder="Account number" style="${bankInputStyle}"></td>
+        <td><input type="text" class="bank-ifsc" value="${esc(r.ifsc_code)}" placeholder="IFSC code" style="${bankInputStyle}"></td>
+        <td><input type="text" class="bank-holder" value="${esc(r.account_holder_name)}" placeholder="Account holder name" style="${bankInputStyle}"></td>
+        <td><input type="text" class="bank-branch" value="${esc(r.branch_name)}" placeholder="Branch" style="${bankInputStyle}"></td>
+        <td><input type="text" class="bank-pan" value="${esc(r.pan)}" placeholder="PAN" style="${bankInputStyle}"></td>
+        <td><input type="text" class="bank-cin" value="${esc(r.cin)}" placeholder="CIN" style="${bankInputStyle}"></td>
+        <td><input type="text" class="bank-corp-addr" value="${esc(r.corporate_office_address)}" placeholder="Corporate office address" style="${bankInputStyle}"></td>
+    `;
+    tbody.appendChild(tr);
+}
+
+async function saveBankAccounts() {
+    const rows = document.querySelectorAll('#banksTableBody tr');
+    for (let row of rows) {
+        const bankId = row.getAttribute('data-bank-id') || '';
+        const data = {
+            id: bankId,
+            bank_name: row.querySelector('.bank-name').value,
+            account_number: row.querySelector('.bank-acct').value,
+            ifsc_code: row.querySelector('.bank-ifsc').value,
+            account_holder_name: row.querySelector('.bank-holder').value,
+            branch_name: row.querySelector('.bank-branch').value,
+            pan: row.querySelector('.bank-pan').value,
+            cin: row.querySelector('.bank-cin').value,
+            corporate_office_address: row.querySelector('.bank-corp-addr').value
+        };
+        if (!data.bank_name && !data.account_number) continue;
+        const res = await fetch('/admin/api/port-banks/save', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        if (result.id && !bankId) row.setAttribute('data-bank-id', result.id);
+    }
+    await loadBankAccounts();
+}
+
+async function deleteSelectedBanks() {
+    const selected = document.querySelectorAll('.bank-sel:checked');
+    if (selected.length === 0) { alert('Select accounts to delete'); return; }
+    if (!confirm(`Delete ${selected.length} account(s)?`)) return;
+    for (let cb of selected) {
+        const row = cb.closest('tr');
+        const id = row.getAttribute('data-bank-id');
+        if (id) await fetch('/admin/api/port-banks/delete', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id})
+        });
+        row.remove();
+    }
+    document.getElementById('bankSelectAll').checked = false;
+}
+
+// ── SAP Config ───────────────────────────────────────────────────────────────
+function _sapFormData() {
+    return {
+        environment: document.getElementById('sapEnvironment').value,
+        base_url: document.getElementById('sapBaseUrl').value.trim(),
+        token_url: document.getElementById('sapTokenUrl').value.trim(),
+        client_id: document.getElementById('sapClientId').value.trim(),
+        client_secret: document.getElementById('sapClientSecret').value.trim(),
+        company_code: document.getElementById('sapCompanyCode').value.trim(),
+        default_payment_term: document.getElementById('sapPaymentTerm').value.trim(),
+        plant_code: document.getElementById('sapPlantCode').value.trim(),
+        business_place: document.getElementById('sapBusinessPlace').value.trim(),
+        section_code: document.getElementById('sapSectionCode').value.trim(),
+        credit_control_area: document.getElementById('sapCreditControlArea').value.trim(),
+        profit_center: document.getElementById('sapProfitCenter').value.trim(),
+        tax_code: document.getElementById('sapTaxCode').value.trim(),
+        currency: document.getElementById('sapCurrency').value.trim() || 'INR',
+        is_active: document.getElementById('sapIsActive').value,
+        tds_gl: document.getElementById('sapTdsGl').value.trim(),
+        tcs_gl: document.getElementById('sapTcsGl').value.trim(),
+        round_off_gl: document.getElementById('sapRoundOffGl').value.trim()
+    };
+}
+
+async function loadSapConfig() {
+    const res = await fetch('/admin/api/sap-config');
+    const cfg = await res.json();
+    document.getElementById('sapEnvironment').value = cfg.environment || 'production';
+    document.getElementById('sapBaseUrl').value = cfg.base_url || '';
+    document.getElementById('sapTokenUrl').value = cfg.token_url || '';
+    document.getElementById('sapClientId').value = cfg.client_id || '';
+    document.getElementById('sapClientSecret').value = cfg.client_secret || '';
+    document.getElementById('sapCompanyCode').value = cfg.company_code || '';
+    document.getElementById('sapPaymentTerm').value = cfg.default_payment_term || cfg.payment_term || '';
+    document.getElementById('sapPlantCode').value = cfg.plant_code || '';
+    document.getElementById('sapBusinessPlace').value = cfg.business_place || '';
+    document.getElementById('sapSectionCode').value = cfg.section_code || '';
+    document.getElementById('sapCreditControlArea').value = cfg.credit_control_area || '';
+    document.getElementById('sapProfitCenter').value = cfg.profit_center || '';
+    document.getElementById('sapTaxCode').value = cfg.tax_code || '';
+    document.getElementById('sapCurrency').value = cfg.currency || 'INR';
+    document.getElementById('sapIsActive').value = cfg.is_active ? '1' : '0';
+    document.getElementById('sapTdsGl').value = cfg.tds_gl || '';
+    document.getElementById('sapTcsGl').value = cfg.tcs_gl || '';
+    document.getElementById('sapRoundOffGl').value = cfg.round_off_gl || '';
+    document.getElementById('sapStatus').textContent = cfg.id ? 'Config loaded' : 'No config found — fill in to create';
+    document.getElementById('sapStatus').style.color = cfg.id ? '#38a169' : '#e53e3e';
+}
+
+async function saveSapConfig() {
+    const data = _sapFormData();
+    if (!data.company_code) { alert('Company Code is required'); return; }
+    const res = await fetch('/admin/api/sap-config/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    if (res.ok) {
+        alert('SAP config saved!');
+        loadSapConfig();
+    } else {
+        alert('Failed to save SAP config');
+    }
+}
+
+async function testSapConnection() {
+    const data = _sapFormData();
+    const status = document.getElementById('sapStatus');
+    status.textContent = 'Testing...';
+    status.style.color = '#7d6608';
+    try {
+        const res = await fetch('/admin/api/sap-config/test-connection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        status.textContent = result.message;
+        status.style.color = result.success ? '#38a169' : '#e53e3e';
+    } catch (e) {
+        status.textContent = 'Connection test failed: ' + e.message;
+        status.style.color = '#e53e3e';
+    }
+}
+
+// ── Vessel Closure ───────────────────────────────────────────────────────────
+async function loadLdudVessels() {
+    const res = await fetch('/admin/api/ldud/vessels');
+    const vessels = await res.json();
+    const tbody = document.getElementById('ldudVesselsBody');
+    if (!vessels.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#718096;padding:16px;">No closed or partial-closed vessels found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = vessels.map(v => {
+        const statusColor = v.doc_status === 'Closed' ? '#276749' : '#c05621';
+        const statusBg   = v.doc_status === 'Closed' ? '#c6f6d5' : '#feebc8';
+        return `<tr>
+            <td>${v.doc_num || ''}</td>
+            <td>${v.vessel_name || ''}</td>
+            <td>${v.vcn_doc_num || ''}</td>
+            <td>${v.operation_type || ''}</td>
+            <td><span style="background:${statusBg};color:${statusColor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${v.doc_status}</span></td>
+            <td>${v.created_by || ''}</td>
+            <td><button class="btn btn-danger" onclick="openVessel(${v.id}, '${(v.doc_num||'').replace(/'/g,"\\'")}')">Open Vessel</button></td>
+        </tr>`;
+    }).join('');
+}
+
+async function openVessel(id, docNum) {
+    if (!confirm(`Reset "${docNum}" back to Draft?\n\nThis will also permanently delete all Proof of Quantity documents uploaded for this vessel.`)) return;
+    const res = await fetch('/admin/api/ldud/open_vessel', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    const removed = data.docs_removed || 0;
+    if (removed > 0) alert(`Vessel reset to Draft. ${removed} proof document(s) deleted.`);
+    loadLdudVessels();
+}
+
+async function loadMbcApprovals() {
+    const res = await fetch('/admin/api/mbc/approvals');
+    const rows = await res.json();
+    const tbody = document.getElementById('mbcApprovalsBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#718096;padding:16px;">No approved MBC records found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${r.doc_num || ''}</td>
+            <td>${r.mbc_name || ''}</td>
+            <td>${r.operation_type || ''}</td>
+            <td>${r.cargo_name || ''}</td>
+            <td><span style="background:#c6f6d5;color:#276749;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.doc_status || 'Approved'}</span></td>
+            <td>${r.created_by || ''}</td>
+            <td><button class="btn btn-danger" onclick="resetMbcApproval(${r.id}, '${(r.doc_num||'').replace(/'/g,"\\'")}')">Reset Approval</button></td>
+        </tr>
+    `).join('');
+}
+
+async function resetMbcApproval(id, docNum) {
+    if (!confirm(`Reset "${docNum}" back to Draft?\n\nThis will also permanently delete all Proof of Quantity documents uploaded for this MBC record.`)) return;
+    const res = await fetch('/admin/api/mbc/reset_approval', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    const removed = data.docs_removed || 0;
+    if (removed > 0) alert(`MBC reset to Draft. ${removed} proof document(s) deleted.`);
+    loadMbcApprovals();
+}
+
+// ── Mail Tab ─────────────────────────────────────────────────────────────────
+async function loadSmtpConfig() {
+    const res = await fetch('/admin/api/smtp-config');
+    const cfg = await res.json();
+    document.getElementById('smtpEnabled').checked  = !!cfg.is_enabled;
+    document.getElementById('smtpHost').value        = cfg.host || 'smtp-mail.outlook.com';
+    document.getElementById('smtpPort').value        = cfg.port || 587;
+    document.getElementById('smtpUsername').value    = cfg.username || '';
+    document.getElementById('smtpPassword').value    = cfg.password || '';
+    document.getElementById('smtpFromEmail').value   = cfg.from_email || '';
+    document.getElementById('smtpFromName').value    = cfg.from_name || 'PORTMAN';
+    document.getElementById('smtpUseTls').checked    = cfg.use_tls !== false;
+    document.getElementById('smtpSchedule').value    = cfg.schedule_minutes || 5;
+}
+
+async function saveSmtpConfig() {
+    const status = document.getElementById('smtpStatus');
+    status.textContent = 'Saving...'; status.style.color = '#c05621';
+    const data = {
+        host:             document.getElementById('smtpHost').value.trim(),
+        port:             parseInt(document.getElementById('smtpPort').value) || 587,
+        username:         document.getElementById('smtpUsername').value.trim(),
+        password:         document.getElementById('smtpPassword').value,
+        from_email:       document.getElementById('smtpFromEmail').value.trim(),
+        from_name:        document.getElementById('smtpFromName').value.trim() || 'PORTMAN',
+        use_tls:          document.getElementById('smtpUseTls').checked,
+        is_enabled:       document.getElementById('smtpEnabled').checked,
+        schedule_minutes: parseInt(document.getElementById('smtpSchedule').value) || 5,
+    };
+    const res = await fetch('/admin/api/smtp-config/save', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    if (res.ok) { status.textContent = 'Saved!'; status.style.color = '#276749'; setTimeout(()=>status.textContent='',2000); }
+    else { status.textContent = 'Failed to save'; status.style.color = '#c53030'; }
+}
+
+async function loadMailQueue() {
+    const res = await fetch('/admin/api/mail-queue');
+    const rows = await res.json();
+    document.getElementById('mailQueueCount').textContent = `${rows.length} record(s)`;
+    const statusColors = { pending:'#c05621', sent:'#276749', failed:'#c53030' };
+    const statusBg     = { pending:'#feebc8', sent:'#c6f6d5',  failed:'#fed7d7' };
+    document.getElementById('mailQueueBody').innerHTML = rows.map(r => `
+        <tr>
+            <td>${r.id}</td>
+            <td style="font-size:11px;">${r.to_email}<br><span style="color:#718096;">${r.to_name||''}</span></td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(r.subject||'').replace(/"/g,'&quot;')}">${r.subject||''}</td>
+            <td><span style="background:${statusBg[r.status]||'#e2e8f0'};color:${statusColors[r.status]||'#2d3748'};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.status}</span></td>
+            <td style="text-align:center;">${r.retry_count}/${r.max_retries}</td>
+            <td style="font-size:11px;">${r.created_at||''}</td>
+            <td style="font-size:11px;">${r.sent_at||'—'}</td>
+            <td style="font-size:11px;color:#c53030;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(r.error_message||'').replace(/"/g,'&quot;')}">${r.error_message||''}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="8" style="text-align:center;color:#a0aec0;padding:16px;">No mail records found.</td></tr>';
+}
+
+async function retryFailed() {
+    const res = await fetch('/admin/api/mail-queue/retry', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await res.json();
+    if (d.success) { alert(`Reset ${d.reset} failed mail(s) to pending.`); loadMailQueue(); }
+}
+
+async function sendMailNow() {
+    const status = document.getElementById('smtpStatus');
+    status.textContent = 'Sending...'; status.style.color = '#c05621';
+    const res = await fetch('/admin/api/mail-queue/send-now', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    if (res.ok) { status.textContent = 'Done!'; status.style.color = '#276749'; loadMailQueue(); setTimeout(()=>status.textContent='',3000); }
+    else { const d=await res.json(); status.textContent=d.error||'Failed'; status.style.color='#c53030'; }
+}
+
+// ── Logs Tab ─────────────────────────────────────────────────────────────────
+let _logEntries = [];
+let _logFilter = 'ALL';
+
+const STATUS_META = {
+    '500': { label: '500 Server Error',   color: '#e53e3e', bg: '#fed7d7' },
+    '502': { label: '502 Bad Gateway',    color: '#e53e3e', bg: '#fed7d7' },
+    '503': { label: '503 Unavailable',    color: '#e53e3e', bg: '#fed7d7' },
+    '504': { label: '504 Timeout',        color: '#e53e3e', bg: '#fed7d7' },
+    '404': { label: '404 Not Found',      color: '#c05621', bg: '#feebc8' },
+    '403': { label: '403 Forbidden',      color: '#c05621', bg: '#feebc8' },
+    '401': { label: '401 Unauthorized',   color: '#c05621', bg: '#feebc8' },
+    '400': { label: '400 Bad Request',    color: '#c05621', bg: '#feebc8' },
+    '405': { label: '405 Method N/A',     color: '#c05621', bg: '#feebc8' },
+    '200': { label: '200 OK',             color: '#276749', bg: '#c6f6d5' },
+    '201': { label: '201 Created',        color: '#276749', bg: '#c6f6d5' },
+    '301': { label: '301 Redirect',       color: '#2b6cb0', bg: '#bee3f8' },
+    '302': { label: '302 Redirect',       color: '#2b6cb0', bg: '#bee3f8' },
+    'none': { label: 'No HTTP Status',    color: '#4a5568', bg: '#e2e8f0' },
+};
+
+function _statusMeta(code) {
+    const s = String(code ?? 'none');
+    if (STATUS_META[s]) return { ...STATUS_META[s], code: s };
+    const grp = s.charAt(0);
+    if (grp === '5') return { label: s + ' Server Error',  color: '#e53e3e', bg: '#fed7d7', code: s };
+    if (grp === '4') return { label: s + ' Client Error',  color: '#c05621', bg: '#feebc8', code: s };
+    if (grp === '3') return { label: s + ' Redirect',      color: '#2b6cb0', bg: '#bee3f8', code: s };
+    if (grp === '2') return { label: s + ' OK',            color: '#276749', bg: '#c6f6d5', code: s };
+    return { label: s, color: '#4a5568', bg: '#e2e8f0', code: s };
+}
+
+async function loadLogs() {
+    document.getElementById('logTableBody').innerHTML =
+        '<tr><td colspan="4" style="text-align:center;color:#718096;padding:16px;">Loading…</td></tr>';
+    try {
+        const res = await fetch('/admin/api/logs');
+        const data = await res.json();
+        if (data.error) { alert('Failed to load logs: ' + data.error); return; }
+        _logEntries = data.entries || [];
+        renderLogStats(data.stats || {});
+        renderLogDateBars(data.stats.by_date || []);
+        renderLogTable();
+        const kb = ((data.stats.file_size || 0) / 1024).toFixed(1);
+        document.getElementById('logFileSize').textContent = `File: ${kb} KB`;
+    } catch (e) {
+        document.getElementById('logTableBody').innerHTML =
+            `<tr><td colspan="4" style="text-align:center;color:#e53e3e;padding:16px;">Error: ${e.message}</td></tr>`;
+    }
+}
+
+function renderLogStats(stats) {
+    const cards = document.getElementById('logStatsCards');
+    const filterSpan = document.getElementById('logStatusFilters');
+
+    // Total card (always first)
+    let html = `<div class="log-stat-card" style="border-color:#4a90d9;min-width:110px;">
+        <div class="log-stat-num">${stats.total ?? '—'}</div>
+        <div class="log-stat-label">Total Entries</div>
+    </div>`;
+
+    let filterHtml = '';
+    const counts = stats.status_counts || {};
+    const allCodes = Object.keys(counts).sort((a, b) => parseInt(a) - parseInt(b));
+
+    allCodes.forEach(code => {
+        const m = _statusMeta(code);
+        html += `<div class="log-stat-card" style="border-color:${m.color};min-width:110px;cursor:pointer;" onclick="setLogFilter('${code}')">
+            <div class="log-stat-num" style="color:${m.color};">${counts[code]}</div>
+            <div class="log-stat-label">${m.label}</div>
+        </div>`;
+        filterHtml += `<button class="log-filter-btn" data-status="${code}" onclick="setLogFilter('${code}')"
+            style="background:${m.bg};color:${m.color};border-color:${m.color};">${code}</button> `;
+    });
+
+    if (stats.no_status) {
+        const m = _statusMeta('none');
+        html += `<div class="log-stat-card" style="border-color:${m.color};min-width:110px;cursor:pointer;" onclick="setLogFilter('none')">
+            <div class="log-stat-num" style="color:${m.color};">${stats.no_status}</div>
+            <div class="log-stat-label">${m.label}</div>
+        </div>`;
+        filterHtml += `<button class="log-filter-btn" data-status="none" onclick="setLogFilter('none')"
+            style="background:${m.bg};color:${m.color};border-color:${m.color};">No Status</button>`;
+    }
+
+    cards.innerHTML = html;
+    filterSpan.innerHTML = filterHtml;
+    // Re-sync active state
+    _syncFilterActive();
+}
+
+function renderLogDateBars(byDate) {
+    const wrap = document.getElementById('logByDate');
+    const container = document.getElementById('logDateBars');
+    if (!byDate.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+
+    // Collect all status codes seen across all dates
+    const allCodes = new Set();
+    byDate.forEach(d => Object.keys(d).filter(k => k !== 'date').forEach(k => allCodes.add(k)));
+    const codeList = [...allCodes].filter(k => k !== 'none').sort((a, b) => parseInt(a) - parseInt(b));
+    if (allCodes.has('none')) codeList.push('none');
+
+    const maxTotal = Math.max(...byDate.map(d => codeList.reduce((s, k) => s + (d[k] || 0), 0)), 1);
+
+    container.innerHTML = byDate.map(d => {
+        const total = codeList.reduce((s, k) => s + (d[k] || 0), 0);
+        const pct = v => ((v / maxTotal) * 100).toFixed(1);
+        const segs = codeList.map(k => {
+            if (!d[k]) return '';
+            const m = _statusMeta(k === 'none' ? null : k);
+            return `<div class="log-date-bar-seg" style="width:${pct(d[k])}%;background:${m.color};" title="${m.label}: ${d[k]}"></div>`;
+        }).join('');
+        return `<div class="log-date-bar-row">
+            <div class="log-date-label">${d.date}</div>
+            <div class="log-date-bar-wrap">${segs}</div>
+            <div class="log-date-count">${total}</div>
+        </div>`;
+    }).join('');
+}
+
+function _syncFilterActive() {
+    document.querySelectorAll('.log-filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.status === _logFilter);
+    });
+}
+
+function setLogFilter(status) {
+    _logFilter = status;
+    _syncFilterActive();
+    renderLogTable();
+}
+
+function renderLogTable() {
+    const q = (document.getElementById('logSearch').value || '').toLowerCase();
+    const filtered = _logEntries.filter(e => {
+        if (_logFilter !== 'ALL') {
+            const s = e.http_status ? String(e.http_status) : 'none';
+            if (s !== _logFilter) return false;
+        }
+        if (q && !e.message.toLowerCase().includes(q) && !e.source.toLowerCase().includes(q) && !e.logger.toLowerCase().includes(q)) return false;
+        return true;
+    });
+    document.getElementById('logEntryCount').textContent = `${filtered.length} entr${filtered.length === 1 ? 'y' : 'ies'}`;
+    const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    if (!filtered.length) {
+        document.getElementById('logTableBody').innerHTML =
+            '<tr><td colspan="4" style="text-align:center;color:#a0aec0;padding:20px;">No entries match the current filter.</td></tr>';
+        return;
+    }
+    document.getElementById('logTableBody').innerHTML = filtered.map((e, i) => {
+        const sm = _statusMeta(e.http_status ?? null);
+        const statusBadge = `<span class="log-status-badge" style="background:${sm.bg};color:${sm.color};">${e.http_status ?? '—'}</span>`;
+        const tb = e.traceback ? e.traceback.trim() : '';
+        const tbHtml = tb ? `<br><span class="log-tb-toggle" onclick="toggleLogTb(${i})">&#9660; traceback</span>
+            <pre class="log-tb-pre" id="log-tb-${i}">${esc(tb)}</pre>` : '';
+        return `<tr>
+            <td style="white-space:nowrap;font-size:11px;color:#718096;">${esc(e.timestamp)}</td>
+            <td>${statusBadge}</td>
+            <td style="font-size:11px;color:#4a5568;white-space:nowrap;">${esc(e.source)}</td>
+            <td style="font-size:12px;">${esc(e.message)}${tbHtml}</td>
+        </tr>`;
+    }).join('');
+}
+
+function toggleLogTb(i) {
+    const pre = document.getElementById(`log-tb-${i}`);
+    if (!pre) return;
+    const isOpen = pre.style.display === 'block';
+    pre.style.display = isOpen ? 'none' : 'block';
+    const toggle = pre.previousElementSibling;
+    if (toggle) toggle.textContent = (isOpen ? '▼' : '▲') + ' traceback';
+}
+
+async function clearLogs() {
+    if (!confirm('Clear the entire log file? This cannot be undone.')) return;
+    const res = await fetch('/admin/api/logs/clear', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await res.json();
+    if (d.success) { loadLogs(); }
+    else alert('Failed to clear logs: ' + (d.error || 'Unknown error'));
+}
+
+async function loadNginxConfig() {
+    try {
+        const res = await fetch('/admin/api/aud-config');
+        const cfg = await res.json();
+        document.getElementById('nginxLogPath').value = cfg.nginx_log_path || '';
+    } catch (e) { /* ignore */ }
+}
+
+async function saveNginxConfig() {
+    const path = document.getElementById('nginxLogPath').value.trim();
+    const status = document.getElementById('nginxConfigStatus');
+    try {
+        const res = await fetch('/admin/api/aud-config/save', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({nginx_log_path: path})
+        });
+        const d = await res.json();
+        if (d.success) {
+            status.textContent = 'Saved!'; status.style.color = '#276749';
+            setTimeout(() => status.textContent = '', 2000);
+        } else { status.textContent = 'Failed'; status.style.color = '#c53030'; }
+    } catch (e) { status.textContent = 'Error'; status.style.color = '#c53030'; }
+}
+
+// Initialize
+loadUsers().then(() => loadAllConfigs());
+loadModules();
+</script>
+{% endblock %}

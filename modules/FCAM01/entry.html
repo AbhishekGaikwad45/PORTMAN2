@@ -1,0 +1,635 @@
+{% extends "base.html" %}
+
+{% block title %}Customer Agreement Entry - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .form-section { background: white; padding: 15px; margin-bottom: 15px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .form-section h3 { margin: 0 0 10px 0; font-size: 14px; border-bottom: 2px solid #d90429; padding-bottom: 5px; }
+    .form-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label { font-size: 11px; font-weight: 600; margin-bottom: 3px; }
+    .form-group input, .form-group select { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-primary { background: #3498db; color: white; }
+    .btn-success { background: #27ae60; color: white; }
+    .btn-danger { background: #e74c3c; color: white; }
+    .btn-secondary { background: #95a5a6; color: white; }
+    .btn-warning { background: #f39c12; color: white; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; }
+    .data-table input, .data-table select { width: 100%; padding: 4px; font-size: 11px; border: 1px solid #ddd; }
+    .toolbar { margin-bottom: 10px; }
+    .cargo-badge { display: inline-block; background: #ebf5fb; color: #2e86c1; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: 5px; cursor: pointer; }
+    .cargo-badge:hover { background: #d4e6f1; }
+
+    /* Modal styles */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+    .modal-overlay.active { display: flex; }
+    .modal-box { background: white; border-radius: 8px; width: 700px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+    .modal-header { padding: 15px 20px; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h3 { margin: 0; font-size: 14px; color: #2c3e50; }
+    .modal-header .close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #7f8c8d; padding: 0 5px; }
+    .modal-body { padding: 15px 20px; overflow-y: auto; flex: 1; }
+    .modal-footer { padding: 12px 20px; border-top: 1px solid #ecf0f1; display: flex; justify-content: space-between; align-items: center; }
+    .cargo-rate-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .cargo-rate-table th { background: #34495e; color: white; padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 600; }
+    .cargo-rate-table td { padding: 6px 10px; border-bottom: 1px solid #ecf0f1; }
+    .cargo-rate-table input { padding: 5px 8px; font-size: 12px; border: 1px solid #ddd; border-radius: 3px; width: 100px; }
+    .cargo-rate-table tr:hover { background: #f8f9fa; }
+    .copy-bar { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #ecf0f1; margin-bottom: 10px; }
+    .copy-bar label { font-size: 11px; font-weight: 600; color: #2c3e50; }
+    .copy-bar input { padding: 5px 8px; font-size: 12px; border: 1px solid #ddd; border-radius: 3px; width: 100px; }
+</style>
+
+<div class="module-header">
+    <h2>Customer Agreement Entry</h2>
+    <div>
+        <span class="module-code" style="margin-right: 10px;">FCAM01</span>
+        <button class="btn btn-secondary" onclick="location.href='/module/FCAM01/'">Back to List</button>
+    </div>
+</div>
+
+<div class="form-section">
+    <h3>Agreement Header</h3>
+    <form id="headerForm">
+        <input type="hidden" id="agreement_id" value="{{ header.id if header else '' }}">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Agreement Code</label>
+                <input type="text" id="agreement_code" value="{{ header.agreement_code if header else '' }}" readonly>
+            </div>
+            <div class="form-group">
+                <label>Agreement Name *</label>
+                <input type="text" id="agreement_name" value="{{ header.agreement_name if header else '' }}" required>
+            </div>
+            <div class="form-group">
+                <label>Customer Type *</label>
+                <select id="customer_type" required onchange="loadCustomers()">
+                    <option value="">--Select--</option>
+                    <option value="Customer" {% if header and header.customer_type == 'Customer' %}selected{% endif %}>Customer</option>
+                    <option value="Agent" {% if header and header.customer_type == 'Agent' %}selected{% endif %}>Agent</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Customer *</label>
+                <select id="customer_id" required>
+                    <option value="">--Select--</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Currency</label>
+                <select id="currency_code">
+                    {% for curr in currencies %}
+                    <option value="{{ curr.currency_code }}" {% if header and header.currency_code == curr.currency_code %}selected{% endif %}>{{ curr.currency_code }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Valid From *</label>
+                <input type="date" id="valid_from" value="{{ header.valid_from if header else '' }}" required>
+            </div>
+            <div class="form-group">
+                <label>Valid To</label>
+                <input type="date" id="valid_to" value="{{ header.valid_to if header else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Status</label>
+                <select id="is_active">
+                    <option value="1" {% if not header or header.is_active %}selected{% endif %}>Active</option>
+                    <option value="0" {% if header and not header.is_active %}selected{% endif %}>Inactive</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group" style="grid-column: span 4;">
+                <label>Remarks</label>
+                <input type="text" id="remarks" value="{{ header.remarks if header else '' }}">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Header</button>
+    </form>
+</div>
+
+<div class="form-section">
+    <h3>Agreement Lines</h3>
+    <div class="toolbar">
+        <button class="btn btn-success" onclick="addLine()">+ Add Service</button>
+        <button class="btn btn-danger" onclick="deleteSelectedLines()">Delete Selected</button>
+    </div>
+    <table class="data-table" id="linesTable">
+        <thead>
+            <tr>
+                <th style="width:30px"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
+                <th>Service Type *</th>
+                <th>Rate *</th>
+                <th>UOM</th>
+                <th>Currency</th>
+                <th>Min Charge</th>
+                <th>Max Charge</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody id="linesBody">
+            {% for line in lines %}
+            {% if not line.cargo_id %}
+            <tr data-id="{{ line.id }}">
+                <td><input type="checkbox" class="line-select"></td>
+                <td>
+                    <select name="service_type_id[]" required onchange="onServiceTypeChange(this)">
+                        {% for svc in service_types %}
+                        <option value="{{ svc.id }}" {% if line.service_type_id == svc.id %}selected{% endif %}>{{ svc.service_name }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+                <td><input type="number" step="0.01" name="rate[]" value="{{ line.rate }}" required></td>
+                <td><input type="text" name="uom[]" value="{{ line.uom }}"></td>
+                <td><input type="text" name="currency[]" value="{{ line.currency_code }}"></td>
+                <td><input type="number" step="0.01" name="min_charge[]" value="{{ line.min_charge }}"></td>
+                <td><input type="number" step="0.01" name="max_charge[]" value="{{ line.max_charge }}"></td>
+                <td><input type="text" name="remarks[]" value="{{ line.remarks }}"></td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    <button class="btn btn-primary" onclick="saveAllLines()" style="margin-top: 10px;">Save All Lines</button>
+</div>
+
+{% if cargo_service_ids %}
+<div class="form-section">
+    <h3>Cargo Handling Rates</h3>
+    <p style="font-size:11px; color:#7f8c8d; margin:0 0 10px 0;">Cargo handling services that have different rates per cargo type. Click to set rates.</p>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        {% for svc in service_types %}
+        {% if svc.id in cargo_service_ids %}
+        <button class="btn btn-warning" onclick="openCargoModal({{ svc.id }}, '{{ svc.service_name }}', '{{ svc.uom or 'MT' }}')" style="padding:8px 16px; font-size:12px;">
+            {{ svc.service_name }}
+            <span class="cargo-badge" id="cargoBadge_{{ svc.id }}">
+                {% set ns = namespace(count=0) %}
+                {% for line in lines %}{% if line.service_type_id == svc.id and line.cargo_id %}{% set ns.count = ns.count + 1 %}{% endif %}{% endfor %}
+                {{ ns.count }} rates
+            </span>
+        </button>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Cargo Rates Modal -->
+<div class="modal-overlay" id="cargoModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="cargoModalTitle">Cargo Handling Rates</h3>
+            <button class="close-btn" onclick="closeCargoModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="copy-bar">
+                <label>Copy to all:</label>
+                <input type="number" step="0.01" id="copyRateInput" placeholder="Rate">
+                <input type="number" step="0.01" id="copyMinInput" placeholder="Min Charge">
+                <input type="number" step="0.01" id="copyMaxInput" placeholder="Max Charge">
+                <button class="btn btn-primary" onclick="copyRateToAll()" style="padding:4px 10px;">Apply to All</button>
+                <span style="font-size:10px; color:#7f8c8d; margin-left:5px;">Sets values for all visible rows</span>
+            </div>
+            <div style="margin-bottom:10px;">
+                <input type="text" id="cargoSearchInput" placeholder="Search cargo name, type or category..." style="width:100%; padding:7px 10px; font-size:12px; border:1px solid #ddd; border-radius:4px;" oninput="filterCargoRows()">
+            </div>
+            <table class="cargo-rate-table">
+                <thead>
+                    <tr>
+                        <th style="width:30px">#</th>
+                        <th>Cargo Type</th>
+                        <th>Cargo Category</th>
+                        <th>Cargo Name</th>
+                        <th style="width:120px">Rate *</th>
+                        <th style="width:120px">Min Charge</th>
+                        <th style="width:120px">Max Charge</th>
+                    </tr>
+                </thead>
+                <tbody id="cargoRatesBody"></tbody>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <span id="cargoModalInfo" style="font-size:11px; color:#7f8c8d;"></span>
+            <div>
+                <button class="btn btn-secondary" onclick="closeCargoModal()">Cancel</button>
+                <button id="btnSaveCargoRates" class="btn btn-primary" onclick="saveCargoRates()">Save Cargo Rates</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+try { addToRecent('FCAM01', 'Customer Agreements'); } catch(e) {}
+
+var agents = {{ agents|tojson|safe }} || [];
+var customers = {{ customers|tojson|safe }} || [];
+var serviceTypes = {{ service_types|tojson|safe }} || [];
+var currencies = {{ currencies|tojson|safe }} || [];
+var cargoList = {{ cargo_list|tojson|safe }} || [];
+var cargoServiceIds = {{ cargo_service_ids|tojson|safe }} || [];
+var currentAgreementId = document.getElementById('agreement_id').value;
+
+// Store existing cargo lines from server (keyed by service_type_id -> cargo_id -> line data)
+var existingCargoLines = {};
+{% for line in lines %}
+{% if line.cargo_id %}
+(function() {
+    var stId = {{ line.service_type_id }};
+    var cId = {{ line.cargo_id }};
+    if (!existingCargoLines[stId]) existingCargoLines[stId] = {};
+    existingCargoLines[stId][cId] = {
+        id: {{ line.id }},
+        rate: {{ line.rate or 'null' }},
+        min_charge: {{ line.min_charge or 'null' }},
+        max_charge: {{ line.max_charge or 'null' }}
+    };
+})();
+{% endif %}
+{% endfor %}
+
+var currentCargoServiceId = null;
+var currentCargoUom = 'MT';
+
+function isCargoService(serviceTypeId) {
+    return cargoServiceIds.includes(parseInt(serviceTypeId));
+}
+
+function onServiceTypeChange(select) {
+    const row = select.closest('tr');
+    const stId = parseInt(select.value);
+    const svc = serviceTypes.find(s => s.id === stId);
+
+    // Auto-fill UOM
+    if (svc && svc.uom) {
+        const uomInput = row.querySelector('[name="uom[]"]');
+        if (uomInput) uomInput.value = svc.uom;
+    }
+
+    // If user selects a cargo handling service in the regular table, warn them
+    if (isCargoService(stId)) {
+        alert('Cargo Handling services have per-cargo rates. Use the "Cargo Handling Rates" section below instead.');
+        // Reset to first non-cargo service
+        const firstNonCargo = serviceTypes.find(s => !cargoServiceIds.includes(s.id));
+        if (firstNonCargo) select.value = firstNonCargo.id;
+    }
+}
+
+// --- Cargo Modal ---
+function openCargoModal(serviceTypeId, serviceName, uom) {
+    if (!currentAgreementId) {
+        alert('Please save header first');
+        return;
+    }
+    currentCargoServiceId = serviceTypeId;
+    currentCargoUom = uom;
+    document.getElementById('cargoModalTitle').textContent = serviceName + ' - Cargo Rates';
+    document.getElementById('copyRateInput').value = '';
+    document.getElementById('copyMinInput').value = '';
+    document.getElementById('copyMaxInput').value = '';
+
+    const tbody = document.getElementById('cargoRatesBody');
+    const existing = existingCargoLines[serviceTypeId] || {};
+    tbody.innerHTML = '';
+
+    cargoList.forEach((cargo, idx) => {
+        const saved = existing[cargo.id] || {};
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-cargo-id', cargo.id);
+        tr.setAttribute('data-cargo-name', cargo.cargo_name);
+        tr.setAttribute('data-line-id', saved.id || '');
+        tr.innerHTML = `
+            <td style="color:#999">${idx + 1}</td>
+            <td>${esc(cargo.cargo_type || '')}</td>
+            <td>${esc(cargo.cargo_category || '')}</td>
+            <td style="font-weight:600">${esc(cargo.cargo_name)}</td>
+            <td><input type="number" step="0.01" class="cargo-rate" value="${saved.rate != null ? saved.rate : ''}"></td>
+            <td><input type="number" step="0.01" class="cargo-min" value="${saved.min_charge != null ? saved.min_charge : ''}"></td>
+            <td><input type="number" step="0.01" class="cargo-max" value="${saved.max_charge != null ? saved.max_charge : ''}"></td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    const filledCount = Object.keys(existing).length;
+    document.getElementById('cargoModalInfo').textContent = `${cargoList.length} cargo types | ${filledCount} with rates`;
+    document.getElementById('cargoSearchInput').value = '';
+    document.getElementById('cargoModal').classList.add('active');
+}
+
+function closeCargoModal() {
+    document.getElementById('cargoModal').classList.remove('active');
+    currentCargoServiceId = null;
+}
+
+function copyRateToAll() {
+    const rate = document.getElementById('copyRateInput').value;
+    const min  = document.getElementById('copyMinInput').value;
+    const max  = document.getElementById('copyMaxInput').value;
+    if (!rate && !min && !max) { alert('Enter at least one value to copy'); return; }
+    document.querySelectorAll('#cargoRatesBody tr').forEach(row => {
+        if (row.style.display !== 'none') {
+            if (rate) row.querySelector('.cargo-rate').value = rate;
+            if (min)  row.querySelector('.cargo-min').value  = min;
+            if (max)  row.querySelector('.cargo-max').value  = max;
+        }
+    });
+}
+
+function filterCargoRows() {
+    const term = document.getElementById('cargoSearchInput').value.toLowerCase().trim();
+    const rows = document.querySelectorAll('#cargoRatesBody tr');
+    let visible = 0;
+    rows.forEach(row => {
+        if (!term) {
+            row.style.display = '';
+            visible++;
+        } else {
+            const text = row.textContent.toLowerCase();
+            const match = text.includes(term);
+            row.style.display = match ? '' : 'none';
+            if (match) visible++;
+        }
+    });
+    const info = document.getElementById('cargoModalInfo');
+    const existing = existingCargoLines[currentCargoServiceId] || {};
+    const filledCount = Object.keys(existing).length;
+    if (term) {
+        info.textContent = `Showing ${visible} of ${cargoList.length} cargo types | ${filledCount} with rates`;
+    } else {
+        info.textContent = `${cargoList.length} cargo types | ${filledCount} with rates`;
+    }
+}
+
+function esc(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+async function saveCargoRates() {
+    if (!currentAgreementId || !currentCargoServiceId) return;
+
+    const currency = document.getElementById('currency_code').value;
+    const rows = document.querySelectorAll('#cargoRatesBody tr');
+    const lines = [];
+    const rowMap = {};  // cargo_id -> row element
+
+    for (let row of rows) {
+        const rate = row.querySelector('.cargo-rate').value.trim();
+        if (!rate) continue;
+
+        const cargoId = row.getAttribute('data-cargo-id');
+        const lineData = {
+            id: row.getAttribute('data-line-id') || '',
+            agreement_id: currentAgreementId,
+            service_type_id: currentCargoServiceId,
+            rate: rate,
+            uom: currentCargoUom,
+            currency_code: currency,
+            min_charge: row.querySelector('.cargo-min').value.trim() || null,
+            max_charge: row.querySelector('.cargo-max').value.trim() || null,
+            cargo_id: cargoId,
+            cargo_name: row.getAttribute('data-cargo-name')
+        };
+        lines.push(lineData);
+        rowMap[cargoId] = row;
+    }
+
+    if (lines.length === 0) { alert('No rates to save'); return; }
+
+    const btn = document.getElementById('btnSaveCargoRates');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Saving ' + lines.length + ' rates...';
+
+    try {
+        const res = await fetch('/api/module/FCAM01/save-lines-batch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ lines })
+        });
+        if (!res.ok) { alert('Server error: ' + res.status); return; }
+        const result = await res.json();
+        if (!result.success) { alert('Save failed: ' + (result.error || 'Unknown error')); return; }
+
+        let saved = 0, errors = 0;
+        for (const r of (result.results || [])) {
+            if (r.success) {
+                saved++;
+                const row = rowMap[r.cargo_id];
+                if (row) row.setAttribute('data-line-id', r.id);
+                if (!existingCargoLines[currentCargoServiceId]) existingCargoLines[currentCargoServiceId] = {};
+                const lineData = lines.find(l => l.cargo_id == r.cargo_id);
+                existingCargoLines[currentCargoServiceId][r.cargo_id] = {
+                    id: r.id,
+                    rate: parseFloat(lineData.rate),
+                    min_charge: lineData.min_charge ? parseFloat(lineData.min_charge) : null,
+                    max_charge: lineData.max_charge ? parseFloat(lineData.max_charge) : null
+                };
+            } else {
+                errors++;
+            }
+        }
+
+        if (saved > 0) {
+            const badge = document.getElementById('cargoBadge_' + currentCargoServiceId);
+            if (badge) {
+                const count = Object.keys(existingCargoLines[currentCargoServiceId] || {}).length;
+                badge.textContent = count + ' rates';
+            }
+            alert(`Saved ${saved} cargo rate(s)` + (errors ? ` (${errors} errors)` : ''));
+        }
+        if (!errors) closeCargoModal();
+    } catch(e) {
+        alert('Error saving: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
+// --- Standard Lines ---
+function loadCustomers() {
+    const type = document.getElementById('customer_type').value;
+    const customerSelect = document.getElementById('customer_id');
+    customerSelect.innerHTML = '<option value="">--Select--</option>';
+
+    const list = type === 'Customer' ? customers : agents;
+    if (list && Array.isArray(list)) {
+        list.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            customerSelect.appendChild(opt);
+        });
+    }
+}
+
+if (document.getElementById('customer_type').value) {
+    loadCustomers();
+}
+
+{% if header %}
+document.getElementById('customer_id').value = {{ header.customer_id }};
+{% endif %}
+
+document.getElementById('headerForm').onsubmit = async function(e) {
+    e.preventDefault();
+
+    const data = {
+        id: currentAgreementId || '',
+        agreement_name: document.getElementById('agreement_name').value,
+        customer_type: document.getElementById('customer_type').value,
+        customer_id: document.getElementById('customer_id').value,
+        customer_name: document.getElementById('customer_id').selectedOptions[0].textContent,
+        currency_code: document.getElementById('currency_code').value,
+        valid_from: document.getElementById('valid_from').value,
+        valid_to: document.getElementById('valid_to').value,
+        is_active: document.getElementById('is_active').value,
+        remarks: document.getElementById('remarks').value
+    };
+
+    const res = await fetch('/api/module/FCAM01/save-header', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (result.success) {
+        alert('Header saved successfully');
+        currentAgreementId = result.id;
+        document.getElementById('agreement_id').value = result.id;
+        document.getElementById('agreement_code').value = result.agreement_code;
+    } else {
+        alert('Error: ' + result.error);
+    }
+};
+
+function addLine() {
+    if (!currentAgreementId) {
+        alert('Please save header first');
+        return;
+    }
+    const tbody = document.getElementById('linesBody');
+    const tr = document.createElement('tr');
+    const currency = document.getElementById('currency_code').value;
+
+    // Filter out cargo handling services from dropdown
+    const nonCargoServices = serviceTypes.filter(s => !cargoServiceIds.includes(s.id));
+
+    tr.innerHTML = `
+        <td><input type="checkbox" class="line-select"></td>
+        <td>
+            <select name="service_type_id[]" required onchange="onServiceTypeChange(this)">
+                ${nonCargoServices.map(s => `<option value="${s.id}">${s.service_name}</option>`).join('')}
+            </select>
+        </td>
+        <td><input type="number" step="0.01" name="rate[]" required></td>
+        <td><input type="text" name="uom[]"></td>
+        <td><input type="text" name="currency[]" value="${currency}"></td>
+        <td><input type="number" step="0.01" name="min_charge[]"></td>
+        <td><input type="number" step="0.01" name="max_charge[]"></td>
+        <td><input type="text" name="remarks[]"></td>
+    `;
+    tbody.appendChild(tr);
+
+    // Auto-fill UOM from first service
+    const select = tr.querySelector('[name="service_type_id[]"]');
+    const svc = serviceTypes.find(s => s.id === parseInt(select.value));
+    if (svc && svc.uom) tr.querySelector('[name="uom[]"]').value = svc.uom;
+}
+
+async function saveAllLines() {
+    if (!currentAgreementId) {
+        alert('Please save header first');
+        return;
+    }
+    const toNullable = (value) => {
+        const trimmed = String(value || '').trim();
+        return trimmed === '' ? null : trimmed;
+    };
+
+    const rows = document.querySelectorAll('#linesBody tr');
+    const lines = [];
+    const rowList = [];
+
+    for (let row of rows) {
+        const data = {
+            id: row.getAttribute('data-id') || '',
+            agreement_id: currentAgreementId,
+            service_type_id: toNullable(row.querySelector('[name="service_type_id[]"]').value),
+            rate: toNullable(row.querySelector('[name="rate[]"]').value),
+            uom: toNullable(row.querySelector('[name="uom[]"]').value),
+            currency_code: toNullable(row.querySelector('[name="currency[]"]').value),
+            min_charge: toNullable(row.querySelector('[name="min_charge[]"]').value),
+            max_charge: toNullable(row.querySelector('[name="max_charge[]"]').value),
+            remarks: toNullable(row.querySelector('[name="remarks[]"]').value),
+            cargo_id: null,
+            cargo_name: null
+        };
+        if (data.rate === null) continue;
+        lines.push(data);
+        rowList.push(row);
+    }
+
+    if (lines.length === 0) return;
+
+    const res = await fetch('/api/module/FCAM01/save-lines-batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ lines })
+    });
+    const result = await res.json();
+
+    let saved = 0;
+    for (let i = 0; i < (result.results || []).length; i++) {
+        const r = result.results[i];
+        if (r.success) {
+            saved++;
+            if (!rowList[i].getAttribute('data-id')) rowList[i].setAttribute('data-id', r.id);
+        }
+    }
+
+    if (saved > 0) {
+        alert(`Saved ${saved} line(s)`);
+        location.reload();
+    }
+}
+
+function toggleSelectAll(checkbox) {
+    document.querySelectorAll('.line-select').forEach(cb => cb.checked = checkbox.checked);
+}
+
+async function deleteSelectedLines() {
+    const selected = document.querySelectorAll('.line-select:checked');
+    if (selected.length === 0) {
+        alert('Select lines to delete');
+        return;
+    }
+    if (!confirm(`Delete ${selected.length} line(s)?`)) return;
+
+    for (let checkbox of selected) {
+        const row = checkbox.closest('tr');
+        const id = row.getAttribute('data-id');
+        if (id) {
+            await fetch('/api/module/FCAM01/delete-line', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id})
+            });
+        }
+        row.remove();
+    }
+}
+
+// Close modal on overlay click
+document.getElementById('cargoModal').addEventListener('click', function(e) {
+    if (e.target === this) closeCargoModal();
+});
+</script>
+{% endblock %}

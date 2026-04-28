@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}Reports — RP01{% endblock %}
+
+{% block head %}
+<style>
+    .reports-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 28px;
+        padding-bottom: 14px;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .reports-header h2 {
+        margin: 0;
+        font-size: 20px;
+        color: var(--text-primary);
+    }
+    .module-badge {
+        background: #4a90d9;
+        color: #fff;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .report-cards {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 20px;
+        padding: 4px 0;
+    }
+    .report-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 24px 20px 20px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+    }
+    .report-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.13);
+        border-color: #4a90d9;
+    }
+    .report-card .card-icon {
+        font-size: 32px;
+        line-height: 1;
+        height: 48px;
+        display: flex;
+        align-items: center;
+    }
+    .report-card .card-icon img {
+        height: 44px;
+        width: auto;
+        object-fit: contain;
+    }
+    .report-card .card-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+    .report-card .card-desc {
+        font-size: 11px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+    .report-card .card-arrow {
+        margin-top: auto;
+        font-size: 11px;
+        color: #4a90d9;
+        font-weight: 600;
+    }
+    /* Placeholder cards */
+    .report-card.coming-soon {
+        opacity: 0.5;
+        cursor: default;
+        pointer-events: none;
+    }
+    .report-card.coming-soon .card-title::after {
+        content: ' (Coming Soon)';
+        font-size: 9px;
+        font-weight: 400;
+        color: var(--text-secondary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header" style="display:flex;align-items:center;gap:12px;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
+    <h2 style="margin:0;font-size:20px;color:var(--text-primary);">Reports</h2>
+    <span class="module-badge">RP01</span>
+</div>
+
+<p style="color:var(--text-secondary);font-size:12px;margin-bottom:24px;">
+    Select a report type to generate and view.
+</p>
+
+<div class="report-cards">
+
+    <!-- Vessel SOF -->
+    <a class="report-card" href="/module/RP01/vessel-sof/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/vessellogo.png') }}" alt="Vessel Logo">
+        </div>
+        <div class="card-title">Vessel Statement of Facts</div>
+        <div class="card-desc">
+            Generate the official SOF document for any vessel call — arrival times, draft surveys, anchorage movements, discharge operations, idle delays, and hatch-wise cargo completion.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+
+    <!-- Mother Vessel Discharged Report -->
+    <a class="report-card" href="/module/RP01/vessel-discharged/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/vessellogo.png') }}" alt="Vessel Logo">
+        </div>
+        <div class="card-title">Mother Vessel Discharged Report</div>
+        <div class="card-desc">
+            Date-range filtered list of discharged vessels. Download a formatted Excel report per vessel — day-wise discharge, delay log, delay classification by account type, and performance block.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+
+    <!-- MBC SOF -->
+    <a class="report-card" href="/module/RP01/mbc-sof/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/mbclogo.png') }}" alt="MBC Logo">
+        </div>
+        <div class="card-title">MBC Statement of Facts</div>
+        <div class="card-desc">
+            Generate SOF documents for MBC operations — load port and discharge port timings for import, or load port details for export.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+
+    <!-- MBC TAT Report (Master Data + TAT summary, both sheets in download) -->
+    <a class="report-card" href="/module/RP01/mbc-master/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/mbclogo.png') }}" alt="MBC Logo">
+        </div>
+        <div class="card-title">MBC TAT Report</div>
+        <div class="card-desc">
+            Trip-wise master data and aggregated TAT summary for Import MBC operations. Download generates two sheets: Master Data and TAT averages (date, MTD, YTD).
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+    <!-- Barge Lines Report -->
+    <a class="report-card" href="/module/RP01/barge-report/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/barge.png') }}" alt="Barge">
+        </div>
+        <div class="card-title">Barge Lines Report</div>
+        <div class="card-desc">
+            View barge line details for Import or Export vessel calls. Select one or more vessels to see the full barge line dataframe with vessel header repeated per entry.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+    
+    <a class="report-card" href="/module/RP01/daily-ops/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/time.png') }}" alt="MBC Logo">
+        </div>
+        <div class="card-title">Daily Operations Report</div>
+        <div class="card-desc">
+            Daily summary of vessel operations, including arrivals, departures, cargo operations, and idle times. Download a formatted Excel report with day-wise details and performance metrics.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+    <!-- Shift Report -->
+    <a class="report-card" href="/module/RP01/shift-report/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/shift.png') }}" alt="Shift Report">
+        </div>
+        <div class="card-title">Shift Report</div>
+        <div class="card-desc">
+            Per-shift cargo quantities pivoted by equipment and route, with detailed delay breakdowns by type. Select date and shift to preview or download.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+
+    <!-- Custom Report Designer -->
+    <a class="report-card" href="/module/RP01/custom-report/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/custom_report.png') }}" alt="MBC Logo">
+        </div>
+        <div class="card-title">Custom Report Designer</div>
+        <div class="card-desc">
+            Build your own pivot reports with drag-and-drop fields. Choose any data source, arrange rows and columns, pick an aggregator or chart type, and save your configurations for reuse.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+
+
+
+    <!-- Operations Dashboard -->
+    <a class="report-card" href="/module/RP01/dashboard/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/graph.png') }}" alt="MBC Logo">
+        </div>
+        <div class="card-title">Dashboard Widgets</div>
+        <div class="card-desc">
+            Interactive dashboard widgets configuration with a pivot table and live charts.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+
+</div>
+{% endblock %}

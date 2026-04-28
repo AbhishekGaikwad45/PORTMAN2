@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+
+{% block title %}Invoices - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .toolbar { margin-bottom: 15px; display: flex; gap: 5px; flex-wrap: wrap; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; }
+    .btn-primary { background: #3498db; color: white; }
+    .btn-success { background: #27ae60; color: white; }
+    .btn-warning { background: #f39c12; color: white; }
+    .btn-export { background: #8e44ad; color: white; }
+    .btn-gst { background: #e74c3c; color: white; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; }
+    .status { padding: 2px 6px; border-radius: 3px; font-size: 10px; color: white; }
+    .status-generated { background: #3498db; }
+    .status-posted-to-sap { background: #9b59b6; }
+    .status-posted-to-gst { background: #27ae60; }
+    .filters { margin-bottom: 15px; display: flex; gap: 10px; }
+    .filters select { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .pagination { margin-top: 15px; display: flex; gap: 5px; justify-content: center; font-size: 11px; }
+
+    /* Export modal */
+    .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; }
+    .modal-box { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; border-radius:6px; padding:20px; width:450px; z-index:1001; box-shadow:0 4px 20px rgba(0,0,0,0.3); }
+    .modal-box h3 { margin:0 0 15px 0; font-size:14px; color:#333; border-bottom:2px solid #8e44ad; padding-bottom:8px; }
+    .modal-box .form-group { margin-bottom:10px; }
+    .modal-box label { display:block; font-size:10px; font-weight:600; color:#555; margin-bottom:3px; text-transform:uppercase; }
+    .modal-box input, .modal-box select { width:100%; padding:6px; font-size:11px; border:1px solid #ddd; border-radius:3px; box-sizing:border-box; }
+    .modal-box .btn-row { margin-top:15px; display:flex; gap:5px; }
+</style>
+
+<div class="module-header">
+    <h2>Invoicing</h2>
+    <span class="module-code">FINV01</span>
+</div>
+
+<div class="toolbar">
+    {% if perms.can_add %}
+    <button class="btn btn-primary" onclick="location.href='/module/FINV01/generate'">+ Generate Invoice</button>
+    {% endif %}
+    <button class="btn btn-success" onclick="location.href='/module/FIN01/bills'">View Bills (FIN01)</button>
+    <button class="btn btn-export" onclick="showExportModal('gstr1')">Export GSTR-1 JSON</button>
+    <button class="btn btn-gst" onclick="showExportModal('einvoice')">Export e-Invoice JSON</button>
+</div>
+
+<div class="filters">
+    <label style="font-size: 11px; padding: 6px 0;">Filter by Status:</label>
+    <select onchange="location.href='?status='+this.value" style="padding: 6px; font-size: 11px;">
+        <option value="">All</option>
+        <option value="Generated" {% if status_filter == 'Generated' %}selected{% endif %}>Generated</option>
+        <option value="Posted to SAP" {% if status_filter == 'Posted to SAP' %}selected{% endif %}>Posted to SAP</option>
+        <option value="Posted to GST" {% if status_filter == 'Posted to GST' %}selected{% endif %}>Posted to GST</option>
+        <option value="Paid" {% if status_filter == 'Paid' %}selected{% endif %}>Paid</option>
+    </select>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th style="width:30px"><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
+            <th>Invoice Number</th>
+            <th>Invoice Date</th>
+            <th>FY</th>
+            <th>Customer</th>
+            <th>GSTIN</th>
+            <th>Subtotal</th>
+            <th>GST</th>
+            <th>Total</th>
+            <th>Currency</th>
+            <th>Status</th>
+            <th>SAP Doc</th>
+            <th>GST IRN</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in data %}
+        <tr data-id="{{ row.id }}">
+            <td><input type="checkbox" class="inv-select" value="{{ row.id }}"></td>
+            <td>{{ row.invoice_number }}</td>
+            <td>{{ row.invoice_date }}</td>
+            <td>{{ row.financial_year }}</td>
+            <td>{{ row.customer_name }}</td>
+            <td>{{ row.customer_gstin }}</td>
+            <td style="text-align: right;">{{ "%.2f"|format(row.subtotal or 0) }}</td>
+            <td style="text-align: right;">{{ "%.2f"|format((row.cgst_amount or 0) + (row.sgst_amount or 0) + (row.igst_amount or 0)) }}</td>
+            <td style="text-align: right;">{{ "%.2f"|format(row.total_amount or 0) }}</td>
+            <td>{{ row.currency_code }}</td>
+            <td>
+                <span class="status status-{{ row.invoice_status|lower|replace(' ', '-') }}">{{ row.invoice_status }}</span>
+            </td>
+            <td>{{ row.sap_document_number or '-' }}</td>
+            <td>{{ row.gst_irn[:10] + '...' if row.gst_irn else '-' }}</td>
+            <td>
+                <button class="btn btn-primary" onclick="printInvoice({{ row.id }})" style="font-size:10px;padding:3px 8px;">Print</button>
+                {% if row.invoice_status == 'Generated' %}
+                <button class="btn btn-warning" onclick="postToGST({{ row.id }})" style="font-size:10px;padding:3px 8px;">Post GST</button>
+                <button class="btn btn-success" onclick="postToSAP({{ row.id }})" style="font-size:10px;padding:3px 8px;">Post SAP</button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="pagination">
+    {% if page > 1 %}
+    <button class="btn" onclick="location.href='?page={{ page - 1 }}&status={{ status_filter or '' }}'">Previous</button>
+    {% endif %}
+    <span style="padding: 5px 10px;">Page {{ page }} of {{ last_page }}</span>
+    {% if page < last_page %}
+    <button class="btn" onclick="location.href='?page={{ page + 1 }}&status={{ status_filter or '' }}'">Next</button>
+    {% endif %}
+</div>
+
+<!-- GSTR-1 Export Modal -->
+<div class="modal-overlay" id="gstr1Modal">
+    <div class="modal-box">
+        <h3>Export GSTR-1 B2B JSON</h3>
+        <p style="font-size:11px;color:#666;margin:0 0 12px 0;">
+            Generates JSON file compatible with GST portal's "Prepare Offline" upload for GSTR-1 B2B section.
+        </p>
+        <div class="form-group">
+            <label>Supplier GSTIN</label>
+            <input type="text" id="gstr1Gstin" placeholder="e.g., 20AABCT1234H1Z0" maxlength="15">
+        </div>
+        <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div>
+                <label>Filing Month</label>
+                <select id="gstr1Month">
+                    <option value="01">January</option>
+                    <option value="02">February</option>
+                    <option value="03">March</option>
+                    <option value="04">April</option>
+                    <option value="05">May</option>
+                    <option value="06">June</option>
+                    <option value="07">July</option>
+                    <option value="08">August</option>
+                    <option value="09">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+            </div>
+            <div>
+                <label>Filing Year</label>
+                <select id="gstr1Year"></select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Selected Invoices</label>
+            <input type="text" id="gstr1Count" readonly style="background:#f0f0f0;">
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-export" onclick="exportGSTR1()">Download JSON</button>
+            <button class="btn" style="background:#95a5a6;color:white;" onclick="closeModal('gstr1Modal')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- e-Invoice Export Modal -->
+<div class="modal-overlay" id="einvoiceModal">
+    <div class="modal-box">
+        <h3>Export e-Invoice JSON (IRN Format v1.1)</h3>
+        <p style="font-size:11px;color:#666;margin:0 0 12px 0;">
+            Generates JSON file per e-Invoice schema v1.1 for B2B invoices. Upload to e-Invoice portal for IRN generation.
+        </p>
+        <div class="form-group">
+            <label>Seller GSTIN</label>
+            <input type="text" id="einvGstin" placeholder="e.g., 20AABCT1234H1Z0" maxlength="15">
+        </div>
+        <div class="form-group">
+            <label>Legal Name</label>
+            <input type="text" id="einvLegalName" placeholder="Company legal name">
+        </div>
+        <div class="form-group">
+            <label>Address</label>
+            <input type="text" id="einvAddress" placeholder="Registered address">
+        </div>
+        <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div>
+                <label>Location / City</label>
+                <input type="text" id="einvLocation" placeholder="City">
+            </div>
+            <div>
+                <label>Pincode</label>
+                <input type="text" id="einvPincode" placeholder="6-digit" maxlength="6">
+            </div>
+        </div>
+        <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div>
+                <label>State Code</label>
+                <input type="text" id="einvStateCode" placeholder="e.g., 20" maxlength="2">
+            </div>
+            <div>
+                <label>Phone</label>
+                <input type="text" id="einvPhone" placeholder="Optional">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="text" id="einvEmail" placeholder="Optional">
+        </div>
+        <div class="form-group">
+            <label>Selected Invoices</label>
+            <input type="text" id="einvCount" readonly style="background:#f0f0f0;">
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-gst" onclick="exportEInvoice()">Download JSON</button>
+            <button class="btn" style="background:#95a5a6;color:white;" onclick="closeModal('einvoiceModal')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let sellerConfig = {};
+
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof addToRecent === 'function') {
+        addToRecent('FINV01', 'Invoicing');
+    }
+});
+
+// Load seller config from FIN01 module config
+(async function() {
+    try {
+        const res = await fetch('/api/module/FINV01/port-config');
+        sellerConfig = await res.json();
+    } catch(e) { console.error('Error loading seller config:', e); }
+
+    // Populate filing year dropdown (current year + 1 back)
+    const yearSel = document.getElementById('gstr1Year');
+    const now = new Date();
+    const curYear = now.getFullYear();
+    for (let y = curYear; y >= curYear - 2; y--) {
+        const opt = document.createElement('option');
+        opt.value = String(y);
+        opt.textContent = String(y);
+        yearSel.appendChild(opt);
+    }
+    // Default to current month/year
+    document.getElementById('gstr1Month').value = String(now.getMonth() + 1).padStart(2, '0');
+    document.getElementById('gstr1Year').value = String(curYear);
+})();
+
+function toggleSelectAll() {
+    const checked = document.getElementById('selectAll').checked;
+    document.querySelectorAll('.inv-select').forEach(cb => cb.checked = checked);
+}
+
+function getSelectedIds() {
+    return Array.from(document.querySelectorAll('.inv-select:checked')).map(cb => parseInt(cb.value));
+}
+
+function showExportModal(type) {
+    const ids = getSelectedIds();
+    if (ids.length === 0) {
+        alert('Please select at least one invoice to export.');
+        return;
+    }
+    if (type === 'gstr1') {
+        document.getElementById('gstr1Gstin').value = sellerConfig.seller_gstin || '';
+        document.getElementById('gstr1Count').value = ids.length + ' invoice(s) selected';
+        document.getElementById('gstr1Modal').style.display = 'block';
+    } else {
+        document.getElementById('einvGstin').value = sellerConfig.seller_gstin || '';
+        document.getElementById('einvLegalName').value = sellerConfig.seller_legal_name || '';
+        document.getElementById('einvAddress').value = sellerConfig.seller_address || '';
+        document.getElementById('einvLocation').value = sellerConfig.seller_location || '';
+        document.getElementById('einvPincode').value = sellerConfig.seller_pincode || '';
+        document.getElementById('einvStateCode').value = sellerConfig.port_gst_state_code || '';
+        document.getElementById('einvPhone').value = sellerConfig.seller_phone || '';
+        document.getElementById('einvEmail').value = sellerConfig.seller_email || '';
+        document.getElementById('einvCount').value = ids.length + ' invoice(s) selected';
+        document.getElementById('einvoiceModal').style.display = 'block';
+    }
+}
+
+function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+function downloadJson(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function exportGSTR1() {
+    const ids = getSelectedIds();
+    const gstin = document.getElementById('gstr1Gstin').value.trim();
+    const month = document.getElementById('gstr1Month').value;
+    const year = document.getElementById('gstr1Year').value;
+    const period = month + year;
+
+    if (!gstin) { alert('Please enter Supplier GSTIN'); return; }
+
+    const res = await fetch('/api/module/FINV01/export/gstr1-b2b', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            invoice_ids: ids,
+            supplier_gstin: gstin,
+            filing_period: period
+        })
+    });
+    const json = await res.json();
+
+    if (json.error) {
+        alert('Error: ' + json.error);
+        return;
+    }
+
+    downloadJson(json, `GSTR1_B2B_${period}.json`);
+    closeModal('gstr1Modal');
+    alert(`GSTR-1 B2B JSON exported for ${ids.length} invoice(s). Upload this file to the GST portal via Returns > GSTR-1 > Prepare Offline > Upload.`);
+}
+
+async function exportEInvoice() {
+    const ids = getSelectedIds();
+    const gstin = document.getElementById('einvGstin').value.trim();
+    const legalName = document.getElementById('einvLegalName').value.trim();
+    const address = document.getElementById('einvAddress').value.trim();
+    const location = document.getElementById('einvLocation').value.trim();
+    const pincode = document.getElementById('einvPincode').value.trim();
+    const stateCode = document.getElementById('einvStateCode').value.trim();
+
+    if (!gstin || !legalName || !address || !location || !pincode || !stateCode) {
+        alert('Please fill all required seller details (GSTIN, Legal Name, Address, Location, Pincode, State Code)');
+        return;
+    }
+
+    const res = await fetch('/api/module/FINV01/export/einvoice', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            invoice_ids: ids,
+            seller_details: {
+                gstin: gstin,
+                legal_name: legalName,
+                address1: address,
+                location: location,
+                pincode: pincode,
+                state_code: stateCode,
+                phone: document.getElementById('einvPhone').value.trim(),
+                email: document.getElementById('einvEmail').value.trim()
+            }
+        })
+    });
+    const json = await res.json();
+
+    if (json.error) {
+        alert('Error: ' + json.error);
+        return;
+    }
+
+    // If single invoice, download as single object; if multiple, download array
+    const einvoices = json.einvoices || [];
+    if (einvoices.length === 1) {
+        downloadJson(einvoices[0], `EInvoice_${einvoices[0].DocDtls.No}.json`);
+    } else {
+        downloadJson(einvoices, `EInvoices_Batch_${ids.length}.json`);
+    }
+    closeModal('einvoiceModal');
+    alert(`e-Invoice JSON exported for ${einvoices.length} invoice(s). Upload to e-Invoice portal (einvoice1.gst.gov.in) for IRN generation.`);
+}
+
+function printInvoice(id) {
+    window.open(`/module/FINV01/invoice/print/${id}`, '_blank');
+}
+
+async function postToGST(id) {
+    if (!confirm('Generate IRN for this invoice via IRP?')) return;
+    try {
+        const res = await fetch('/api/module/FINV01/invoice/generate-irn', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({invoice_id: id})
+        });
+        const result = await res.json();
+        if (result.success) {
+            alert('IRN generated: ' + (result.irn || 'Success'));
+            location.reload();
+        } else {
+            alert('IRN Error: ' + result.message);
+        }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function postToSAP(id) {
+    if (!confirm('Post this invoice to SAP?')) return;
+    try {
+        const res = await fetch('/api/module/FINV01/invoice/post-sap', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({invoice_id: id})
+        });
+        const result = await res.json();
+        if (result.success) {
+            alert('Posted to SAP. Document: ' + (result.sap_document_number || 'Success'));
+            location.reload();
+        } else {
+            alert('SAP Error: ' + result.message);
+        }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+</script>
+{% endblock %}

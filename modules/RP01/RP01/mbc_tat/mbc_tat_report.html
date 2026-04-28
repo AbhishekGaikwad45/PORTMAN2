@@ -1,0 +1,391 @@
+{% extends "base.html" %}
+
+{% block title %}MBC TAT Report — RP01{% endblock %}
+
+{% block head %}
+<style>
+/* ── Page layout ─────────────────────────────────────────────────────── */
+.page-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+}
+.page-header h2 { margin: 0; font-size: 18px; color: var(--text-primary); }
+.module-badge {
+    background: #4a90d9;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.breadcrumb {
+    font-size: 11px; color: var(--text-secondary); margin-bottom: 14px;
+}
+.breadcrumb a { color: #4a90d9; text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+
+/* ── Filter bar ──────────────────────────────────────────────────────── */
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+    margin-bottom: 18px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px 14px;
+}
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.filter-group label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.filter-group input {
+    padding: 5px 9px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 30px;
+}
+.filter-group input:focus { outline: none; border-color: #4a90d9; }
+.filter-btn {
+    padding: 0 18px;
+    height: 30px;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: flex-end;
+}
+.filter-btn.primary  { background: #4a90d9; color: #fff; }
+.filter-btn.primary:hover  { background: #357abd; }
+.filter-btn.download { background: #27ae60; color: #fff; }
+.filter-btn.download:hover { background: #1e8449; }
+.filter-btn.download:disabled { background: #7dcea0; cursor: not-allowed; }
+
+/* ── TAT table wrapper ───────────────────────────────────────────────── */
+.tat-wrapper {
+    overflow-x: auto;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+/* ── TAT table ───────────────────────────────────────────────────────── */
+.tat-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: Calibri, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    min-width: 640px;
+}
+.tat-table td, .tat-table th {
+    border: 1px solid #888;
+    padding: 5px 9px;
+    white-space: nowrap;
+}
+
+/* ── Header rows ─────────────────────────────────────────────────────── */
+.tat-table .hdr-period td {
+    background: #ccff99;
+    font-weight: 700;
+    text-align: center;
+}
+.tat-table .hdr-period .col-date  { color: #cc0000; }
+.tat-table .hdr-period .col-mtd   { color: #cc0000; }
+.tat-table .hdr-period .col-ytd   { color: #cc6600; }
+.tat-table .hdr-cols td {
+    background: #ccff99;
+    font-weight: 700;
+    text-align: center;
+    font-size: 12px;
+}
+
+/* ── Trips row ───────────────────────────────────────────────────────── */
+.tat-table .row-trips td {
+    background: #ffff00;
+    font-weight: 800;
+    text-align: center;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+}
+.tat-table .row-trips td:first-child { text-align: center; }
+
+/* ── Regular data rows ───────────────────────────────────────────────── */
+.tat-table .row-data td {
+    background: #ffffff;
+}
+.tat-table .row-data td:first-child {
+    text-align: left;
+    padding-left: 14px;
+}
+.tat-table .row-data td:not(:first-child) {
+    text-align: center;
+    font-weight: 600;
+}
+
+/* ── Section total rows (Total at Jaigad / Dharamtar) ───────────────── */
+.tat-table .row-section-total td {
+    background: #ffff00;
+    font-weight: 800;
+}
+.tat-table .row-section-total td:first-child {
+    text-align: left;
+    padding-left: 14px;
+    font-style: italic;
+}
+.tat-table .row-section-total td:not(:first-child) {
+    text-align: center;
+    font-style: italic;
+}
+
+/* ── Main total rows (Jaigad→Dharamtar, Dhar→Jaigad) ───────────────── */
+.tat-table .row-main-total td {
+    background: #ffcc00;
+    font-weight: 800;
+}
+.tat-table .row-main-total td:first-child {
+    text-align: left;
+    font-style: italic;
+}
+.tat-table .row-main-total td:not(:first-child) {
+    text-align: center;
+    font-style: italic;
+}
+
+/* ── TAT row ─────────────────────────────────────────────────────────── */
+.tat-table .row-tat td {
+    background: #00ffff;
+    font-weight: 900;
+    text-align: center;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+/* ── Footnote row ────────────────────────────────────────────────────── */
+.tat-table .row-footnote td {
+    background: #ffffff;
+    font-size: 10px;
+    color: #444;
+    font-style: italic;
+    text-align: left;
+    padding: 6px 10px;
+    white-space: normal;
+    line-height: 1.5;
+}
+
+/* ── Dark-theme overrides ────────────────────────────────────────────── */
+.dark-theme .tat-table td,
+.dark-theme .tat-table th     { border-color: #555; }
+
+.dark-theme .tat-table .hdr-period td,
+.dark-theme .tat-table .hdr-cols td   { background: #2a4a1a; color: #ccff99; }
+.dark-theme .tat-table .hdr-period .col-date { color: #ff7777; }
+.dark-theme .tat-table .hdr-period .col-mtd  { color: #ff7777; }
+.dark-theme .tat-table .hdr-period .col-ytd  { color: #ffaa44; }
+
+.dark-theme .tat-table .row-trips td          { background: #5a5a00; color: #ffff88; }
+.dark-theme .tat-table .row-data td           { background: #1e1e2e; color: #cdd6f4; }
+.dark-theme .tat-table .row-section-total td  { background: #5a5a00; color: #ffff88; }
+.dark-theme .tat-table .row-main-total td     { background: #5a3a00; color: #ffcc66; }
+.dark-theme .tat-table .row-tat td            { background: #004a4a; color: #00ffff; }
+.dark-theme .tat-table .row-footnote td       { background: #1a1a2e; color: #888; }
+
+/* ── Loading / error states ──────────────────────────────────────────── */
+.tat-placeholder {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>MBC TAT Report</h2>
+    <span class="module-badge">RP01</span>
+</div>
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a> &rsaquo; MBC TAT Report
+</div>
+
+<!-- Filter bar -->
+<div class="filter-bar">
+    <div class="filter-group">
+        <label for="filter-date">Select Date</label>
+        <input type="date" id="filter-date" title="Select date for report">
+    </div>
+    <button type="button" class="filter-btn primary"  onclick="loadReport()">Generate</button>
+    <button type="button" class="filter-btn download" id="dl-btn" onclick="downloadExcel()">&#8595; Download Excel</button>
+</div>
+
+<!-- Report table -->
+<div class="tat-wrapper" id="tat-wrapper">
+    <div class="tat-placeholder" id="tat-placeholder">Select a date and click <strong>Generate</strong> to view the MBC TAT Report.</div>
+</div>
+
+<script>
+/* ── state ─────────────────────────────────────────────── */
+let currentDate = '';
+
+/* ── helpers ────────────────────────────────────────────── */
+function fmtVal(v) {
+    if (!v || v === '—') return '<span style="color:#bbb">—</span>';
+    return v;
+}
+
+/* ── table builder ──────────────────────────────────────── */
+function buildTable(d) {
+    const styleClass = {
+        data:          'row-data',
+        section_total: 'row-section-total',
+        main_total:    'row-main-total',
+        tat:           'row-tat',
+    };
+
+    let html = `
+    <table class="tat-table">
+      <tbody>
+        <!-- Period header -->
+        <tr class="hdr-period">
+          <td></td>
+          <td class="col-date">${d.date_label}</td>
+          <td class="col-mtd">MTD</td>
+          <td class="col-ytd">YTD</td>
+        </tr>
+        <!-- Column header -->
+        <tr class="hdr-cols">
+          <td>Activity</td>
+          <td>${d.date_label}</td>
+          <td>${d.mtd_label}</td>
+          <td>${d.ytd_label}</td>
+        </tr>
+        <!-- Trips -->
+        <tr class="row-trips">
+          <td>Trips</td>
+          <td>${d.date_trips}</td>
+          <td>${d.mtd_trips}</td>
+          <td>${d.ytd_trips}</td>
+        </tr>`;
+
+    for (const row of d.rows) {
+        const cls = styleClass[row.style] || 'row-data';
+        html += `
+        <tr class="${cls}">
+          <td>${row.label}</td>
+          <td>${fmtVal(row.date_val)}</td>
+          <td>${fmtVal(row.mtd_val)}</td>
+          <td>${fmtVal(row.ytd_val)}</td>
+        </tr>`;
+    }
+
+    // Footnotes
+    html += `
+        <tr class="row-footnote">
+          <td colspan="4">*Unloading time includes the shifting time after partial discharge of MBC &amp; discharge kept on hold to give priority for other MBC.<br>
+          *Preberthing time includes the MBC waiting at Berth 10 for the unloading turn.</td>
+        </tr>
+      </tbody>
+    </table>`;
+
+    return html;
+}
+
+/* ── load report ────────────────────────────────────────── */
+function loadReport() {
+    const d = document.getElementById('filter-date').value;
+    if (!d) {
+        alert('Please select a date.');
+        return;
+    }
+    currentDate = d;
+
+    const wrapper     = document.getElementById('tat-wrapper');
+    const placeholder = document.getElementById('tat-placeholder');
+
+    wrapper.innerHTML = '<div class="tat-placeholder">Loading…</div>';
+
+    fetch('/api/module/RP01/mbc-tat/data?date=' + encodeURIComponent(d))
+        .then(r => {
+            if (!r.ok) {
+                return r.json().then(body => {
+                    throw new Error('Server ' + r.status + ': ' + (body.error || JSON.stringify(body)));
+                }).catch(() => {
+                    throw new Error('Server error ' + r.status);
+                });
+            }
+            return r.json();
+        })
+        .then(data => {
+            wrapper.innerHTML = buildTable(data);
+        })
+        .catch(err => {
+            console.error(err);
+            wrapper.innerHTML = `<div class="tat-placeholder" style="color:#c0392b;text-align:left;padding:20px;"><strong>Error:</strong> ${err.message}<br><small style="font-family:monospace;white-space:pre-wrap;">${err.stack || ''}</small></div>`;
+        });
+}
+
+/* ── download ────────────────────────────────────────────── */
+function downloadExcel() {
+    if (!currentDate) {
+        alert('Generate a report first before downloading.');
+        return;
+    }
+    const btn = document.getElementById('dl-btn');
+    btn.disabled = true;
+    btn.textContent = 'Preparing…';
+
+    const url = '/api/module/RP01/mbc-tat/download?date=' + encodeURIComponent(currentDate);
+    fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error('Server error ' + res.status);
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename="(.+?)"/);
+            const filename = match ? match[1] : 'MBC_TAT_Report.xlsx';
+            return res.blob().then(blob => ({ blob, filename }));
+        })
+        .then(({ blob, filename }) => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        })
+        .catch(err => {
+            console.error(err);
+            alert('Download failed. Please try again.');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = '&#8595; Download Excel';
+        });
+}
+
+/* ── on load: default to today ──────────────────────────── */
+document.addEventListener('DOMContentLoaded', function () {
+    const today = new Date();
+    const iso   = today.toISOString().split('T')[0];
+    document.getElementById('filter-date').value = iso;
+    currentDate = iso;
+    loadReport();
+});
+</script>
+{% endblock %}

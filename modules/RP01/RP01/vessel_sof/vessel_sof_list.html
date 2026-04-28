@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block title %}Vessel SOF — RP01{% endblock %}
+
+{% block head %}
+<style>
+    .page-header {
+        display: flex; align-items: center; gap: 12px;
+        margin-bottom: 8px; padding-bottom: 12px;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .page-header h2 { margin: 0; font-size: 20px; color: var(--text-primary); }
+    .module-badge {
+        background: #4a90d9; color: #fff;
+        padding: 3px 10px; border-radius: 4px;
+        font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .breadcrumb {
+        font-size: 11px; color: var(--text-secondary); margin-bottom: 20px;
+    }
+    .breadcrumb a { color: #4a90d9; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+
+    /* ── Vessel list ─────────────────────────────────────────── */
+    .vessel-list { display: flex; flex-direction: column; gap: 12px; }
+
+    .vessel-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    }
+
+    /* Accordion header */
+    .vessel-card-header {
+        display: flex; align-items: center; gap: 12px;
+        padding: 11px 16px;
+        background: var(--bg-secondary);
+        border-left: 3px solid #4a90d9;
+        cursor: pointer; user-select: none;
+        transition: background 0.15s;
+    }
+    .vessel-card-header:hover { background: var(--hover-bg); }
+    .vessel-card-header .vessel-name {
+        font-size: 13px; font-weight: 700; color: var(--text-primary); flex: 1;
+    }
+    .vessel-card-header .count-badge {
+        font-size: 10px; color: var(--text-secondary);
+        background: var(--border-color);
+        padding: 2px 8px; border-radius: 10px;
+    }
+    .vessel-card-header .toggle-arrow {
+        font-size: 10px; color: var(--text-secondary);
+        transition: transform 0.2s;
+    }
+    .vessel-card-header.open .toggle-arrow { transform: rotate(90deg); }
+    .vessel-card-header .vessel-icon {
+        height: 28px; width: auto; object-fit: contain; flex-shrink: 0;
+    }
+
+    .vessel-card-body { display: none; border-top: 1px solid var(--border-color); }
+    .vessel-card-body.open { display: block; }
+
+    /* ── Section label bars ──────────────────────────────────── */
+    .section-label {
+        display: flex; align-items: center; gap: 8px;
+        padding: 6px 14px;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 10px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.6px;
+        color: var(--text-secondary);
+    }
+    .section-label.barge { border-top: 2px solid var(--border-color); }
+
+    /* ── Tables (portal standard) ────────────────────────────── */
+    .data-table {
+        width: 100%; border-collapse: collapse; font-size: 11px;
+    }
+    .data-table thead tr { background: var(--border-color); }
+    .data-table th {
+        padding: 8px 14px; text-align: left;
+        font-weight: 600; color: var(--text-secondary);
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+    }
+    .data-table td {
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--border-color);
+        color: var(--text-primary); vertical-align: middle;
+    }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: var(--hover-bg); }
+
+    /* ── Status badges ───────────────────────────────────────── */
+    .status-badge {
+        display: inline-block; padding: 2px 8px; border-radius: 3px;
+        font-size: 9px; font-weight: 600; text-transform: uppercase;
+    }
+    .status-badge.approved { background: #d4edda; color: #155724; }
+    .status-badge.pending  { background: #fff3cd; color: #856404; }
+    .status-badge.rejected { background: #f8d7da; color: #721c24; }
+
+    /* ── Buttons (portal standard) ───────────────────────────── */
+    .btn-sof, .btn-barge-sof {
+        background: #4a90d9; color: #fff;
+        border: none; padding: 5px 13px; border-radius: 4px;
+        font-size: 10px; font-weight: 600; cursor: pointer;
+        text-decoration: none; display: inline-block;
+        transition: background 0.15s; white-space: nowrap;
+    }
+    .btn-sof:hover, .btn-barge-sof:hover { background: #2d72c0; }
+
+    /* ── Import / Export sub-labels ──────────────────────────── */
+    .op-label {
+        display: flex; align-items: center; gap: 7px;
+        padding: 5px 14px 5px 20px;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 10px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.5px;
+        color: var(--text-secondary);
+    }
+    .op-label .dot {
+        width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    }
+    .op-label.import .dot { background: #4a90d9; }
+    .op-label.export .dot { background: #48bb78; }
+    .op-label.import { border-left: 3px solid #4a90d9; }
+    .op-label.export { border-left: 3px solid #48bb78; }
+    .op-label .op-count {
+        font-weight: 400; font-size: 10px; color: var(--text-secondary);
+    }
+
+    /* ── No barges placeholder ───────────────────────────────── */
+    .no-barges {
+        padding: 10px 16px;
+        border-top: 2px solid var(--border-color);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: 11px; font-style: italic;
+    }
+
+    /* ── Empty page state ────────────────────────────────────── */
+    .empty-state {
+        text-align: center; padding: 60px 20px; color: var(--text-secondary);
+    }
+    .empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; }
+    .empty-state p { font-size: 13px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Vessel Statement of Facts</h2>
+    <span class="module-badge">RP01</span>
+</div>
+
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a> &rsaquo; Vessel SOF
+</div>
+
+{% if vessels %}
+<div class="vessel-list">
+    {% for vessel in vessels %}
+    <div class="vessel-card">
+
+        <!-- Accordion header -->
+        <div class="vessel-card-header" onclick="toggleVessel(this)">
+            <img src="{{ url_for('static', filename='img/vessellogo.png') }}" alt="" class="vessel-icon">
+            <span class="vessel-name">{{ vessel.vessel_name }}</span>
+            <span class="count-badge">{{ vessel.records | length }} SOF record{{ 's' if vessel.records | length != 1 }}</span>
+            <span class="toggle-arrow">&#9654;</span>
+        </div>
+
+        <div class="vessel-card-body">
+
+            <!-- ── Vessel SOF Records ── -->
+            <div class="section-label">
+                Vessel SOF Records
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>LDUD Doc No</th>
+                        <th>VCN Doc No</th>
+                        <th>Operation</th>
+                        <th>NOR Tendered</th>
+                        <th>Discharge Completed</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rec in vessel.records %}
+                    <tr>
+                        <td><strong>{{ rec.ldud_doc_num or '—' }}</strong></td>
+                        <td>{{ rec.vcn_doc_num or '—' }}</td>
+                        <td>{{ rec.operation_type or '—' }}</td>
+                        <td>{{ rec.nor_tendered or '—' }}</td>
+                        <td>{{ rec.discharge_completed or '—' }}</td>
+                        <td>
+                            {% set status = (rec.doc_status or 'Pending') | lower %}
+                            <span class="status-badge {{ status }}">{{ rec.doc_status or 'Pending' }}</span>
+                        </td>
+                        <td>
+                            <a class="btn-sof"
+                               href="/module/RP01/vessel-sof/{{ rec.ldud_id }}"
+                               target="_blank">Open SOF</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <!-- ── Barge SOF Records ── -->
+            {% set total_barges = (vessel.import_barges | length) + (vessel.export_barges | length) %}
+            {% if total_barges > 0 %}
+
+            <div class="section-label barge">
+                Barge SOF Records
+                <span class="count-badge" style="margin-left:4px;">{{ total_barges }} barge{{ 's' if total_barges != 1 }}</span>
+            </div>
+
+            {% if vessel.import_barges %}
+            <div class="op-label import">
+                <span class="dot"></span>
+                Import
+                <span class="op-count">&mdash; {{ vessel.import_barges | length }} barge{{ 's' if vessel.import_barges | length != 1 }}</span>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Barge Name</th>
+                        <th>LDUD Doc No</th>
+                        <th>Trips</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in vessel.import_barges %}
+                    <tr>
+                        <td><strong>{{ b.barge_name }}</strong></td>
+                        <td>{{ b.ldud_doc_num or '—' }}</td>
+                        <td>{{ b.trip_count }}</td>
+                        <td>
+                            <a class="btn-barge-sof"
+                               href="/module/RP01/barge-sof/{{ b.ldud_id }}/{{ b.barge_name_encoded }}"
+                               target="_blank">Open Barge SOF</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if vessel.export_barges %}
+            <div class="op-label export">
+                <span class="dot"></span>
+                Export
+                <span class="op-count">&mdash; {{ vessel.export_barges | length }} barge{{ 's' if vessel.export_barges | length != 1 }}</span>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Barge Name</th>
+                        <th>LDUD Doc No</th>
+                        <th>Trips</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in vessel.export_barges %}
+                    <tr>
+                        <td><strong>{{ b.barge_name }}</strong></td>
+                        <td>{{ b.ldud_doc_num or '—' }}</td>
+                        <td>{{ b.trip_count }}</td>
+                        <td>
+                            <a class="btn-barge-sof"
+                               href="/module/RP01/barge-sof/{{ b.ldud_id }}/{{ b.barge_name_encoded }}"
+                               target="_blank">Open Barge SOF</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% else %}
+            <div class="no-barges">
+                No barge operations recorded for this vessel.
+            </div>
+            {% endif %}
+
+        </div><!-- /vessel-card-body -->
+    </div><!-- /vessel-card -->
+    {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🚢</div>
+    <p>No vessel records found. Create LDUD entries in the Loading/Unloading module to generate SOF reports.</p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleVessel(header) {
+    header.classList.toggle('open');
+    header.nextElementSibling.classList.toggle('open');
+}
+</script>
+{% endblock %}

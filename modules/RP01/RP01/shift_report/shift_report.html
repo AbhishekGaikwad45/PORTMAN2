@@ -1,0 +1,726 @@
+{% extends "base.html" %}
+
+{% block title %}Shift Report - RP01{% endblock %}
+
+{% block head %}
+<style>
+    .page-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .page-header h2 { margin: 0; font-size: 18px; color: var(--text-primary); }
+    .module-badge {
+        background: #4a90d9;
+        color: #fff;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .breadcrumb {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-bottom: 14px;
+    }
+    .breadcrumb a { color: #4a90d9; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+    .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: flex-end;
+        margin-bottom: 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 12px 14px;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 4px; }
+    .filter-group label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+    .filter-group input, .filter-group select {
+        padding: 5px 9px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 12px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        height: 30px;
+    }
+    .filter-group input:focus, .filter-group select:focus {
+        outline: none;
+        border-color: #4a90d9;
+    }
+    .filter-btn {
+        padding: 0 18px;
+        height: 30px;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        align-self: flex-end;
+    }
+    .filter-btn.primary { background: #4a90d9; color: #fff; }
+    .filter-btn.primary:hover { background: #357abd; }
+    .filter-btn.primary:disabled { background: #aaa; cursor: not-allowed; }
+
+    .delay-panel {
+        margin-bottom: 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 14px;
+    }
+    .delay-panel-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+        margin-bottom: 12px;
+    }
+    .delay-panel-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+    }
+    .delay-panel-note,
+    .delay-status {
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+    .delay-picker {
+        display: grid;
+        grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr);
+        gap: 12px;
+        align-items: start;
+    }
+    .delay-list {
+        display: grid;
+        gap: 8px;
+    }
+    .delay-list label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+    .delay-list select {
+        width: 100%;
+        min-height: 220px;
+        height: 220px;
+        padding: 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: 12px;
+    }
+    .delay-actions,
+    .delay-order {
+        display: grid;
+        gap: 8px;
+    }
+    .delay-actions {
+        align-self: center;
+    }
+    .delay-btn {
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .delay-btn:hover {
+        border-color: #4a90d9;
+        color: #2d5f90;
+    }
+
+    .preview-stack {
+        display: grid;
+        gap: 18px;
+        margin-top: 20px;
+    }
+    .cargo-stack {
+        display: grid;
+        gap: 18px;
+    }
+    .report-block {
+        overflow-x: auto;
+        background: var(--bg-primary, #fff);
+        border: 1px solid var(--border-color, #d7dde5);
+        border-radius: 8px;
+        box-shadow: none;
+    }
+    .report-table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+        color: var(--text-primary, #2c3e50);
+        font-size: 11px;
+        background: var(--bg-primary, #fff);
+    }
+    .report-table th, .report-table td {
+        border: 1px solid var(--border-color, #d7dde5);
+        padding: 4px 8px;
+        text-align: center;
+        white-space: nowrap;
+    }
+    .report-table .title-row th {
+        background: #f6f8fb;
+        color: var(--text-primary, #2c3e50);
+        font-size: 15px;
+        font-weight: 700;
+        padding: 6px 8px;
+    }
+    .report-table .head-row th {
+        background: #eef4fb;
+        color: var(--text-primary, #2c3e50);
+        font-weight: 700;
+    }
+    .report-table td {
+        background: var(--bg-primary, #fff);
+    }
+    .report-table .row-label {
+        text-align: left;
+        font-weight: 600;
+    }
+    .report-table .group-cell {
+        background: #f8fafc;
+        font-weight: 700;
+    }
+    .report-table .type-cell {
+        background: #f1f6fb;
+        font-weight: 700;
+    }
+    .report-table .subtotal-row td {
+        background: #f6f7f9;
+        font-weight: 700;
+    }
+    .report-table .type-total-row td {
+        background: #eef4fb;
+        font-weight: 700;
+    }
+    .report-table .grand-total-row td {
+        background: #e9eef5;
+        font-weight: 700;
+    }
+    .report-table .subtotal-label {
+        text-align: center;
+    }
+    .no-data {
+        font-size: 12px;
+        color: var(--text-secondary);
+        padding: 20px;
+        text-align: center;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+    }
+    .loading {
+        font-size: 12px;
+        color: var(--text-secondary);
+        padding: 12px;
+    }
+
+    @media (max-width: 900px) {
+        .delay-picker {
+            grid-template-columns: 1fr;
+        }
+        .delay-actions,
+        .delay-order {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .delay-panel-header {
+            flex-direction: column;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Shift Report</h2>
+    <span class="module-badge">RP01</span>
+</div>
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a> &rsaquo; Shift Report
+</div>
+
+<div class="filter-bar">
+    <div class="filter-group">
+        <label for="entry-date">Entry Date</label>
+        <input type="date" id="entry-date">
+    </div>
+    <div class="filter-group">
+        <label for="shift-select">Shift</label>
+        <select id="shift-select">
+            <option value="">-- Select --</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="ALL">All Shifts</option>
+        </select>
+    </div>
+    <button type="button" class="filter-btn primary" id="preview-btn" onclick="loadPreview()">Preview</button>
+    <button type="button" class="filter-btn primary" id="dl-btn" onclick="downloadReport()">&#8595; Download Excel</button>
+</div>
+
+<div class="delay-panel">
+    <div class="delay-panel-header">
+        <div>
+            <div class="delay-panel-title">Delay Selection</div>
+            <div class="delay-panel-note">Choose which delays appear in the report and reorder the selected list before preview or export.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <div class="delay-status" id="delay-status">Select date and shift to load delays.</div>
+            <button type="button" class="delay-btn" id="save-delays-btn" onclick="saveDelaySelection()" style="padding:4px 12px;font-size:11px;" title="Save current delay selection for this date &amp; shift">&#128190; Save</button>
+        </div>
+    </div>
+    <div class="delay-picker">
+        <div class="delay-list">
+            <label for="delay-available">Available Delays</label>
+            <select id="delay-available" multiple ondblclick="addSelectedDelays()"></select>
+        </div>
+        <div class="delay-actions">
+            <button type="button" class="delay-btn" onclick="addSelectedDelays()">Add &gt;</button>
+            <button type="button" class="delay-btn" onclick="removeSelectedDelays()">&lt; Remove</button>
+            <button type="button" class="delay-btn" onclick="addAllDelays()">Add All &gt;&gt;</button>
+            <button type="button" class="delay-btn" onclick="clearSelectedDelays()">&lt;&lt; Clear</button>
+        </div>
+        <div class="delay-list">
+            <label for="delay-selected">Delays In Report</label>
+            <select id="delay-selected" multiple ondblclick="removeSelectedDelays()"></select>
+            <div class="delay-order">
+                <button type="button" class="delay-btn" onclick="moveDelaySelection(-1)">Move Up</button>
+                <button type="button" class="delay-btn" onclick="moveDelaySelection(1)">Move Down</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="preview-area"></div>
+
+<script>
+let loadedDelaySignature = '';
+let delayOptionsPromise = null;
+let _lastLoadedDelayItems = [];
+
+function _delayStorageKey() {
+    const d = document.getElementById('entry-date').value;
+    const s = document.getElementById('shift-select').value;
+    return (d && s) ? `sr_delays_${d}_${s}` : null;
+}
+
+function saveDelaySelection() {
+    const key = _delayStorageKey();
+    if (!key) return;
+    const keys = Array.from(document.getElementById('delay-selected').options).map(o => o.value);
+    localStorage.setItem(key, JSON.stringify(keys));
+    setDelayStatus(`Saved. ${keys.length} delay(s) selected.`);
+}
+
+function _applySavedSelection(items) {
+    const key = _delayStorageKey();
+    if (!key) return false;
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    try {
+        const savedKeys = JSON.parse(raw);
+        if (!Array.isArray(savedKeys)) return false;
+        const itemMap = {};
+        items.forEach(item => { itemMap[item.key] = item; });
+        const available = document.getElementById('delay-available');
+        const selected = document.getElementById('delay-selected');
+        available.innerHTML = '';
+        selected.innerHTML = '';
+        savedKeys.forEach(k => {
+            if (itemMap[k]) { selected.appendChild(createDelayOption(itemMap[k])); delete itemMap[k]; }
+        });
+        Object.values(itemMap).forEach(item => available.appendChild(createDelayOption(item)));
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    document.getElementById('entry-date').value = `${y}-${m}-${d}`;
+    document.getElementById('entry-date').addEventListener('change', refreshDelayOptions);
+    document.getElementById('shift-select').addEventListener('change', refreshDelayOptions);
+});
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function setDelayStatus(message) {
+    document.getElementById('delay-status').textContent = message;
+}
+
+function getDelaySignature(entryDate, shift) {
+    return `${entryDate}|${shift}`;
+}
+
+function buildReportQuery(params) {
+    const query = new URLSearchParams();
+    query.set('entry_date', params.entryDate);
+    query.set('shift', params.shift);
+    const delayKeys = getSelectedDelayKeys();
+    if (delayKeys !== null) {
+        query.set('delay_keys', JSON.stringify(delayKeys));
+    }
+    return query.toString();
+}
+
+function _getParams() {
+    const entryDate = document.getElementById('entry-date').value;
+    const shift = document.getElementById('shift-select').value;
+    if (!entryDate || !shift) {
+        alert('Please select both date and shift.');
+        return null;
+    }
+    return { entryDate, shift };
+}
+
+function resetDelayLists() {
+    document.getElementById('delay-available').innerHTML = '';
+    document.getElementById('delay-selected').innerHTML = '';
+}
+
+function createDelayOption(item) {
+    const option = document.createElement('option');
+    option.value = item.key;
+    option.textContent = item.label;
+    return option;
+}
+
+async function refreshDelayOptions() {
+    const entryDate = document.getElementById('entry-date').value;
+    const shift = document.getElementById('shift-select').value;
+    const signature = getDelaySignature(entryDate, shift);
+
+    loadedDelaySignature = '';
+    resetDelayLists();
+
+    if (!entryDate || !shift) {
+        setDelayStatus('Select date and shift to load delays.');
+        return false;
+    }
+
+    setDelayStatus('Loading delays...');
+    delayOptionsPromise = fetch(`/api/module/RP01/shift-report/delay-options?entry_date=${encodeURIComponent(entryDate)}&shift=${encodeURIComponent(shift)}`)
+        .then(r => {
+            if (!r.ok) throw new Error('Failed to load delays');
+            return r.json();
+        })
+        .then(items => {
+            _lastLoadedDelayItems = items;
+            const hasSaved = _applySavedSelection(items);
+            if (!hasSaved) {
+                const selected = document.getElementById('delay-selected');
+                items.forEach(item => selected.appendChild(createDelayOption(item)));
+            }
+            loadedDelaySignature = signature;
+            setDelayStatus(items.length
+                ? (hasSaved ? 'Loaded saved selection. Adjust or save again as needed.' : 'All delays selected by default. Adjust and save.')
+                : 'No delays found for the selected date and shift.');
+            return true;
+        })
+        .catch(err => {
+            setDelayStatus(err.message || 'Failed to load delays.');
+            return false;
+        });
+
+    return delayOptionsPromise;
+}
+
+async function ensureDelayOptionsLoaded(params) {
+    const signature = getDelaySignature(params.entryDate, params.shift);
+    if (loadedDelaySignature === signature) {
+        return true;
+    }
+    if (delayOptionsPromise) {
+        await delayOptionsPromise;
+        if (loadedDelaySignature === signature) {
+            return true;
+        }
+    }
+    return refreshDelayOptions();
+}
+
+function moveOptions(sourceId, targetId, allOptions) {
+    const source = document.getElementById(sourceId);
+    const target = document.getElementById(targetId);
+    const options = allOptions ? Array.from(source.options) : Array.from(source.selectedOptions);
+    options.forEach(option => {
+        option.selected = false;
+        target.appendChild(option);
+    });
+}
+
+function addSelectedDelays() {
+    moveOptions('delay-available', 'delay-selected', false);
+}
+
+function removeSelectedDelays() {
+    moveOptions('delay-selected', 'delay-available', false);
+}
+
+function addAllDelays() {
+    moveOptions('delay-available', 'delay-selected', true);
+}
+
+function clearSelectedDelays() {
+    moveOptions('delay-selected', 'delay-available', true);
+}
+
+function moveDelaySelection(direction) {
+    const select = document.getElementById('delay-selected');
+    const options = Array.from(select.options);
+    if (!options.some(option => option.selected)) return;
+
+    if (direction < 0) {
+        for (let i = 1; i < options.length; i++) {
+            if (options[i].selected && !options[i - 1].selected) {
+                select.insertBefore(options[i], options[i - 1]);
+                options[i].selected = true;
+            }
+        }
+        return;
+    }
+
+    for (let i = options.length - 2; i >= 0; i--) {
+        if (options[i].selected && !options[i + 1].selected) {
+            select.insertBefore(options[i + 1], options[i]);
+            options[i].selected = true;
+        }
+    }
+}
+
+function getSelectedDelayKeys() {
+    const available = document.getElementById('delay-available');
+    const selected = document.getElementById('delay-selected');
+    if (!available.options.length && !selected.options.length) {
+        return null;
+    }
+    return Array.from(selected.options).map(option => option.value);
+}
+
+async function loadPreview() {
+    const p = _getParams();
+    if (!p) return;
+
+    await ensureDelayOptionsLoaded(p);
+
+    const btn = document.getElementById('preview-btn');
+    const area = document.getElementById('preview-area');
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    area.innerHTML = '<div class="loading">Loading preview...</div>';
+
+    fetch(`/api/module/RP01/shift-report/preview?${buildReportQuery(p)}`)
+        .then(r => { if (!r.ok) throw new Error('Server error'); return r.json(); })
+        .then(data => {
+            const stack = document.createElement('div');
+            stack.className = 'preview-stack';
+            stack.appendChild(buildCargoTables(data.cargo_tables || []));
+            stack.appendChild(buildDelayTable(data.delay_view || { rows: [] }));
+            area.innerHTML = '';
+            area.appendChild(stack);
+        })
+        .catch(err => {
+            area.innerHTML = `<div class="no-data">${escapeHtml(err.message || 'Failed to load preview.')}</div>`;
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = 'Preview';
+        });
+}
+
+async function downloadReport() {
+    const p = _getParams();
+    if (!p) return;
+
+    await ensureDelayOptionsLoaded(p);
+
+    const btn = document.getElementById('dl-btn');
+    btn.disabled = true;
+    btn.textContent = 'Preparing...';
+
+    fetch(`/api/module/RP01/shift-report/download?${buildReportQuery(p)}`)
+        .then(res => {
+            if (!res.ok) throw new Error('Download failed');
+            const disp = res.headers.get('Content-Disposition') || '';
+            const match = disp.match(/filename="(.+?)"/);
+            const filename = match ? match[1] : `ShiftReport_${p.entryDate}_${p.shift}.xlsx`;
+            return res.blob().then(blob => ({ blob, filename }));
+        })
+        .then(({ blob, filename }) => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        })
+        .catch(err => {
+            alert(err.message || 'Download failed.');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '\u2193 Download Excel';
+        });
+}
+
+function buildCargoTables(tables) {
+    const container = document.createElement('div');
+    container.className = 'cargo-stack';
+
+    if (!tables.length) {
+        container.innerHTML = '<div class="no-data">No cargo data for this shift.</div>';
+        return container;
+    }
+
+    tables.forEach(table => {
+        container.appendChild(buildMatrixTable(table));
+    });
+    return container;
+}
+
+function buildMatrixTable(table) {
+    const block = document.createElement('div');
+    block.className = 'report-block';
+
+    const headLabel = escapeHtml(table.row_header || '');
+    const columns = (table.columns || []).map(escapeHtml);
+    const rows = table.rows || [];
+    const totals = table.totals || { label: 'Grand Total', values: [], total: '' };
+
+    let html = '<table class="report-table">';
+    html += `<thead>
+        <tr class="title-row"><th colspan="${columns.length + 2}">${escapeHtml(table.title || '')}</th></tr>
+        <tr class="head-row">
+            <th>${headLabel}</th>
+            ${columns.map(column => `<th>${column}</th>`).join('')}
+            <th>Grand Total</th>
+        </tr>
+    </thead><tbody>`;
+
+    rows.forEach(row => {
+        html += `<tr>
+            <td class="row-label">${escapeHtml(row.label || '')}</td>
+            ${(row.values || []).map(value => `<td>${escapeHtml(value)}</td>`).join('')}
+            <td><strong>${escapeHtml(row.total)}</strong></td>
+        </tr>`;
+    });
+
+    html += `<tr class="grand-total-row">
+        <td class="row-label">${escapeHtml(totals.label || 'Grand Total')}</td>
+        ${(totals.values || []).map(value => `<td>${escapeHtml(value)}</td>`).join('')}
+        <td>${escapeHtml(totals.total)}</td>
+    </tr>`;
+    html += '</tbody></table>';
+
+    block.innerHTML = html;
+    return block;
+}
+
+function buildDelayTable(view) {
+    const block = document.createElement('div');
+    block.className = 'report-block';
+
+    if (!view.rows || !view.rows.length) {
+        block.innerHTML = '<div class="no-data">No delay data for this shift.</div>';
+        return block;
+    }
+
+    let html = '<table class="report-table">';
+    html += `<thead>
+        <tr class="title-row"><th colspan="8">${escapeHtml(view.title || 'Shift Delays')}</th></tr>
+        <tr class="head-row">
+            <th>Delays Type</th>
+            <th>Activity</th>
+            <th>Equipment</th>
+            <th>System</th>
+            <th>Route</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Total</th>
+        </tr>
+    </thead><tbody>`;
+
+    view.rows.forEach(row => {
+        if (row.kind === 'detail') {
+            html += '<tr>';
+            if (row.show_type) {
+                html += `<td class="type-cell" rowspan="${row.type_rowspan}">${escapeHtml(row.type_name)}</td>`;
+            }
+            if (row.show_activity) {
+                html += `<td class="group-cell" rowspan="${row.activity_rowspan}">${escapeHtml(row.activity_name)}</td>`;
+            }
+            if (row.show_equipment) {
+                html += `<td class="group-cell" rowspan="${row.equipment_rowspan}">${escapeHtml(row.equipment_name)}</td>`;
+            }
+            if (row.show_system) {
+                html += `<td class="group-cell" rowspan="${row.system_rowspan}">${escapeHtml(row.system_name)}</td>`;
+            }
+            html += `
+                <td>${escapeHtml(row.route)}</td>
+                <td>${escapeHtml(row.from_time)}</td>
+                <td>${escapeHtml(row.to_time)}</td>
+                <td><strong>${escapeHtml(row.total)}</strong></td>
+            </tr>`;
+        } else if (row.kind === 'system_total') {
+            html += `<tr class="subtotal-row">
+                <td colspan="4" class="subtotal-label">${escapeHtml(row.label)}</td>
+                <td>${escapeHtml(row.total)}</td>
+            </tr>`;
+        } else if (row.kind === 'activity_total') {
+            html += `<tr class="subtotal-row">
+                <td colspan="6" class="subtotal-label">${escapeHtml(row.label)}</td>
+                <td>${escapeHtml(row.total)}</td>
+            </tr>`;
+        } else if (row.kind === 'type_total') {
+            html += `<tr class="type-total-row">
+                <td colspan="7" class="subtotal-label">${escapeHtml(row.label)}</td>
+                <td>${escapeHtml(row.total)}</td>
+            </tr>`;
+        } else if (row.kind === 'grand_total') {
+            html += `<tr class="grand-total-row">
+                <td colspan="7" class="subtotal-label">${escapeHtml(row.label)}</td>
+                <td>${escapeHtml(row.total)}</td>
+            </tr>`;
+        }
+    });
+
+    html += '</tbody></table>';
+    block.innerHTML = html;
+    return block;
+}
+</script>
+{% endblock %}

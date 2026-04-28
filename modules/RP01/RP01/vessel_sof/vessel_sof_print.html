@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOF — {{ vessel_name }}</title>
+    <style>
+        /* ── Screen wrapper ──────────────────────────────────────────── */
+        body {
+            background: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            color: #222;
+        }
+
+        .screen-toolbar {
+            max-width: 210mm;
+            margin: 0 auto 12px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .btn-toolbar {
+            padding: 7px 18px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .btn-print {
+            background: #1a73e8;
+            color: #fff;
+        }
+        .btn-print:hover { background: #1558b0; }
+        .btn-back {
+            background: #f0f2f5;
+            color: #333;
+            border: 1px solid #bbb;
+        }
+        .btn-back:hover { background: #e2e6ea; border-color: #999; }
+
+        /* ── A4 page ─────────────────────────────────────────────────── */
+        .sof-page {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            background: #fff;
+            padding: 14mm 14mm 14mm 14mm;
+            box-sizing: border-box;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+        }
+
+        /* ── Header ─────────────────────────────────────────────────── */
+        .sof-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 6px;
+            gap: 20px;
+        }
+        .sof-header img {
+            height: 56px;
+            object-fit: contain;
+        }
+        .sof-title-block {
+            text-align: center;
+            flex: 1;
+        }
+        .sof-vessel-name {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+        .sof-doc-title {
+            font-size: 14px;
+            font-weight: 700;
+            text-decoration: underline;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        /* ── Main table ──────────────────────────────────────────────── */
+        .sof-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            font-size: 10px;
+        }
+        .sof-table td, .sof-table th {
+            border: 1px solid #555;
+            padding: 4px 7px;
+            vertical-align: top;
+        }
+        .sof-table .banner-row td {
+            font-size: 9.5px;
+            font-weight: 600;
+            text-align: center;
+            padding: 6px 10px;
+            border-bottom: 1.5px solid #333;
+        }
+
+        /* Row number column */
+        .col-num {
+            width: 28px;
+            text-align: center;
+            font-weight: 700;
+            background: #f7f7f7;
+        }
+        /* Label column */
+        .col-label {
+            width: 48%;
+        }
+        /* Value column */
+        .col-value {
+            width: 46%;
+        }
+
+        /* Bold sub-section headings (rows 21, 22) */
+        .sub-section-label {
+            font-weight: 700;
+            text-decoration: underline;
+        }
+
+        /* Hatch-wise sub-table (row 21) */
+        .hatch-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4px;
+        }
+        .hatch-table td {
+            border: none;
+            padding: 2px 4px;
+            font-size: 9.5px;
+        }
+        .hatch-table .hatch-check {
+            text-align: right;
+            width: 20px;
+            font-size: 12px;
+        }
+
+        /* Delay sub-table (row 22) */
+        .delay-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4px;
+        }
+        .delay-table th {
+            background: #f0f0f0;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 3px 5px;
+            border: 1px solid #bbb;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .delay-table td {
+            border: 1px solid #ccc;
+            padding: 3px 5px;
+            font-size: 9.5px;
+        }
+        .delay-note {
+            font-style: italic;
+            font-size: 9px;
+            font-weight: 700;
+            margin-top: 5px;
+        }
+
+        /* Footer */
+        .sof-footer {
+            text-align: center;
+            font-style: italic;
+            font-size: 9.5px;
+            padding-top: 8px;
+            color: #444;
+        }
+
+        /* ── Print overrides ─────────────────────────────────────────── */
+        @media print {
+            body {
+                background: #fff;
+                padding: 0;
+                margin: 0;
+            }
+            .no-print { display: none !important; }
+            .screen-toolbar { display: none !important; }
+            .sof-page {
+                box-shadow: none;
+                width: 100%;
+                min-height: 0;
+                padding: 10mm 10mm 10mm 10mm;
+                margin: 0;
+            }
+            @page {
+                size: A4 portrait;
+                margin: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Screen toolbar (hidden at print) -->
+<div class="screen-toolbar no-print">
+    <button class="btn-toolbar btn-back" onclick="window.close()">&#10005; Close</button>
+    <button class="btn-toolbar btn-print" onclick="window.print()">🖨 Print / Save as PDF</button>
+</div>
+
+<!-- A4 page -->
+<div class="sof-page">
+
+    <!-- Header: vessel name + title -->
+    <div class="sof-header">
+        <div class="sof-title-block">
+            <div class="sof-vessel-name">{{ vessel_name }}</div>
+            <div class="sof-doc-title">STATEMENT OF FACTS</div>
+        </div>
+    </div>
+
+    <!-- Main SOF table -->
+    <table class="sof-table">
+
+        <!-- Banner row -->
+        <tr class="banner-row">
+            <td colspan="3">{{ banner }}</td>
+        </tr>
+
+        <!-- Rows 1–N (generated dynamically in Python) -->
+        {% for row in sof_rows %}
+        <tr>
+            <td class="col-num">{{ loop.index }}</td>
+            <td class="col-label">{{ row.label }}</td>
+            <td class="col-value">{{ row.value }}</td>
+        </tr>
+        {% endfor %}
+
+        <!-- Row N+1: Hatch Wise Cargo Completion -->
+        <tr>
+            <td class="col-num">{{ sof_rows | length + 1 }}</td>
+            <td class="col-label" colspan="2">
+                <span class="sub-section-label">Hatch Wise Cargo Completion</span>
+                {% if holds_display %}
+                <table class="hatch-table">
+                    {% for hold_line in holds_display %}
+                    <tr>
+                        <td>{{ hold_line }}</td>
+                        <td class="hatch-check">&#10003;</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% else %}
+                <div style="color:#999;font-style:italic;margin-top:4px;font-size:9px;">No hold completion data recorded.</div>
+                {% endif %}
+            </td>
+        </tr>
+
+        <!-- Row N+2: Idle Timings / Delays -->
+        <tr>
+            <td class="col-num">{{ sof_rows | length + 2 }}</td>
+            <td class="col-label" colspan="2">
+                <span class="sub-section-label">Idle Timings / Delays if any as per Stevedore's daily report signed by Chief officer of Vessel</span>
+                {% if delays_display %}
+                <table class="delay-table" style="margin-top:6px;">
+                    <thead>
+                        <tr>
+                            <th>CR.NO</th>
+                            <th>DATE - FROM</th>
+                            <th>TO - DATE</th>
+                            <th>REASONS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for d in delays_display %}
+                        <tr>
+                            <td>{{ d.crane_number }}</td>
+                            <td>{{ d.date_from }}</td>
+                            <td>{{ d.date_to }}</td>
+                            <td>{{ d.reason }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="delay-note">BARGE APPROACHING AND PAYLOADER COLLECTION TIMINGS AS PER IDLE SHEET</div>
+                {% else %}
+                <div style="color:#999;font-style:italic;margin-top:4px;font-size:9px;">No idle timings / delays recorded for SOF.</div>
+                {% endif %}
+            </td>
+        </tr>
+
+    </table>
+
+    <!-- Footer -->
+    <div class="sof-footer">
+        <em>This is a system generated report. No signature required.</em>
+    </div>
+
+</div><!-- /sof-page -->
+
+</body>
+</html>

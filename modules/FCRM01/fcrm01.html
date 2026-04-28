@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Currency Master - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .toolbar { margin-bottom: 15px; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-add { background: #27ae60; color: white; }
+    .btn-save { background: #3498db; color: white; }
+    .btn-delete { background: #e74c3c; color: white; }
+    .btn-secondary { background: #95a5a6; color: white; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; }
+    .data-table input, .data-table select { width: 100%; padding: 4px; font-size: 11px; border: 1px solid #ddd; }
+    .pagination { margin-top: 15px; display: flex; gap: 5px; justify-content: center; font-size: 11px; }
+    .tabs { display: flex; margin-bottom: 15px; border-bottom: 2px solid #ecf0f1; }
+    .tab { padding: 10px 20px; cursor: pointer; font-size: 12px; background: none; border: none; border-bottom: 3px solid transparent; }
+    .tab.active { border-bottom-color: #d90429; color: #d90429; font-weight: 600; }
+</style>
+
+<div class="module-header">
+    <h2>Currency Master</h2>
+    <span class="module-code">FCRM01</span>
+</div>
+
+<div class="tabs">
+    <button class="tab active" onclick="showTab('currencies')">Currencies</button>
+    <button class="tab" onclick="showTab('rates')">Exchange Rates</button>
+</div>
+
+<div id="currenciesTab">
+    <div class="toolbar">
+        {% if perms.can_add %}
+        <button class="btn btn-add" onclick="addRow()">+ Add Currency</button>
+        {% endif %}
+        {% if perms.can_delete %}
+        <button class="btn btn-delete" onclick="deleteRow()">Delete Selected</button>
+        {% endif %}
+        {% if perms.can_edit or perms.can_add %}
+        <button class="btn btn-save" onclick="saveAll()">Save All</button>
+        {% endif %}
+    </div>
+
+    <form id="dataForm">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width:30px"><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
+                <th>Currency Code</th>
+                <th>Currency Name</th>
+                <th>Symbol</th>
+                <th>Base Currency</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            {% for row in data %}
+            <tr data-id="{{ row.id }}">
+                <td><input type="checkbox" class="row-select"></td>
+                <td><input type="text" name="currency_code[]" value="{{ row.currency_code }}" {% if row.id and not perms.can_edit %}readonly{% endif %} maxlength="3"></td>
+                <td><input type="text" name="currency_name[]" value="{{ row.currency_name }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+                <td><input type="text" name="currency_symbol[]" value="{{ row.currency_symbol }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+                <td><select name="is_base_currency[]" {% if not perms.can_edit %}disabled{% endif %}>
+                    <option value="1" {% if row.is_base_currency %}selected{% endif %}>Yes</option>
+                    <option value="0" {% if not row.is_base_currency %}selected{% endif %}>No</option>
+                </select></td>
+                <td><select name="is_active[]" {% if not perms.can_edit %}disabled{% endif %}>
+                    <option value="1" {% if row.is_active %}selected{% endif %}>Active</option>
+                    <option value="0" {% if not row.is_active %}selected{% endif %}>Inactive</option>
+                </select></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </form>
+</div>
+
+<div id="ratesTab" style="display:none;">
+    <button class="btn btn-secondary" onclick="location.href='/module/FCRM01/exchange-rates'">Manage Exchange Rates</button>
+</div>
+
+<script>
+addToRecent('FCRM01', 'Currency Master');
+
+function showTab(tab) {
+    if (tab === 'currencies') {
+        document.getElementById('currenciesTab').style.display = 'block';
+        document.getElementById('ratesTab').style.display = 'none';
+        document.querySelectorAll('.tab')[0].classList.add('active');
+        document.querySelectorAll('.tab')[1].classList.remove('active');
+    } else {
+        document.getElementById('currenciesTab').style.display = 'none';
+        document.getElementById('ratesTab').style.display = 'block';
+        document.querySelectorAll('.tab')[0].classList.remove('active');
+        document.querySelectorAll('.tab')[1].classList.add('active');
+    }
+}
+
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.row-select');
+    const selectAll = document.getElementById('selectAll').checked;
+    checkboxes.forEach(cb => cb.checked = selectAll);
+}
+
+function addRow() {
+    const tbody = document.getElementById('tableBody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="checkbox" class="row-select"></td>
+        <td><input type="text" name="currency_code[]" required maxlength="3"></td>
+        <td><input type="text" name="currency_name[]" required></td>
+        <td><input type="text" name="currency_symbol[]"></td>
+        <td><select name="is_base_currency[]">
+            <option value="0" selected>No</option>
+            <option value="1">Yes</option>
+        </select></td>
+        <td><select name="is_active[]">
+            <option value="1" selected>Active</option>
+            <option value="0">Inactive</option>
+        </select></td>
+    `;
+    tbody.appendChild(tr);
+}
+
+async function saveAll() {
+    const rows = document.querySelectorAll('#tableBody tr');
+    let saved = 0;
+
+    for (let row of rows) {
+        const id = row.getAttribute('data-id') || '';
+        const data = {
+            id: id,
+            currency_code: row.querySelector('[name="currency_code[]"]').value.toUpperCase(),
+            currency_name: row.querySelector('[name="currency_name[]"]').value,
+            currency_symbol: row.querySelector('[name="currency_symbol[]"]').value,
+            is_base_currency: row.querySelector('[name="is_base_currency[]"]').value,
+            is_active: row.querySelector('[name="is_active[]"]').value
+        };
+
+        if (!data.currency_code) continue;
+
+        const res = await fetch('/api/module/FCRM01/currency/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        if (result.success) {
+            saved++;
+            if (!id) row.setAttribute('data-id', result.id);
+        }
+    }
+
+    if (saved > 0) {
+        alert(`Saved ${saved} currency(ies)`);
+        location.reload();
+    }
+}
+
+async function deleteRow() {
+    const selected = document.querySelectorAll('.row-select:checked');
+    if (selected.length === 0) {
+        alert('Select rows to delete');
+        return;
+    }
+    if (!confirm(`Delete ${selected.length} currency(ies)?`)) return;
+
+    for (let checkbox of selected) {
+        const row = checkbox.closest('tr');
+        const id = row.getAttribute('data-id');
+        if (id) {
+            await fetch('/api/module/FCRM01/currency/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+        }
+        row.remove();
+    }
+    location.reload();
+}
+</script>
+{% endblock %}

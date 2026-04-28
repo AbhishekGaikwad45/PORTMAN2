@@ -1,0 +1,2741 @@
+{% extends "base.html" %}
+
+{% block title %}Loading Unloading - PORTMAN{% endblock %}
+
+{% block head %}
+<style>
+    .btn-closure {
+        background: #2b6cb0; color: white; border: none;
+        padding: 2px 7px; border-radius: 4px; cursor: pointer;
+        font-size: 12px; font-weight: 700; line-height: 1.6;
+    }
+    .btn-closure:hover { background: #1a4f8f; }
+    .btn-reopen {
+        background: #c05621; color: white; border: none;
+        padding: 2px 7px; border-radius: 4px; cursor: pointer;
+        font-size: 12px; font-weight: 700; line-height: 1.6;
+    }
+    .btn-reopen:hover { background: #9c4221; }
+    .btn-info-closure {
+        background: #718096; color: white; border: none;
+        padding: 2px 7px; border-radius: 4px; cursor: pointer;
+        font-size: 12px; font-weight: 700; line-height: 1.6;
+    }
+    .btn-info-closure:hover { background: #4a5568; }
+    .closure-badge {
+        padding: 2px 8px; border-radius: 12px;
+        font-size: 11px; font-weight: 600; cursor: pointer;
+        display: inline-block;
+    }
+    .detail-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 9999;
+        overflow: auto;
+    }
+    .detail-modal.active {
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 20px;
+    }
+    .detail-modal-content {
+        background: white;
+        border-radius: 8px;
+        width: 95%;
+        max-width: 1400px;
+        margin: 20px auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        position: relative;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    .dark-theme .detail-modal-content {
+        background: #1e293b;
+        color: #e2e8f0;
+    }
+    .detail-modal-header {
+        padding: 20px;
+        border-bottom: 2px solid #3182ce;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: sticky;
+        top: 0;
+        background: white;
+        z-index: 10;
+    }
+    .dark-theme .detail-modal-header {
+        background: #1e293b;
+        border-color: #334155;
+    }
+    .detail-modal-header h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+    }
+    .detail-modal-close {
+        background: #e53e3e;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    .detail-modal-close:hover {
+        background: #c53030;
+    }
+    .detail-modal-body {
+        padding: 20px;
+    }
+    .sub-table-container {
+        background: #f8fafc;
+        padding: 15px;
+        border-bottom: 2px solid #3182ce;
+        box-sizing: border-box;
+        width: 100% !important;
+        overflow: hidden;
+        display: block;
+        margin: 0;
+    }
+    .btn-open-details {
+        background: #3182ce;
+        color: white;
+        border: none;
+        padding: 4px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    .btn-open-details:hover {
+        background: #2c5282;
+    }
+    .dark-theme .sub-table-container {
+        background: #1e293b;
+        border-color: #334155;
+    }
+    .sub-section {
+        margin-bottom: 15px;
+        border: 1px solid #cbd5e0;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    .sub-section:last-child {
+        margin-bottom: 0;
+    }
+    .dark-theme .sub-section {
+        border-color: #475569;
+    }
+    .sub-section-header {
+        background: #e2e8f0;
+        padding: 10px 15px;
+        font-weight: 600;
+        font-size: 13px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #1a202c;
+    }
+    .dark-theme .sub-section-header {
+        background: #334155;
+        color: #e2e8f0;
+    }
+    .sub-section-content {
+        background: white;
+    }
+    .dark-theme .sub-section-content {
+        background: #1e293b;
+    }
+    .sub-tabulator {
+        font-size: 11px;
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    .sub-tabulator .tabulator-header {
+        background: #f1f5f9 !important;
+        border-bottom: 1px solid #cbd5e0 !important;
+    }
+    .sub-tabulator .tabulator-header .tabulator-col {
+        background: #f1f5f9 !important;
+        border-right: 1px solid #e2e8f0 !important;
+    }
+    .sub-tabulator .tabulator-header .tabulator-col-title {
+        color: #374151 !important;
+        font-weight: 600 !important;
+    }
+    .sub-tabulator .tabulator-tableHolder {
+        overflow-x: auto !important;
+    }
+    .sub-tabulator .tabulator-cell {
+        padding: 4px 6px !important;
+    }
+    .dark-theme .sub-tabulator .tabulator-header {
+        background: #475569 !important;
+        border-bottom: 1px solid #64748b !important;
+    }
+    .dark-theme .sub-tabulator .tabulator-header .tabulator-col {
+        background: #475569 !important;
+        border-right: 1px solid #64748b !important;
+    }
+    .dark-theme .sub-tabulator .tabulator-header .tabulator-col-title {
+        color: #e2e8f0 !important;
+    }
+    .btn-sub-add {
+        background: #48bb78;
+        color: white;
+        border: none;
+        padding: 5px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .btn-sub-add:hover {
+        background: #38a169;
+    }
+    .btn-sub-delete {
+        background: #fc8181;
+        color: white;
+        border: none;
+        padding: 3px 10px;
+        border-radius: 3px;
+        font-size: 11px;
+        cursor: pointer;
+    }
+    .btn-sub-delete:hover {
+        background: #f56565;
+    }
+    .btn-sub-clone {
+        background: #68d391;
+        color: white;
+        border: none;
+        padding: 3px 8px;
+        border-radius: 3px;
+        font-size: 11px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+    .btn-sub-clone:hover {
+        background: #48bb78;
+    }
+    .btn-sub-save {
+        background: #3182ce;
+        color: white;
+        border: none;
+        padding: 5px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    .btn-sub-save:hover {
+        background: #2c5282;
+    }
+    .sub-section-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+    /* Dirty section indicator */
+    .sub-section-header.dirty-section::after {
+        content: ' ●';
+        color: #e53e3e;
+        font-size: 12px;
+        margin-left: 4px;
+    }
+    /* Unsaved warning modal */
+    .unsaved-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.6);
+        z-index: 19999;
+        align-items: center;
+        justify-content: center;
+    }
+    .unsaved-modal-overlay.active { display: flex; }
+    .unsaved-modal-box {
+        background: white;
+        border-radius: 8px;
+        padding: 20px 24px;
+        max-width: 380px;
+        width: 90%;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .dark-theme .unsaved-modal-box { background: #1e293b; color: #e2e8f0; }
+    .unsaved-modal-box h4 { margin: 0 0 8px; font-size: 15px; }
+    .unsaved-modal-box ul { margin: 0 0 16px; padding-left: 18px; font-size: 13px; }
+    .unsaved-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    /* Header unsaved banner */
+    .unsaved-banner {
+        display: none;
+        background: #fffbeb;
+        border: 1px solid #f6e05e;
+        color: #744210;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-weight: 500;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        align-items: center;
+        gap: 8px;
+    }
+    .unsaved-banner.visible { display: flex; }
+    .dark-theme .unsaved-banner { background: #2d3748; border-color: #4a5568; color: #fbd38d; }
+    /* Autosave toast */
+    .autosave-toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #2d3748;
+        color: white;
+        padding: 10px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        z-index: 99999;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+    }
+    .autosave-toast.show { opacity: 1; }
+    /* Filter panel */
+    .filter-panel {
+        background: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-bottom: 8px;
+    }
+    .dark-theme .filter-panel { background: #1e293b; border-color: #334155; }
+    .filter-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+    }
+    .filter-col-select, .filter-text-input, .filter-from, .filter-to {
+        padding: 4px 8px;
+        border: 1px solid #cbd5e0;
+        border-radius: 4px;
+        font-size: 12px;
+        background: white;
+    }
+    .dark-theme .filter-col-select,
+    .dark-theme .filter-text-input,
+    .dark-theme .filter-from,
+    .dark-theme .filter-to { background: #0f172a; color: #e2e8f0; border-color: #334155; }
+    .filter-multi-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+    }
+    .filter-multi-list label { display: flex; gap: 4px; align-items: center; font-size: 12px; cursor: pointer; }
+    .filter-remove {
+        background: none;
+        border: none;
+        color: #e53e3e;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 0 4px;
+        line-height: 1;
+    }
+    .filter-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .btn-filter-add { background: #edf2f7; color: #2d3748; border: 1px solid #cbd5e0; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-apply { background: #3182ce; color: white; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-clear { background: #e2e8f0; color: #2d3748; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .sub-save-status { font-size: 11px; color: #38a169; margin-left: 8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Loading Unloading</h2>
+    <span class="module-code">LDUD01</span>
+    <span id="saveStatus" class="save-status"></span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+    {% if permissions.can_edit or permissions.can_add %}<button id="editModeBtn" class="btn" style="font-size:12px;padding:4px 12px;background:#805ad5;color:white;border:none;" onclick="toggleEditMode()">✏️ Edit</button>{% endif %}
+    <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="toggleFilterPanel()">⚙ Filters <span id="filterBadge" style="display:none;background:#3182ce;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+    <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+</div>
+<!-- Header unsaved banner -->
+<div id="unsavedBanner" class="unsaved-banner">
+    ⚠ You have unsaved header changes &mdash; <button class="btn btn-save" onclick="saveAll()" style="margin:0;padding:3px 10px;font-size:12px;">Save Now</button>
+</div>
+<div id="editModeBanner" style="display:none;background:#ebf8ff;border-left:4px solid #3182ce;color:#2b6cb0;padding:8px 14px;font-size:12px;">
+    ✏️ <b>Edit mode</b> — Check rows to select for editing, then modify cells and click <b>Save</b>.
+</div>
+<div id="filterPanel" class="filter-panel" style="display:none;">
+    <div id="filterRows"></div>
+    <div class="filter-actions">
+        <button class="btn-filter-add" onclick="addFilterRow()">+ Add Filter</button>
+        <button class="btn-filter-apply" onclick="applyFilters()">Apply</button>
+        <button class="btn-filter-clear" onclick="clearFilters()">Clear All</button>
+        <button onclick="saveCurrentFilter()" style="background:#48bb78;color:white;border:none;padding:5px 14px;border-radius:4px;font-size:12px;cursor:pointer;">💾 Save Filter</button>
+    </div>
+    <div id="savedFiltersBar" style="margin-top:8px;display:none;align-items:center;flex-wrap:wrap;gap:6px;">
+        <span style="font-size:11px;color:#718096;font-weight:600;white-space:nowrap;">Saved Filters:</span>
+        <div id="savedFiltersList" style="display:inline-flex;flex-wrap:wrap;gap:6px;"></div>
+    </div>
+</div>
+
+<div id="table"></div>
+
+<!-- Details Modal -->
+<div id="detailsModal" class="detail-modal">
+    <div class="detail-modal-content">
+        <div class="detail-modal-header">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <h3 id="modalTitle" style="margin:0;">Details</h3>
+                <span id="modalDirtyBadge" style="display:none;background:#fed7d7;color:#c53030;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">⚠ Unsaved changes</span>
+            </div>
+            <button class="detail-modal-close" onclick="closeDetailsModal()">Close</button>
+        </div>
+        <div class="detail-modal-body">
+            <div id="modalSubTables"></div>
+        </div>
+    </div>
+</div>
+<!-- Closure Modal -->
+<div id="closureModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:480px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 14px;font-size:16px;font-weight:600;">🔒 Vessel Closure</h3>
+        <!-- Missing requirements (when not eligible) -->
+        <div id="closureMissingSection" style="display:none;">
+            <p style="margin:0 0 8px;font-size:13px;font-weight:500;color:#c05621;">The following requirements are not yet met:</p>
+            <ul id="closureMissingList" style="margin:0 0 14px;padding-left:18px;font-size:13px;color:#744210;"></ul>
+        </div>
+        <!-- Eligible content -->
+        <div id="closureEligibleSection" style="display:none;">
+            <div id="closureQtyInfo" style="background:#f0fff4;border:1px solid #9ae6b4;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:13px;"></div>
+            <!-- Proof of Quantity (mandatory) -->
+            <div style="margin-bottom:14px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">
+                    Proof of Quantity <span style="color:#e53e3e">*</span>
+                    <span style="font-size:11px;color:#718096;font-weight:400;">&nbsp;mandatory — multiple files allowed</span>
+                </label>
+                <div id="closureDocsList" style="margin-bottom:8px;display:flex;flex-direction:column;gap:4px;"></div>
+                <input type="file" id="closureDocsInput" multiple accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.doc,.docx" style="display:none;" onchange="uploadProofDocs()">
+                <button type="button" onclick="document.getElementById('closureDocsInput').click()"
+                        style="padding:6px 14px;background:#ebf8ff;border:1px dashed #3182ce;border-radius:4px;cursor:pointer;font-size:12px;color:#2b6cb0;font-weight:500;">
+                    + Upload Proof of Quantity
+                </button>
+                <div id="closureDocsUploading" style="display:none;font-size:12px;color:#718096;margin-top:4px;">Uploading…</div>
+            </div>
+            <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">Confirm your password <span style="color:#e53e3e">*</span></label>
+            <input type="password" id="closurePassword" placeholder="Enter your login password…" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;margin-bottom:14px;">
+            <div style="display:flex;gap:8px;">
+                <button id="btnCloseVessel" onclick="confirmClose('Closed')" style="flex:1;padding:8px;background:#276749;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">✓ Close Vessel</button>
+                <button id="btnPartialClose" onclick="confirmClose('Partial Close')" style="flex:1;padding:8px;background:#c05621;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">⚡ Partial Close</button>
+            </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+            <button onclick="closeClosureModal()" style="padding:6px 18px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+        </div>
+    </div>
+</div>
+<!-- Reopen (Back to Draft) Modal -->
+<div id="reopenModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:420px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 14px;font-size:16px;font-weight:600;">↩ Send Back to Draft</h3>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">Reason <span style="color:#e53e3e">*</span></label>
+        <textarea id="reopenComment" rows="4" placeholder="Enter reason for reopening…" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;resize:vertical;"></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+            <button onclick="closeReopenModal()" style="padding:6px 18px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+            <button onclick="confirmReopen()" style="padding:6px 18px;background:#c05621;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">Send to Draft</button>
+        </div>
+    </div>
+</div>
+<!-- Unsaved Changes Warning Modal -->
+<div id="unsavedModal" class="unsaved-modal-overlay">
+    <div class="unsaved-modal-box">
+        <h4>⚠ Unsaved Changes</h4>
+        <p style="font-size:13px;margin:0 0 8px;">The following sections have unsaved changes:</p>
+        <ul id="unsavedSectionList"></ul>
+        <div class="unsaved-modal-actions">
+            <button onclick="unsavedGoBack()" style="padding:6px 14px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Go Back</button>
+            <button onclick="unsavedDiscard()" style="padding:6px 14px;background:#e53e3e;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">Discard &amp; Close</button>
+            <button onclick="unsavedSaveAll()" style="padding:6px 14px;background:#38a169;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">Save All &amp; Close</button>
+        </div>
+    </div>
+</div>
+<!-- Autosave Toast -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('LDUD01', 'Loading Unloading');
+
+    let table;
+    let moduleConfig = {};
+    let vcnList = [];
+    let delayTypes = [];
+    let bargeList = [];
+    let contractorList = [];
+    let cargoNames = [];
+    let anchorageNames = [];
+    let payloaderList = [];
+    let holdMasterList = [];
+    let equipmentList = [];
+    let subTables = {};
+    let stowagePlanData = {}; // Store stowage plan data per LDUD ID
+
+    // Dirty tracking
+    let dirtySubSections = {};
+    let headerDirty = false;
+    let _isSaving = false;
+    let dirtyRowIds = new Set();
+    let stowageHoldMeta = {}; // Hold metadata per LDUD ID
+    let vesselOpsHoldFields = {}; // Dynamic vessel ops hold columns per LDUD ID
+    let currentOperationTypes = {}; // Track operation type per ldud ID
+    let holdCargoConfig = {}; // Per-hold cargo config per LDUD ID
+    let vcnCargoCache = {}; // VCN-specific cargo names per LDUD ID (for Export)
+    let currentLdudId = null;
+
+    // Module-scope so openDetailsModal and closure functions can access them
+    let isApprover = false;
+    let isAdmin = {{ 'true' if session.get('is_admin') else 'false' }};
+    let editMode = false;
+
+    function isDraftRow(docStatus) {
+        return !docStatus || docStatus === 'Draft' || docStatus === 'Pending';
+    }
+
+    const currentUser = '{{ session.username }}';
+    const permissions = {
+        can_read: {{ permissions.can_read|default(0) }},
+        can_add: {{ permissions.can_add|default(0) }},
+        can_edit: {{ permissions.can_edit|default(0) }},
+        can_delete: {{ permissions.can_delete|default(0) }}
+    };
+
+    function getTodayDate() {
+        return new Date().toISOString().split('T')[0];
+    }
+
+    function showStatus(message, type) {
+        const status = document.getElementById('saveStatus');
+        status.textContent = message;
+        status.className = 'save-status ' + type;
+        if (type === 'saved') {
+            setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
+        }
+    }
+
+    function showUnsavedBanner() {
+        document.getElementById('unsavedBanner').classList.add('visible');
+    }
+    function hideUnsavedBanner() {
+        document.getElementById('unsavedBanner').classList.remove('visible');
+        headerDirty = false;
+    }
+
+    function markDirty(section) {
+        dirtySubSections[section] = true;
+        const header = document.querySelector(`[data-section="${section}"]`);
+        if (header) header.classList.add('dirty-section');
+        updateModalDirtyBadge();
+    }
+
+    function clearDirty(section) {
+        dirtySubSections[section] = false;
+        const header = document.querySelector(`[data-section="${section}"]`);
+        if (header) header.classList.remove('dirty-section');
+        updateModalDirtyBadge();
+    }
+
+    function clearAllDirty() {
+        dirtySubSections = {};
+        document.querySelectorAll('.sub-section-header.dirty-section').forEach(el => el.classList.remove('dirty-section'));
+        updateModalDirtyBadge();
+    }
+
+    function updateModalDirtyBadge() {
+        const hasDirty = Object.values(dirtySubSections).some(Boolean);
+        const badge = document.getElementById('modalDirtyBadge');
+        if (badge) badge.style.display = hasDirty ? 'inline-block' : 'none';
+    }
+
+    function getDirtySections() {
+        return Object.entries(dirtySubSections).filter(([,v]) => v).map(([k]) => k);
+    }
+
+    function showSubStatus(type, parentId, msg) {
+        const header = document.querySelector(`[data-section="${type}"]`);
+        if (!header) return;
+        let status = header.querySelector('.sub-save-status');
+        if (!status) {
+            status = document.createElement('span');
+            status.className = 'sub-save-status';
+            header.querySelector('.sub-section-actions').appendChild(status);
+        }
+        status.textContent = msg;
+        setTimeout(() => { status.textContent = ''; }, 3000);
+    }
+
+    function unsavedGoBack() {
+        document.getElementById('unsavedModal').classList.remove('active');
+    }
+
+    function unsavedDiscard() {
+        document.getElementById('unsavedModal').classList.remove('active');
+        closeDetailsModal(true);
+    }
+
+    async function unsavedSaveAll() {
+        const dirty = getDirtySections();
+        for (const section of dirty) {
+            await saveSubTable(section, currentLdudId, true);
+        }
+        document.getElementById('unsavedModal').classList.remove('active');
+        if (getDirtySections().length === 0) {
+            closeDetailsModal(true);
+        }
+    }
+
+    async function loadMasterData() {
+        const [vcnRes, delayRes, bargeRes, contractorRes, cargoRes, ancRes, pplRes, holdsRes, equipRes, configRes] = await Promise.all([
+            fetch('/api/module/LDUD01/vcn_list'),
+            fetch('/api/module/VDM01/all'),
+            fetch('/api/module/VBM01/all'),
+            fetch('/api/module/VSDM01/all'),
+            fetch('/api/module/VCG01/names'),
+            fetch('/api/module/VANM01/all'),
+            fetch('/api/module/PPL01/all'),
+            fetch('/api/module/VHO01/all'),
+            fetch('/api/module/VEM01/all'),
+            fetch('/admin/api/config/LDUD01')
+        ]);
+        vcnList = await vcnRes.json();
+        delayTypes = await delayRes.json();
+        bargeList = await bargeRes.json();
+        contractorList = await contractorRes.json();
+        cargoNames = await cargoRes.json();
+        anchorageNames = await ancRes.json();
+        payloaderList = await pplRes.json();
+        holdMasterList = await holdsRes.json();
+        equipmentList = await equipRes.json();
+        moduleConfig = await configRes.json();
+        initFilterConfig();
+        initTable();
+    }
+
+    // datetimeEditor and dateEditor are now global (defined in base.html)
+
+    function normalizeDate(value) {
+        if (!value) return '';
+        const str = String(value).trim();
+        if (!str) return '';
+        if (str.length >= 10) return str.slice(0, 10);
+        return str;
+    }
+
+    function sortHoldNames(a, b) {
+        const aNumMatch = String(a).match(/\d+/);
+        const bNumMatch = String(b).match(/\d+/);
+        const aNum = aNumMatch ? parseInt(aNumMatch[0], 10) : NaN;
+        const bNum = bNumMatch ? parseInt(bNumMatch[0], 10) : NaN;
+
+        if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aNum !== bNum) {
+            return aNum - bNum;
+        }
+        return String(a).localeCompare(String(b));
+    }
+
+    function getHoldDefs(ldudId) {
+        return vesselOpsHoldFields[ldudId] || [];
+    }
+
+    function buildVesselOpsRowsFromApi(ldudId, apiRows) {
+        const holdDefs = getHoldDefs(ldudId);
+        const holdByName = {};
+        holdDefs.forEach(def => { holdByName[def.hold_name] = def; });
+
+        const grouped = {};
+        (apiRows || []).forEach(r => {
+            const def = holdByName[r.hold_name];
+            if (!def) return;
+
+            const opDate = normalizeDate(r.start_time || r.end_time);
+            const key = opDate || '__NO_DATE__';
+            if (!grouped[key]) {
+                const row = {op_date: opDate, __cellIds: {}};
+                holdDefs.forEach(d => {
+                    row[d.field] = '';
+                    row.__cellIds[d.field] = [];
+                });
+                grouped[key] = row;
+            }
+
+            const row = grouped[key];
+            const qty = parseFloat(r.quantity || 0);
+            const current = parseFloat(row[def.field] || 0);
+            row[def.field] = (current + (Number.isFinite(qty) ? qty : 0));
+            row.__cellIds[def.field].push(r.id);
+        });
+
+        return Object.values(grouped).sort((a, b) => (a.op_date || '').localeCompare(b.op_date || ''));
+    }
+
+    function getVesselOpsDischargedByHold(ldudId) {
+        const dischargedByHold = {};
+        const holdDefs = getHoldDefs(ldudId);
+        const tableRef = subTables[ldudId] && subTables[ldudId].vessel_ops;
+        if (!tableRef) return dischargedByHold;
+
+        tableRef.getRows().forEach(row => {
+            const data = row.getData();
+            holdDefs.forEach(def => {
+                const qty = parseFloat(data[def.field] || 0);
+                if (!Number.isFinite(qty) || qty <= 0) return;
+                if (!dischargedByHold[def.hold_name]) dischargedByHold[def.hold_name] = 0;
+                dischargedByHold[def.hold_name] += qty;
+            });
+        });
+
+        return dischargedByHold;
+    }
+
+    async function saveVesselOpsCell(payload) {
+        const res = await fetch('/api/module/LDUD01/vessel_ops/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (!res.ok || !result.success || !result.id) {
+            throw new Error(result.error || 'Failed to save vessel operation cell');
+        }
+        return result.id;
+    }
+
+    async function deleteVesselOpsCell(id) {
+        const res = await fetch('/api/module/LDUD01/vessel_ops/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id})
+        });
+        const result = await res.json();
+        if (!res.ok || !result.success) {
+            throw new Error(result.error || 'Failed to delete vessel operation cell');
+        }
+    }
+
+    function addVesselOpsDateRow(ldudId) {
+        const tableRef = subTables[ldudId] && subTables[ldudId].vessel_ops;
+        if (!tableRef) return;
+        const holdDefs = getHoldDefs(ldudId);
+        // Default date: day after the last existing row's date, or today if no rows
+        let nextDate = getTodayDate();
+        const existingRows = tableRef.getRows();
+        if (existingRows.length > 0) {
+            const lastDate = existingRows[existingRows.length - 1].getData().op_date;
+            if (lastDate) {
+                const d = new Date(lastDate);
+                d.setDate(d.getDate() + 1);
+                nextDate = d.toISOString().split('T')[0];
+            }
+        }
+        const newRow = {op_date: nextDate, __cellIds: {}};
+        holdDefs.forEach(def => {
+            newRow[def.field] = '';
+            newRow.__cellIds[def.field] = [];
+        });
+        tableRef.addRow(newRow, false);
+        updateHoldSummary(ldudId);
+    }
+
+    async function deleteVesselOpsDateRow(ldudId, row) {
+        if (!confirm('Delete this date row?')) return;
+
+        const data = row.getData();
+        const holdDefs = getHoldDefs(ldudId);
+        try {
+            for (const def of holdDefs) {
+                const ids = (data.__cellIds && Array.isArray(data.__cellIds[def.field])) ? data.__cellIds[def.field] : [];
+                for (const id of ids) {
+                    await deleteVesselOpsCell(id);
+                }
+            }
+            row.delete();
+            updateHoldSummary(ldudId);
+        } catch (err) {
+            alert(`Error deleting vessel operation row: ${err.message}`);
+        }
+    }
+
+    async function saveVesselOpsTable(ldudId, silent = false) {
+        const tableRef = subTables[ldudId] && subTables[ldudId].vessel_ops;
+        if (!tableRef) return;
+
+        const holdDefs = getHoldDefs(ldudId);
+        const rows = tableRef.getRows();
+
+        for (const row of rows) {
+            const data = row.getData();
+            const opDate = normalizeDate(data.op_date);
+            const hasQty = holdDefs.some(def => {
+                const qty = parseFloat(data[def.field]);
+                return Number.isFinite(qty) && qty > 0;
+            });
+
+            if (hasQty && !opDate) {
+                alert('Date is required for rows where quantity is entered.');
+                return;
+            }
+        }
+
+        let savedCount = 0;
+        let deletedCount = 0;
+
+        try {
+            for (const row of rows) {
+                const data = row.getData();
+                const opDate = normalizeDate(data.op_date);
+                if (!data.__cellIds || typeof data.__cellIds !== 'object') {
+                    data.__cellIds = {};
+                }
+
+                for (const def of holdDefs) {
+                    const rawQty = data[def.field];
+                    const parsedQty = parseFloat(rawQty);
+                    const hasQty = Number.isFinite(parsedQty) && parsedQty > 0;
+                    const ids = Array.isArray(data.__cellIds[def.field]) ? [...data.__cellIds[def.field]] : [];
+
+                    if (hasQty) {
+                        const payload = {
+                            ldud_id: ldudId,
+                            hold_name: def.hold_name,
+                            start_time: opDate,
+                            end_time: null,
+                            cargo_name: def.cargo_name || null,
+                            quantity: parsedQty
+                        };
+
+                        if (ids.length > 0) {
+                            payload.id = ids[0];
+                        }
+
+                        const savedId = await saveVesselOpsCell(payload);
+                        savedCount++;
+
+                        const keepIds = [savedId];
+                        const staleIds = ids.filter(x => x !== savedId);
+                        for (const staleId of staleIds) {
+                            await deleteVesselOpsCell(staleId);
+                            deletedCount++;
+                        }
+                        data.__cellIds[def.field] = keepIds;
+                    } else {
+                        for (const id of ids) {
+                            await deleteVesselOpsCell(id);
+                            deletedCount++;
+                        }
+                        data.__cellIds[def.field] = [];
+                    }
+                }
+
+                row.update({op_date: opDate, __cellIds: data.__cellIds});
+            }
+
+            await tableRef.setData(`/api/module/LDUD01/vessel_ops/${ldudId}`);
+            updateHoldSummary(ldudId);
+            clearDirty('vessel_ops');
+            if (!silent) showSubStatus('vessel_ops', ldudId, `Saved ${savedCount} cell(s)${deletedCount ? `, removed ${deletedCount} empty cell(s)` : ''}`);
+        } catch (err) {
+            alert(`Error saving vessel operations: ${err.message}`);
+        }
+    }
+
+    const CARGO_COLORS = [
+        {bg:'#dbeafe', text:'#1d4ed8', border:'#93c5fd'},  // blue
+        {bg:'#dcfce7', text:'#15803d', border:'#86efac'},  // green
+        {bg:'#fef9c3', text:'#a16207', border:'#fde047'},  // yellow
+        {bg:'#fce7f3', text:'#be185d', border:'#f9a8d4'},  // pink
+        {bg:'#ede9fe', text:'#6d28d9', border:'#c4b5fd'},  // purple
+        {bg:'#ffedd5', text:'#c2410c', border:'#fdba74'},  // orange
+        {bg:'#cffafe', text:'#0e7490', border:'#67e8f9'},  // cyan
+        {bg:'#f1f5f9', text:'#475569', border:'#cbd5e1'},  // slate
+    ];
+
+    function cargoColorBadges(valStr) {
+        if (!valStr) return '<span style="color:#999">-</span>';
+        const parts = valStr.split(', ').filter(Boolean);
+        return parts.map((p, i) => {
+            const c = CARGO_COLORS[i % CARGO_COLORS.length];
+            return `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;background:${c.bg};color:${c.text};border:1px solid ${c.border};margin:1px 2px;">${p}</span>`;
+        }).join('');
+    }
+
+    function initTable() {
+        isApprover = moduleConfig.approver_id == '{{ session.user_id }}' || isAdmin;
+        const canEdit = permissions.can_edit || permissions.can_add;
+        const vcnOptions = {};
+        vcnList.forEach(v => { vcnOptions[v.value] = v.value; });
+
+        const columns = [
+            {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40, frozen: true},
+            {
+                title: "Details",
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    return '<button class="btn-open-details">+</button>';
+                },
+                width: 70,
+                hozAlign: "center",
+                headerSort: false,
+                frozen: true,
+                cellClick: function(e, cell) {
+                    const row = cell.getRow();
+                    const data = row.getData();
+                    if (!data.id) return;
+                    openDetailsModal(data);
+                },
+
+            },
+            {title: "VCN / Vessel / Doc", field: "vcn_display", editor: canEdit ? "list" : false,
+                editorParams: {values: vcnOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true},
+                width: 280,
+                frozen: true,
+                cellEdited: function(cell) {
+                    const val = cell.getValue();
+                    const vcn = vcnList.find(v => v.value === val);
+                    if (vcn) {
+                        cell.getRow().update({
+                            vcn_id: vcn.vcn_id,
+                            vcn_doc_num: vcn.vcn_doc_num,
+                            vessel_name: vcn.vessel_name,
+                            anchored_datetime: vcn.anchored_datetime,
+                            operation_type: vcn.operation_type
+                        });
+                    }
+                }
+            },
+            {title: "Doc Num", field: "doc_num", width: 80, frozen: true},
+            {title: "Cargo Name", field: "cargo_names_display", width: 200, frozen: true,
+                formatter: function(cell) { return cargoColorBadges(cell.getValue()); }
+            },
+            {title: "BL Quantity", field: "bl_quantities_display", width: 160, frozen: true,
+                formatter: function(cell) { return cargoColorBadges(cell.getValue()); }
+            },
+            {title: "Total Disch / Balance", field: "balance_display", width: 180,
+                formatter: function(cell) { return cargoColorBadges(cell.getValue()); }
+            },
+            {title: "NOR Tendered", field: "nor_tendered", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
+            {title: "Agent Name", field: "agent_name", width: 120},
+            {title: "Stevedore", field: "stevedore_name", width: 120},
+            {title: "NOR Accepted", field: "nor_accepted", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
+            {title: "Init Survey From", field: "initial_draft_survey_from", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
+            {title: "Init Survey To", field: "initial_draft_survey_to", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
+            {title: "Init Survey Qty", field: "initial_draft_survey_quantity", editor: canEdit ? "number" : false, width: 100, hozAlign: "right"},
+            {title: "Custom Clearance", field: "custom_clearance", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
+            {title: "Final Survey From", field: "final_draft_survey_from", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
+            {title: "Final Survey To", field: "final_draft_survey_to", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
+            {title: "Agent/Custom/Stevedore On Board", field: "agent_stevedore_onboard", editor: canEdit ? datetimeEditor : false, width: 200,
+                formatter: datetimeCellFormatter},
+            {title: "Discharge/Loading Started", field: "ops_started", width: 170,
+                titleFormatter: function() { return "Disch./Load. Started"; },
+                formatter: datetimeCellFormatter},
+            {title: "Discharge/Loading Completed", field: "ops_completed", width: 170,
+                titleFormatter: function() { return "Disch./Load. Completed"; },
+                formatter: datetimeCellFormatter},
+            {title: "Status", field: "doc_status", width: 110,
+                formatter: function(cell) {
+                    const val = cell.getValue();
+                    const id = cell.getRow().getData().id;
+                    let color = '#744210', bg = '#fefcbf';
+                    if (val === 'Closed') { color = '#276749'; bg = '#c6f6d5'; }
+                    else if (val === 'Partial Close') { color = '#c05621'; bg = '#feebc8'; }
+                    const click = id ? `onclick="showClosureLog(${id}, event)"` : '';
+                    return `<span class="closure-badge" style="background:${bg};color:${color};" ${click} title="Click for history">${val || 'Draft'}</span>`;
+                }
+            },
+            {title: "Created By", field: "created_by", width: 90},
+            {title: "Material PO", field: "material_po_number", editor: canEdit ? "input" : false, width: 120},
+            {
+                title: "Closure", field: "_closure_actions", width: 110, headerSort: false,
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    const status = data.doc_status || 'Draft';
+                    if (isApprover || isAdmin) {
+                        if (status === 'Closed') {
+                            return `<button class="btn-reopen" onclick="reopenRow(${data.id})">↩ Draft</button>`;
+                        }
+                        return `<button class="btn-closure" onclick="openClosureModal(${data.id})">🔒 Close</button>`;
+                    }
+                    // Non-approver: info button only
+                    return `<button class="btn-info-closure" onclick="showClosureInfo(${data.id})">ℹ️ Info</button>`;
+                }
+            }
+        ].filter(Boolean);
+
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 160px)",
+            layout: "fitDataFill",
+            columns: columns,
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 20,
+            ajaxURL: "/api/module/LDUD01/data",
+            ajaxParams: function() { return currentFilters.length ? { filters: JSON.stringify(currentFilters) } : {}; },
+            ajaxResponse: function(url, params, response) {
+                response.data.forEach(r => {
+                    r.vcn_display = r.vcn_doc_num ? `${r.vcn_doc_num} / ${r.vessel_name || ''}` : '';
+                });
+                document.getElementById('rowCount').textContent = response.data.length;
+                document.getElementById('totalCount').textContent = response.total;
+                return response;
+            },
+            selectable: true,
+            rowFormatter: function(row) {
+                const data = row.getData();
+                const status = data.doc_status;
+                const el = row.getElement();
+                if (isDraftRow(status) && data.id) {
+                    el.style.backgroundColor = '#fffff0';
+                    el.style.outline = '';
+                    el.title = '';
+                } else if (editMode && data.id && row.isSelected()) {
+                    el.style.backgroundColor = '#ebf8ff';
+                    el.style.outline = '2px solid #3182ce';
+                    el.title = '';
+                } else {
+                    if (status === 'Closed') el.style.backgroundColor = '#f0fff4';
+                    else if (status === 'Partial Close') el.style.backgroundColor = '#fffbf0';
+                    else el.style.backgroundColor = '#fffff0';
+                    if (data._autosave_error) {
+                        el.style.outline = '2px solid #e53e3e';
+                        el.title = `Autosave failed: ${data._autosave_error}`;
+                    } else {
+                        el.style.outline = '';
+                        el.title = '';
+                    }
+                }
+            }
+        });
+
+        table.on('cellEditing', function(cell) {
+            const field = cell.getColumn().getField();
+            if (!field) return;
+            const rowData = cell.getRow().getData();
+            // New rows and Draft/Pending rows are always editable
+            if (!rowData.id || isDraftRow(rowData.doc_status)) return;
+            // Approved/Closed rows require edit mode + checkbox selection
+            if (!editMode || !cell.getRow().isSelected()) {
+                cell.cancelEdit();
+            }
+        });
+        table.on('rowSelectionChanged', function(data, rows, selected, deselected) {
+            if (!editMode) return;
+            selected.forEach(function(row) {
+                const d = row.getData();
+                const status = d.doc_status || '';
+                if ((status === 'Closed' || status === 'Partial Close') && !isApprover && !isAdmin) {
+                    row.deselect();
+                    alert('Closed records can only be edited by the approver.');
+                    return;
+                }
+                row.reformat();
+            });
+            deselected.forEach(function(row) { row.reformat(); });
+        });
+        table.on('cellEdited', function(cell) {
+            if (_isSaving) return;
+            headerDirty = true;
+            const id = cell.getRow().getData().id;
+            if (id) dirtyRowIds.add(String(id));
+            showUnsavedBanner();
+        });
+        table.on('rowAdded', function() {
+            if (_isSaving) return;
+            headerDirty = true;
+            showUnsavedBanner();
+        });
+
+        if (localStorage.getItem('theme') === 'dark') {
+            document.getElementById('table').classList.add('tabulator-dark');
+        }
+    }
+
+    async function openDetailsModal(data) {
+        const ldudId = data.id;
+        const operationType = data.operation_type || 'Import';
+        clearAllDirty();
+        dirtySubSections = {};
+        currentLdudId = ldudId;
+
+        // Set modal title
+        document.getElementById('modalTitle').textContent = `Details for ${data.vessel_name || data.doc_num || 'LDUD'} (${operationType})`;
+        // Show lock banner for closed records
+        let lockBanner = document.getElementById('modalLockBanner');
+        if (!lockBanner) {
+            lockBanner = document.createElement('div');
+            lockBanner.id = 'modalLockBanner';
+            lockBanner.style.cssText = 'background:#c6f6d5;color:#276749;padding:6px 14px;font-size:12px;font-weight:600;border-bottom:2px solid #9ae6b4;display:none;';
+            document.querySelector('.detail-modal-header').after(lockBanner);
+        }
+        const headerRow = table.getRows().find(r => r.getData().id === ldudId);
+        const headerStatus = headerRow ? (headerRow.getData().doc_status || '') : '';
+        const isUnlocked = isDraftRow(headerStatus) || (editMode && (headerRow?.isSelected() ?? false));
+        if (!isUnlocked) {
+            lockBanner.textContent = '🔒 Read Only — select this row in Edit mode to make changes';
+            lockBanner.style.display = 'block';
+        } else {
+            lockBanner.style.display = 'none';
+        }
+
+        // VCN Draft warning
+        let vcnDraftBanner = document.getElementById('modalVcnDraftBanner');
+        if (!vcnDraftBanner) {
+            vcnDraftBanner = document.createElement('div');
+            vcnDraftBanner.id = 'modalVcnDraftBanner';
+            vcnDraftBanner.style.cssText = 'background:#fefcbf;color:#744210;padding:6px 14px;font-size:12px;font-weight:600;border-bottom:2px solid #f6e05e;display:none;';
+            lockBanner.after(vcnDraftBanner);
+        }
+        if (data.vcn_doc_status === 'Draft' && data.vcn_doc_num) {
+            vcnDraftBanner.textContent = `⚠ Linked VCN (${data.vcn_doc_num}) is currently in Draft — BL total may be pending update`;
+            vcnDraftBanner.style.display = 'block';
+        } else {
+            vcnDraftBanner.style.display = 'none';
+        }
+
+        // Clear previous content
+        const modalBody = document.getElementById('modalSubTables');
+        modalBody.innerHTML = '';
+
+        const anchorageTitle = operationType === 'Export' ? 'Anchorage Recording Export' : 'Anchorage Recording';
+        const canAct = (permissions.can_edit || permissions.can_add) && isUnlocked;
+
+        // Build vessel ops section — Import uses pivot+hold-summary, Export uses simple row table
+        let vesselOpsSection = '';
+        if (operationType === 'Export') {
+            vesselOpsSection = `
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="vessel_ops">
+                    <span>MV Anchorage Loading</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addVesselOpsDateRow(${ldudId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('vessel_ops', ${ldudId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content">
+                    <div id="hold-cargo-panel-${ldudId}" style="padding:6px 10px;background:#eff6ff;border-bottom:1px solid #bfdbfe;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;min-height:34px;"></div>
+                    <div id="vessel_ops-table-${ldudId}" class="sub-tabulator"></div>
+                </div>
+            </div>`;
+        } else {
+            vesselOpsSection = `
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="vessel_ops">
+                    <span>MV Anchorage Discharge</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addVesselOpsDateRow(${ldudId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('vessel_ops', ${ldudId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content">
+                    <div id="hold-cargo-panel-${ldudId}" style="padding:6px 10px;background:#eff6ff;border-bottom:1px solid #bfdbfe;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;min-height:34px;"></div>
+                    <div id="vessel_ops-table-${ldudId}" class="sub-tabulator"></div>
+                </div>
+            </div>`;
+        }
+
+        // Create the sub-table container
+        const subContainer = document.createElement('div');
+        subContainer.className = 'sub-table-container';
+        subContainer.innerHTML = `
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="delays">
+                    <span>Delays</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('delays', ${ldudId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('delays', ${ldudId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content"><div id="delays-table-${ldudId}" class="sub-tabulator"></div></div>
+            </div>
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="anchorage">
+                    <span>${anchorageTitle}</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('anchorage', ${ldudId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('anchorage', ${ldudId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content"><div id="anchorage-table-${ldudId}" class="sub-tabulator"></div></div>
+            </div>
+            ${vesselOpsSection}
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="barge_lines">
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                        <span>${operationType === 'Export' ? 'Barge Lines Export' : 'Barge Lines'}</span>
+                        ${(function(){
+                            const cnames = (data.cargo_names_display||'').split(',').map(s=>s.trim()).filter(Boolean);
+                            const cqtys  = (data.bl_quantities_display||'').split(',').map(s=>s.trim()).filter(Boolean);
+                            if (!cnames.length) return '';
+                            const pills = cnames.map((c,i)=>
+                                `<span style="background:#dbeafe;color:#1e40af;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;">BL ${c}: ${cqtys[i]||'-'}</span>`
+                            ).join('');
+                            return `<span id="barge-bl-summary-${ldudId}" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">${pills} <span id="barge-done-summary-${ldudId}" style="background:#d1fae5;color:#065f46;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;display:none;"></span></span>`;
+                        })()}
+                    </div>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('barge_lines', ${ldudId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('barge_lines', ${ldudId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content">
+                    <div id="barge_lines-table-${ldudId}" class="sub-tabulator"></div>
+                </div>
+            </div>
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="barge_cleaning">
+                    <span>Barge Cleaning Lines</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('barge_cleaning', ${ldudId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('barge_cleaning', ${ldudId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content"><div id="barge_cleaning-table-${ldudId}" class="sub-tabulator"></div></div>
+            </div>
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="hold_completion">
+                    <span>${operationType === 'Export' ? 'Hold Loading Completion' : 'Hold Discharge Completion'}</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('hold_completion', ${ldudId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content"><div id="hold_completion-table-${ldudId}" class="sub-tabulator"></div></div>
+            </div>`;
+
+        // Append to modal body
+        modalBody.appendChild(subContainer);
+
+        // Show the modal
+        document.getElementById('detailsModal').classList.add('active');
+
+        // Initialize sub-tables
+        subTables[ldudId] = {};
+        await initSubTables(ldudId, operationType);
+    }
+
+    function closeDetailsModal(force = false) {
+        const dirty = getDirtySections();
+        if (!force && dirty.length > 0) {
+            const list = document.getElementById('unsavedSectionList');
+            list.innerHTML = dirty.map(s => `<li>${s.replace(/_/g,' ')}</li>`).join('');
+            document.getElementById('unsavedModal').classList.add('active');
+            return;
+        }
+        const modal = document.getElementById('detailsModal');
+        modal.classList.remove('active');
+        if (currentLdudId && subTables[currentLdudId]) {
+            Object.values(subTables[currentLdudId]).forEach(t => {
+                if (t && typeof t.destroy === 'function') t.destroy();
+            });
+            delete subTables[currentLdudId];
+        }
+        document.getElementById('modalSubTables').innerHTML = '';
+        clearAllDirty();
+        currentLdudId = null;
+    }
+
+    // Close modal when clicking outside
+    document.addEventListener('DOMContentLoaded', function() {
+        const modal = document.getElementById('detailsModal');
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                closeDetailsModal();
+            }
+        });
+
+        // Close on escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                closeDetailsModal();
+            }
+        });
+    });
+
+    function renderHoldCargoPanel(ldudId, operationType) {
+        const panel = document.getElementById(`hold-cargo-panel-${ldudId}`);
+        if (!panel) return;
+        const holdDefs = getHoldDefs(ldudId);
+        const canEdit = permissions.can_edit || permissions.can_add;
+
+        // Clear panel
+        panel.innerHTML = '';
+
+        if (!holdDefs.length) {
+            const msg = document.createElement('span');
+            msg.style.cssText = 'color:#94a3b8;font-style:italic;font-size:11px;';
+            msg.textContent = operationType === 'Export' ? 'No holds — set No. of Holds on vessel in VC01' : 'No holds in stowage plan';
+            panel.appendChild(msg);
+            return;
+        }
+
+        const label = document.createElement('span');
+        label.style.cssText = 'font-weight:600;color:#1e40af;white-space:nowrap;margin-right:4px;font-size:11px;';
+        label.textContent = 'Cargo per Hold:';
+        panel.appendChild(label);
+
+        holdDefs.forEach(def => {
+            const wrap = document.createElement('span');
+            wrap.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:white;border:1px solid #bfdbfe;border-radius:4px;padding:2px 6px;';
+
+            const holdLbl = document.createElement('span');
+            holdLbl.style.cssText = 'font-weight:600;color:#374151;white-space:nowrap;font-size:11px;';
+            holdLbl.textContent = def.hold_name + ':';
+
+            const sel = document.createElement('select');
+            const isEditable = canEdit && operationType === 'Export';
+            sel.style.cssText = `font-size:11px;border:none;outline:none;background:transparent;cursor:${isEditable ? 'pointer' : 'default'};max-width:150px;`;
+            if (!isEditable) sel.disabled = true;
+
+            const emptyOpt = document.createElement('option');
+            emptyOpt.value = ''; emptyOpt.textContent = '-- Select --';
+            sel.appendChild(emptyOpt);
+
+            const availableCargo = (operationType === 'Export' && vcnCargoCache[ldudId] && vcnCargoCache[ldudId].length)
+                ? vcnCargoCache[ldudId]
+                : cargoNames;
+
+            // Auto-select if only one cargo option and hold not yet assigned
+            if (availableCargo.length === 1 && !def.cargo_name) {
+                def.cargo_name = availableCargo[0];
+                saveHoldCargo(ldudId, def.hold_name, availableCargo[0]);
+            }
+
+            availableCargo.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.textContent = c;
+                if (c === def.cargo_name) opt.selected = true;
+                sel.appendChild(opt);
+            });
+
+            sel.onchange = function() { saveHoldCargo(ldudId, def.hold_name, this.value); };
+
+            wrap.appendChild(holdLbl);
+            wrap.appendChild(sel);
+            panel.appendChild(wrap);
+        });
+    }
+
+    async function saveHoldCargo(ldudId, holdName, cargoName) {
+        // Update local holdDefs
+        const def = (vesselOpsHoldFields[ldudId] || []).find(d => d.hold_name === holdName);
+        if (def) def.cargo_name = cargoName;
+        if (holdCargoConfig[ldudId]) holdCargoConfig[ldudId][holdName] = cargoName;
+
+        await fetch('/api/module/LDUD01/hold_cargo/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ldud_id: ldudId, hold_name: holdName, cargo_name: cargoName})
+        });
+    }
+
+    async function initSubTables(ldudId, operationType = 'Import') {
+        const _hRow = table.getRows().find(r => r.getData().id === ldudId);
+        const _hStatus = _hRow ? (_hRow.getData().doc_status || '') : '';
+        const canEdit = (permissions.can_edit || permissions.can_add) && (isDraftRow(_hStatus) || (editMode && (_hRow?.isSelected() ?? false)));
+        const isDark = localStorage.getItem('theme') === 'dark';
+
+        // Track operation type for this LDUD
+        currentOperationTypes[ldudId] = operationType;
+
+        // Get VCN ID from main table row
+        const mainRow = table.getRows().find(r => r.getData().id === ldudId);
+        const vcnId = mainRow ? mainRow.getData().vcn_id : null;
+
+        // Fetch stowage plan for this VCN
+        let holdOptions = {};
+        stowageHoldMeta[ldudId] = {};
+        vesselOpsHoldFields[ldudId] = [];
+        if (vcnId) {
+            const stowageRes = await fetch(`/api/module/VCN01/stowage/${vcnId}`);
+            const stowageData = await stowageRes.json();
+            stowagePlanData[ldudId] = stowageData;
+
+            // Build unique holds with their total quantities
+            const holdMap = {};
+            const cargoMap = {};
+            stowageData.forEach(s => {
+                if (s.hold_name) {
+                    if (!holdMap[s.hold_name]) {
+                        holdMap[s.hold_name] = 0;
+                    }
+                    holdMap[s.hold_name] += parseFloat(s.hatchwise_quantity || 0);
+
+                    if (!cargoMap[s.hold_name]) {
+                        cargoMap[s.hold_name] = new Set();
+                    }
+                    if (s.cargo_name) {
+                        cargoMap[s.hold_name].add(s.cargo_name);
+                    }
+                }
+            });
+
+            const holdNames = Object.keys(holdMap).sort(sortHoldNames);
+            holdNames.forEach(h => {
+                holdOptions[h] = h;
+                const cargoNamesForHold = cargoMap[h] ? Array.from(cargoMap[h]).join(', ') : '';
+                stowageHoldMeta[ldudId][h] = {
+                    stowage_qty: holdMap[h] || 0,
+                    cargo_name: cargoNamesForHold
+                };
+            });
+
+            vesselOpsHoldFields[ldudId] = holdNames.map((holdName, idx) => ({
+                hold_name: holdName,
+                field: `hold_${idx + 1}`,
+                stowage_qty: stowageHoldMeta[ldudId][holdName] ? stowageHoldMeta[ldudId][holdName].stowage_qty : 0,
+                cargo_name: stowageHoldMeta[ldudId][holdName] ? stowageHoldMeta[ldudId][holdName].cargo_name : ''
+            }));
+        } else {
+            stowagePlanData[ldudId] = [];
+        }
+
+        // Fetch hold cargo config (per-hold cargo overrides)
+        const holdCargoRes = await fetch(`/api/module/LDUD01/hold_cargo/${ldudId}`);
+        holdCargoConfig[ldudId] = await holdCargoRes.json();
+
+        if (operationType === 'Export' && vcnId) {
+            // Build export holds from vessel's no_of_holds
+            const vesselHoldsRes = await fetch(`/api/module/VCN01/vessel_holds/${vcnId}`);
+            const vesselHoldsData = await vesselHoldsRes.json();
+            const numHolds = vesselHoldsData.no_of_holds || 0;
+            const exportHolds = [];
+            for (let i = 1; i <= numHolds; i++) {
+                const holdName = `Hold ${i}`;
+                exportHolds.push({
+                    hold_name: holdName,
+                    field: `hold_${i}`,
+                    stowage_qty: 0,
+                    cargo_name: holdCargoConfig[ldudId][holdName] || ''
+                });
+            }
+            vesselOpsHoldFields[ldudId] = exportHolds;
+
+            // Fetch cargo names specific to this VCN for the hold cargo panel (both import+export tables)
+            const vcnExportCargoRes = await fetch(`/api/module/VCN01/all_cargo_names/${vcnId}`);
+            vcnCargoCache[ldudId] = await vcnExportCargoRes.json();
+        } else if (operationType !== 'Export') {
+            // Import: override stowage cargo with saved holdCargoConfig
+            vesselOpsHoldFields[ldudId].forEach(def => {
+                if (holdCargoConfig[ldudId][def.hold_name]) {
+                    def.cargo_name = holdCargoConfig[ldudId][def.hold_name];
+                }
+            });
+        }
+
+        const delayOptions = {};
+        delayTypes.forEach(d => { delayOptions[d] = d; });
+
+        const bargeOptions = {};
+        bargeList.forEach(b => { bargeOptions[b] = b; });
+
+        const contractorOptions = {};
+        contractorList.forEach(c => { contractorOptions[c] = c; });
+
+        // Restrict cargo dropdown to cargos on this LDUD record; fall back to full master if none
+        const _mainRowData = mainRow ? mainRow.getData() : {};
+        const ldudCargoNames = (_mainRowData.cargo_names_display || '').split(',').map(s => s.trim()).filter(Boolean);
+        const cargoOptions = {};
+        (ldudCargoNames.length ? ldudCargoNames : cargoNames).forEach(c => { cargoOptions[c] = c; });
+
+        const yesNoOptions = {'Yes': 'Yes', 'No': 'No'};
+        const bptBflOptions = {'BPT': 'BPT', 'BFL': 'BFL'};
+        const mbptPlaOptions = {'MBPT': 'MBPT', 'PLA': 'PLA'};
+
+        // Generic multi-select dropdown editor factory
+        function makeMultiSelectEditor(optionsList, labelPrefix) {
+            return function(cell, onRendered, success, cancel) {
+                var currentVal = cell.getValue() || '';
+                var selected = currentVal ? currentVal.split(',').map(s => s.trim()) : [];
+                var wrapper = document.createElement('div');
+                wrapper.style.cssText = 'width:100%;height:100%;padding:4px;box-sizing:border-box;font-size:11px;cursor:pointer;';
+                wrapper.textContent = currentVal || 'Select...';
+                var dropdown = document.createElement('div');
+                dropdown.style.cssText = 'position:fixed;z-index:99999;background:white;border:1px solid #cbd5e0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:8px;min-width:140px;max-height:240px;overflow-y:auto;display:none;';
+                optionsList.forEach(function(item) {
+                    var label = document.createElement('label');
+                    label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
+                    label.addEventListener('mouseenter', function() { label.style.background = '#f1f5f9'; });
+                    label.addEventListener('mouseleave', function() { label.style.background = 'none'; });
+                    var cb = document.createElement('input');
+                    cb.type = 'checkbox'; cb.value = item;
+                    cb.checked = selected.includes(item);
+                    cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;';
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(labelPrefix ? labelPrefix + item : item));
+                    dropdown.appendChild(label);
+                });
+                var btnRow = document.createElement('div');
+                btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+                var confirmBtn = document.createElement('button');
+                confirmBtn.textContent = 'Apply';
+                confirmBtn.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#3182ce;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+                confirmBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var vals = Array.from(dropdown.querySelectorAll('input[type=checkbox]:checked')).map(c => c.value);
+                    cleanup(); success(vals.join(', '));
+                });
+                var cancelBtn = document.createElement('button');
+                cancelBtn.textContent = 'Cancel';
+                cancelBtn.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+                cancelBtn.addEventListener('click', function(e) { e.stopPropagation(); cleanup(); cancel(); });
+                btnRow.appendChild(confirmBtn); btnRow.appendChild(cancelBtn);
+                dropdown.appendChild(btnRow);
+                document.body.appendChild(dropdown);
+                function cleanup() { if (dropdown.parentNode) dropdown.parentNode.removeChild(dropdown); document.removeEventListener('mousedown', outsideClick); }
+                function outsideClick(e) { if (!dropdown.contains(e.target) && !wrapper.contains(e.target)) { cleanup(); cancel(); } }
+                onRendered(function() {
+                    var rect = cell.getElement().getBoundingClientRect();
+                    dropdown.style.left = rect.left + 'px';
+                    dropdown.style.top = (rect.bottom + 2) + 'px';
+                    dropdown.style.display = 'block';
+                    setTimeout(function() { document.addEventListener('mousedown', outsideClick); }, 10);
+                });
+                wrapper.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') { cleanup(); cancel(); }
+                    if (e.key === 'Enter') {
+                        var vals = Array.from(dropdown.querySelectorAll('input[type=checkbox]:checked')).map(c => c.value);
+                        cleanup(); success(vals.join(', '));
+                    }
+                });
+                return wrapper;
+            };
+        }
+
+        // Multi-select badge formatter
+        function multiBadgeFormatter(color) {
+            return function(cell) {
+                var val = cell.getValue();
+                if (!val) return '';
+                return val.split(',').map(function(v) {
+                    return '<span style="background:' + color + ';color:white;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:2px;">' + v.trim() + '</span>';
+                }).join('');
+            };
+        }
+
+        // Build specific multi-select editors for Import barge lines
+        var holdMultiSelectEditor = canEdit ? makeMultiSelectEditor(holdMasterList, '') : false;
+        var craneLoadedFromEditor = canEdit ? makeMultiSelectEditor(['1','2','3','4','5','6'], 'Crane ') : false;
+        var portCraneEditor = canEdit ? makeMultiSelectEditor(equipmentList, '') : false;
+
+        // Crane Number multiselect dropdown editor
+        var craneMultiSelectEditor = function(cell, onRendered, success, cancel) {
+            var currentVal = cell.getValue() || '';
+            var selected = currentVal ? currentVal.split(',').map(s => s.trim()) : [];
+
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'width:100%;height:100%;padding:4px;box-sizing:border-box;font-size:11px;cursor:pointer;';
+            wrapper.textContent = currentVal || 'Select...';
+
+            // Dropdown appended to body to avoid Tabulator overflow clipping
+            var dropdown = document.createElement('div');
+            dropdown.style.cssText = 'position:fixed;z-index:99999;background:white;border:1px solid #cbd5e0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:8px;min-width:140px;display:none;';
+
+            ['1','2','3','4','5','6'].forEach(function(num) {
+                var label = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
+                label.addEventListener('mouseenter', function() { label.style.background = '#f1f5f9'; });
+                label.addEventListener('mouseleave', function() { label.style.background = 'none'; });
+                var cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = num;
+                cb.checked = selected.includes(num);
+                cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;';
+                label.appendChild(cb);
+                label.appendChild(document.createTextNode('Crane ' + num));
+                dropdown.appendChild(label);
+            });
+
+            var btnRow = document.createElement('div');
+            btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+
+            var confirmBtn = document.createElement('button');
+            confirmBtn.textContent = 'Apply';
+            confirmBtn.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#3182ce;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+            confirmBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var checks = dropdown.querySelectorAll('input[type=checkbox]:checked');
+                var vals = Array.from(checks).map(c => c.value);
+                cleanup();
+                success(vals.join(', '));
+            });
+
+            var cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+            cancelBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                cleanup();
+                cancel();
+            });
+
+            btnRow.appendChild(confirmBtn);
+            btnRow.appendChild(cancelBtn);
+            dropdown.appendChild(btnRow);
+            document.body.appendChild(dropdown);
+
+            function cleanup() {
+                if (dropdown.parentNode) dropdown.parentNode.removeChild(dropdown);
+                document.removeEventListener('mousedown', outsideClick);
+            }
+
+            function outsideClick(e) {
+                if (!dropdown.contains(e.target) && !wrapper.contains(e.target)) {
+                    cleanup();
+                    cancel();
+                }
+            }
+
+            onRendered(function() {
+                var rect = cell.getElement().getBoundingClientRect();
+                dropdown.style.left = rect.left + 'px';
+                dropdown.style.top = (rect.bottom + 2) + 'px';
+                dropdown.style.display = 'block';
+                setTimeout(function() { document.addEventListener('mousedown', outsideClick); }, 10);
+            });
+
+            wrapper.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') { cleanup(); cancel(); }
+                if (e.key === 'Enter') {
+                    var checks = dropdown.querySelectorAll('input[type=checkbox]:checked');
+                    var vals = Array.from(checks).map(c => c.value);
+                    cleanup();
+                    success(vals.join(', '));
+                }
+            });
+
+            return wrapper;
+        };
+
+        // Delays table
+        subTables[ldudId].delays = new Tabulator(`#delays-table-${ldudId}`, {
+            layout: "fitDataFill",
+            height: 200,
+            ajaxURL: `/api/module/LDUD01/delays/${ldudId}`,
+            columnDefaults: { headerSort: false },
+            cellEdited: () => markDirty('delays'),
+            columns: [
+                {title: "Crane No", field: "crane_number", width: 110, editor: canEdit ? craneMultiSelectEditor : false,
+                    formatter: function(cell) {
+                        var val = cell.getValue();
+                        if (!val) return '';
+                        return val.split(',').map(function(v) {
+                            return '<span style="background:#3182ce;color:white;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:2px;">' + v.trim() + '</span>';
+                        }).join('');
+                    }
+                },
+                {title: "Delay Name", field: "delay_name", width: 120, editor: canEdit ? "list" : false,
+                    editorParams: {values: delayOptions, autocomplete: true, allowEmpty: true}},
+                {title: "Start", field: "start_datetime", width: 140, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "End", field: "end_datetime", width: 140, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "Mins", field: "total_time_mins", width: 60, hozAlign: "right"},
+                {title: "Hrs", field: "total_time_hrs", width: 60, hozAlign: "right"},
+                {title: "Minus Hrs", field: "minus_delay_hours", width: 70, editor: canEdit ? "list" : false,
+                    editorParams: {values: yesNoOptions}},
+                canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, hozAlign: "center", headerSort: false,
+                    cellClick: function(e, cell) { deleteSubRow('delays', cell.getRow().getData().id, ldudId); }
+                } : null
+            ].filter(Boolean)
+        });
+        if (isDark) document.querySelector(`#delays-table-${ldudId}`).classList.add('tabulator-dark');
+
+        // Anchorage Recording table
+        const anchorageOptions = {};
+        anchorageNames.forEach(a => { anchorageOptions[a] = a; });
+
+        const anchorageStartedTitle = operationType === 'Export' ? 'Loading Started' : 'Discharge Started';
+        const anchorageCompletedTitle = operationType === 'Export' ? 'Loading Completed' : 'Discharge Completed';
+
+        subTables[ldudId].anchorage = new Tabulator(`#anchorage-table-${ldudId}`, {
+            layout: "fitColumns",
+            height: 200,
+            ajaxURL: `/api/module/LDUD01/anchorage/${ldudId}`,
+            columnDefaults: { headerSort: false },
+            cellEdited: () => markDirty('anchorage'),
+            columns: [
+                {title: "Anchorage Name", field: "anchorage_name", widthGrow: 1, editor: canEdit ? "list" : false,
+                    editorParams: {values: anchorageOptions, autocomplete: true, allowEmpty: true}},
+                {title: "Anchored", field: "anchored", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: anchorageStartedTitle, field: "discharge_started", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: anchorageCompletedTitle, field: "discharge_commenced", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "Anchor Aweigh", field: "anchor_aweigh", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "Cargo Quantity", field: "cargo_quantity", widthGrow: 1, editor: canEdit ? "number" : false, hozAlign: "right",
+                    editorParams: {min: 0, step: 0.01}},
+                canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, widthGrow: 0, hozAlign: "center", headerSort: false,
+                    cellClick: function(e, cell) { deleteSubRow('anchorage', cell.getRow().getData().id, ldudId); }
+                } : null
+            ].filter(Boolean)
+        });
+        if (isDark) document.querySelector(`#anchorage-table-${ldudId}`).classList.add('tabulator-dark');
+
+        // Barge Lines table — column order/titles differ for Export
+        const dtFmt = datetimeCellFormatter;
+        const delBtn = canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, hozAlign: "center", headerSort: false,
+            cellClick: function(e, cell) { deleteSubRow('barge_lines', cell.getRow().getData().id, ldudId); }
+        } : null;
+
+        const cloneBtn = canEdit ? {title: "", field: "clone_action", formatter: cloneCargoButtonFormatter, width: 40, hozAlign: "center", headerSort: false,
+            cellClick: function(e, cell) { const d = cell.getRow().getData(); if (d.id) cloneBargeLineForCargo(d, ldudId); }
+        } : null;
+
+        let bargeLinesColumns;
+        if (operationType === 'Export') {
+            bargeLinesColumns = [
+                {title: "S.No.", formatter: "rownum", width: 45, hozAlign: "center", headerSort: false, frozen: true},
+                {title: "Trip#", field: "trip_number", width: 50, hozAlign: "center", frozen: true},
+                {title: "Barge", field: "barge_name", width: 100, editor: canEdit ? "list" : false,
+                    editorParams: {values: bargeOptions, autocomplete: true, allowEmpty: true}, frozen: true},
+                {title: "Cargo", field: "cargo_name", width: 100, editor: canEdit ? "list" : false,
+                    editorParams: {values: cargoOptions, autocomplete: true, allowEmpty: true}},
+                {title: "Trip Start", field: "trip_start", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "AMF at Port", field: "amf_at_port", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Alongside At Loading Berth", field: "along_side_berth", width: 160, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Loading Start", field: "commenced_loading", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Loading End", field: "completed_loading", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Cast Off from Berth", field: "cast_off_loading_berth", width: 140, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Port Crane", field: "port_crane", width: 130, editor: portCraneEditor,
+                    formatter: multiBadgeFormatter('#805ad5')},
+                {title: "Cast Off from Port", field: "cast_off_port", width: 140, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Qty", field: "discharge_quantity", width: 80, editor: canEdit ? "number" : false, hozAlign: "right",
+                    editorParams: {min: 0, step: 0.01},
+                    bottomCalc: "sum", bottomCalcFormatter: function(cell) {
+                        const tot = parseFloat(cell.getValue()||0);
+                        const el = document.getElementById(`barge-done-summary-${ldudId}`);
+                        if (el) { el.textContent = `Barges: ${tot.toFixed(2)} MT`; el.style.display = tot > 0 ? 'inline' : 'none'; }
+                        return `<b style="color:#065f46;">${tot > 0 ? tot.toFixed(2) : ''}</b>`;
+                    }},
+                {title: "Anch Gull Island (Loaded)", field: "anchored_gull_island", width: 155, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Aweigh Gull Island (Loaded)", field: "aweigh_gull_island", width: 160, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "MBPT/PLA", field: "bpt_bfl", width: 80, editor: canEdit ? "list" : false,
+                    editorParams: {values: mbptPlaOptions}},
+                {title: "Alongside Vessel", field: "along_side_vessel", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Unload Start", field: "commence_discharge_berth", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Unload End", field: "completed_discharge_berth", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Cast Off Vessel", field: "cast_off_berth", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Hold", field: "hold_name", width: 100, editor: holdMultiSelectEditor,
+                    formatter: multiBadgeFormatter('#38a169')},
+                {title: "Crane", field: "crane_loaded_from", width: 130, editor: craneLoadedFromEditor,
+                    formatter: multiBadgeFormatter('#3182ce')},
+                {title: "Anch Gull Island (Empty)", field: "anchored_gull_island_empty", width: 160, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Aweigh Gull Island (Empty)", field: "aweigh_gull_island_empty", width: 165, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                cloneBtn, delBtn
+            ].filter(Boolean);
+        } else {
+            bargeLinesColumns = [
+                {title: "S.No.", formatter: "rownum", width: 45, hozAlign: "center", headerSort: false, frozen: true},
+                {title: "Trip#", field: "trip_number", width: 50, hozAlign: "center", frozen: true},
+                {title: "Hold", field: "hold_name", width: 100, editor: holdMultiSelectEditor,
+                    formatter: multiBadgeFormatter('#38a169'), frozen: true},
+                {title: "Crane Loaded From", field: "crane_loaded_from", width: 130, editor: craneLoadedFromEditor,
+                    formatter: multiBadgeFormatter('#3182ce'), frozen: true},
+                {title: "Barge", field: "barge_name", width: 100, editor: canEdit ? "list" : false,
+                    editorParams: {values: bargeOptions, autocomplete: true, allowEmpty: true}, frozen: true},
+                {title: "Stevedore", field: "contractor_name", width: 120, editor: canEdit ? "list" : false,
+                    editorParams: {values: contractorOptions, autocomplete: true, allowEmpty: true}},
+                {title: "Cargo", field: "cargo_name", width: 100, editor: canEdit ? "list" : false,
+                    editorParams: {values: cargoOptions, autocomplete: true, allowEmpty: true}},
+                {title: "MBPT/PLA", field: "bpt_bfl", width: 80, editor: canEdit ? "list" : false,
+                    editorParams: {values: mbptPlaOptions}},
+                {title: "Trip Start (Prev. Cast off from Port)", field: "trip_start", width: 170, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Anch Gull Island", field: "anchored_gull_island", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Aweigh Gull Island", field: "aweigh_gull_island", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Alongside Vessel", field: "along_side_vessel", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Loading Start", field: "commenced_loading", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Loading End", field: "completed_loading", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Qty", field: "discharge_quantity", width: 80, editor: canEdit ? "number" : false, hozAlign: "right",
+                    editorParams: {min: 0, step: 0.01},
+                    bottomCalc: "sum", bottomCalcFormatter: function(cell) {
+                        const tot = parseFloat(cell.getValue()||0);
+                        const el = document.getElementById(`barge-done-summary-${ldudId}`);
+                        if (el) { el.textContent = `Barges: ${tot.toFixed(2)} MT`; el.style.display = tot > 0 ? 'inline' : 'none'; }
+                        return `<b style="color:#065f46;">${tot > 0 ? tot.toFixed(2) : ''}</b>`;
+                    }},
+                {title: "Cast Off MV", field: "cast_off_mv", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Anch Gull Island (Loaded)", field: "anchored_gull_island_empty", width: 155, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Aweigh Gull Island (Loaded)", field: "aweigh_gull_island_empty", width: 160, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "AMF at Port", field: "amf_at_port", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Alongside Berth", field: "along_side_berth", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Discharge Start", field: "commence_discharge_berth", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Discharge End", field: "completed_discharge_berth", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Cast Off Berth", field: "cast_off_berth", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Cast Off Port", field: "cast_off_port", width: 130, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Port Crane", field: "port_crane", width: 130, editor: portCraneEditor,
+                    formatter: multiBadgeFormatter('#805ad5')},
+                cloneBtn, delBtn
+            ].filter(Boolean);
+        }
+
+        subTables[ldudId].barge_lines = new Tabulator(`#barge_lines-table-${ldudId}`, {
+            layout: "fitDataFill",
+            height: 250,
+            ajaxURL: `/api/module/LDUD01/barge_lines/${ldudId}`,
+            columnDefaults: { headerSort: false },
+            cellEdited: () => markDirty('barge_lines'),
+            columns: bargeLinesColumns
+        });
+        if (isDark) document.querySelector(`#barge_lines-table-${ldudId}`).classList.add('tabulator-dark');
+
+        {
+            // Both Import and Export use a pivot table layout.
+            // Import: holds from stowage plan, shows Balance On Board
+            // Export: holds from vessel no_of_holds, shows Total Loaded only
+            const holdDefs = getHoldDefs(ldudId);
+            const isExport = operationType === 'Export';
+
+            // Build column groups: each hold gets a group with title "Hold XX (Cargo)"
+            const vesselOpsHoldColumnGroups = holdDefs.map((def, idx) => {
+                const cargoLabel = def.cargo_name ? ` (${def.cargo_name})` : '';
+                const subTitle = isExport
+                    ? `H${idx + 1}`
+                    : `H${idx + 1} Stow: ${parseFloat(def.stowage_qty || 0).toFixed(2)}`;
+                return {
+                    title: `${def.hold_name}${cargoLabel}`,
+                    columns: [{
+                        title: subTitle,
+                        field: def.field,
+                        width: 140,
+                        hozAlign: "right",
+                        editor: canEdit ? "number" : false,
+                        editorParams: {min: 0, step: 0.01},
+                        cellEdited: function() { updateHoldSummary(ldudId); },
+                        bottomCalc: function(values) {
+                            let sum = 0;
+                            values.forEach(v => { const n = parseFloat(v || 0); if (Number.isFinite(n)) sum += n; });
+                            return sum;
+                        },
+                        bottomCalcFormatter: function(cell) {
+                            const total = parseFloat(cell.getValue() || 0);
+                            if (isExport) {
+                                return total > 0 ? `<div style="font-weight:600;color:#15803d;">${total.toFixed(2)}</div>` : '';
+                            }
+                            const matchDef = holdDefs.find(d => d.field === cell.getColumn().getField());
+                            const stowage = matchDef ? parseFloat(matchDef.stowage_qty || 0) : 0;
+                            const balance = stowage - total;
+                            const balColor = balance < 0 ? '#e53e3e' : balance === 0 ? '#38a169' : '#1f2937';
+                            return `<div style="line-height:1.8;">
+                                <div style="border-bottom:1px solid #cbd5e0;padding-bottom:2px;">${total > 0 ? total.toFixed(2) : ''}</div>
+                                <div style="color:${balColor};padding-top:2px;">${balance.toFixed(2)}</div>
+                            </div>`;
+                        }
+                    }]
+                };
+            });
+
+            // Total column
+            const totalLabel = isExport ? 'Total Loaded' : 'Total Day Qty';
+            let totalStowageAll = 0;
+            if (!isExport) holdDefs.forEach(def => { totalStowageAll += parseFloat(def.stowage_qty || 0); });
+            const totalColSubTitle = isExport ? '' : `Total Stow: ${totalStowageAll.toFixed(2)}`;
+            const totalDayQtyCol = {
+                title: totalLabel,
+                columns: [{
+                    title: totalColSubTitle,
+                    field: "total_day_qty",
+                    width: 130,
+                    hozAlign: "right",
+                    formatter: function(cell) {
+                        const rowData = cell.getRow().getData();
+                        let total = 0;
+                        holdDefs.forEach(def => {
+                            const v = parseFloat(rowData[def.field] || 0);
+                            if (Number.isFinite(v)) total += v;
+                        });
+                        return total > 0 ? total.toFixed(2) : '';
+                    },
+                    bottomCalc: function(values, data) {
+                        let grandTotal = 0;
+                        (data || []).forEach(row => {
+                            holdDefs.forEach(def => {
+                                const v = parseFloat(row[def.field] || 0);
+                                if (Number.isFinite(v)) grandTotal += v;
+                            });
+                        });
+                        return grandTotal;
+                    },
+                    bottomCalcFormatter: function(cell) {
+                        const grand = parseFloat(cell.getValue() || 0);
+                        if (isExport) {
+                            return `<div style="font-weight:700;color:#15803d;">${grand > 0 ? grand.toFixed(2) : ''}</div>`;
+                        }
+                        const totalBalance = totalStowageAll - grand;
+                        const balColor = totalBalance < 0 ? '#e53e3e' : totalBalance === 0 ? '#38a169' : '#1f2937';
+                        return `<div style="line-height:1.8;font-weight:700;">
+                            <div style="border-bottom:1px solid #cbd5e0;padding-bottom:2px;">${grand > 0 ? grand.toFixed(2) : ''}</div>
+                            <div style="color:${balColor};padding-top:2px;">${totalBalance.toFixed(2)}</div>
+                        </div>`;
+                    }
+                }]
+            };
+
+            // Date column with bottom label
+            const dateCol = {
+                title: "Date", field: "op_date", width: 130, editor: canEdit ? dateEditor : false,
+                bottomCalcFormatter: function() {
+                    if (isExport) {
+                        return `<div style="font-weight:700;color:#15803d;">Total Loaded</div>`;
+                    }
+                    return `<div style="line-height:1.8;font-weight:700;">
+                        <div style="border-bottom:1px solid #cbd5e0;padding-bottom:2px;color:#8B6914;">Total Discharge</div>
+                        <div style="color:#2563eb;padding-top:2px;">Balance On Board</div>
+                    </div>`;
+                },
+                bottomCalc: function() { return ''; }
+            };
+
+            subTables[ldudId].vessel_ops = new Tabulator(`#vessel_ops-table-${ldudId}`, {
+                layout: "fitDataFill",
+                height: 300,
+                ajaxURL: `/api/module/LDUD01/vessel_ops/${ldudId}`,
+                ajaxResponse: function(url, params, response) {
+                    return buildVesselOpsRowsFromApi(ldudId, response);
+                },
+                columnDefaults: { headerSort: false },
+                columnHeaderVertAlign: "bottom",
+                cellEdited: () => markDirty('vessel_ops'),
+                columns: [
+                    dateCol,
+                    ...vesselOpsHoldColumnGroups,
+                    totalDayQtyCol,
+                    canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, hozAlign: "center", headerSort: false,
+                        cellClick: function(e, cell) { deleteVesselOpsDateRow(ldudId, cell.getRow()); }
+                    } : null
+                ].filter(Boolean)
+            });
+            if (isDark) document.querySelector(`#vessel_ops-table-${ldudId}`).classList.add('tabulator-dark');
+
+            // Render cargo-per-hold panel above the table
+            renderHoldCargoPanel(ldudId, operationType);
+        }
+
+        // Barge Cleaning Lines table
+        const pplOptions = {};
+        payloaderList.forEach(p => { pplOptions[p] = p; });
+
+        // Build barge options from current barge lines data (only barges used in this LDUD)
+        function getBargeCleaningOptions() {
+            const opts = {};
+            if (subTables[ldudId] && subTables[ldudId].barge_lines) {
+                subTables[ldudId].barge_lines.getRows().forEach(row => {
+                    const bn = row.getData().barge_name;
+                    if (bn) opts[bn] = bn;
+                });
+            }
+            return opts;
+        }
+
+        subTables[ldudId].barge_cleaning = new Tabulator(`#barge_cleaning-table-${ldudId}`, {
+            layout: "fitDataFill",
+            height: 200,
+            ajaxURL: `/api/module/LDUD01/barge_cleaning/${ldudId}`,
+            columnDefaults: { headerSort: false },
+            cellEdited: () => markDirty('barge_cleaning'),
+            columns: [
+                {title: "Barge", field: "barge_name", width: 130, editor: canEdit ? "list" : false,
+                    editorParams: function() { return {values: getBargeCleaningOptions(), autocomplete: true, allowEmpty: true}; }},
+                {title: "Payloader", field: "payloader_name", width: 130, editor: canEdit ? "list" : false,
+                    editorParams: {values: pplOptions, autocomplete: true, allowEmpty: true}},
+                {title: "HMR Start", field: "hmr_start", width: 100, editor: canEdit ? "number" : false, hozAlign: "right",
+                    editorParams: {min: 0, step: 0.01}},
+                {title: "HMR End", field: "hmr_end", width: 100, editor: canEdit ? "number" : false, hozAlign: "right",
+                    editorParams: {min: 0, step: 0.01}},
+                {title: "Diesel Start", field: "diesel_start", width: 140, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "Diesel End", field: "diesel_end", width: 140, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "Start Time", field: "start_time", width: 140, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "End Time", field: "end_time", width: 140, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, hozAlign: "center", headerSort: false,
+                    cellClick: function(e, cell) { deleteSubRow('barge_cleaning', cell.getRow().getData().id, ldudId); }
+                } : null
+            ].filter(Boolean)
+        });
+        if (isDark) document.querySelector(`#barge_cleaning-table-${ldudId}`).classList.add('tabulator-dark');
+
+        // Hold Completion table
+        // Total Time formatter: compute HH:MM from commenced/completed
+        function holdTotalTimeFormatter(cell) {
+            const row = cell.getRow().getData();
+            if (!row.commenced || !row.completed) return '';
+            try {
+                var start = new Date(row.commenced.replace(' ', 'T'));
+                var end = new Date(row.completed.replace(' ', 'T'));
+                var diffMs = end - start;
+                if (diffMs < 0) return '<span style="color:#e53e3e">Invalid</span>';
+                var totalMins = Math.floor(diffMs / 60000);
+                var hrs = Math.floor(totalMins / 60);
+                var mins = totalMins % 60;
+                return hrs.toString().padStart(2, '0') + ':' + mins.toString().padStart(2, '0');
+            } catch (e) { return ''; }
+        }
+
+        // Dynamically sync hold completion rows from source holds
+        // Import: holds come from stowage plan; Export: holds come from MV Anchorage Loading (vessel_ops)
+        function getSourceHolds() {
+            if (operationType === 'Export') {
+                // Get unique hold names from vessel_ops (MV Anchorage Loading) table
+                const holdsSet = new Set();
+                if (subTables[ldudId] && subTables[ldudId].vessel_ops) {
+                    subTables[ldudId].vessel_ops.getRows().forEach(row => {
+                        const hn = row.getData().hold_name;
+                        if (hn) hn.split(',').forEach(h => holdsSet.add(h.trim()));
+                    });
+                }
+                return Array.from(holdsSet).sort(sortHoldNames);
+            } else {
+                return Object.keys(stowageHoldMeta[ldudId] || {}).sort(sortHoldNames);
+            }
+        }
+
+        async function syncHoldCompletionRows(existingRows) {
+            const sourceHolds = getSourceHolds();
+            const existingHoldNames = existingRows.map(r => r.hold_name);
+            // Create rows for holds that don't exist yet
+            const missingHolds = sourceHolds.filter(h => !existingHoldNames.includes(h));
+            // Delete rows for holds that are no longer in source
+            const extraRows = existingRows.filter(r => !sourceHolds.includes(r.hold_name));
+
+            const createPromises = missingHolds.map(holdName =>
+                fetch('/api/module/LDUD01/hold_completion/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ldud_id: ldudId, hold_name: holdName})
+                }).then(r => r.json())
+            );
+            const deletePromises = extraRows.map(r =>
+                fetch('/api/module/LDUD01/hold_completion/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: r.id})
+                })
+            );
+            await Promise.all([...createPromises, ...deletePromises]);
+
+            if (missingHolds.length > 0 || extraRows.length > 0) {
+                // Refetch the full list after sync
+                const res = await fetch(`/api/module/LDUD01/hold_completion/${ldudId}`);
+                return await res.json();
+            }
+            return existingRows;
+        }
+
+        const holdCompCommencedTitle = operationType === 'Export' ? 'Loading Commenced' : 'Discharge Commenced';
+        const holdCompCompletedTitle = operationType === 'Export' ? 'Loading Completed' : 'Discharge Completed';
+
+        subTables[ldudId].hold_completion = new Tabulator(`#hold_completion-table-${ldudId}`, {
+            layout: "fitColumns",
+            height: 200,
+            ajaxURL: `/api/module/LDUD01/hold_completion/${ldudId}`,
+            columnDefaults: { headerSort: false },
+            cellEdited: () => markDirty('hold_completion'),
+            ajaxResponse: function(url, params, response) {
+                // Sync holds asynchronously then update the table
+                syncHoldCompletionRows(response).then(synced => {
+                    if (synced !== response) {
+                        subTables[ldudId].hold_completion.setData(synced);
+                    }
+                });
+                // Sort by source hold order for now
+                const sourceHolds = getSourceHolds();
+                return response.sort((a, b) => sourceHolds.indexOf(a.hold_name) - sourceHolds.indexOf(b.hold_name));
+            },
+            columns: [
+                {title: "Hold Name", field: "hold_name", widthGrow: 1},
+                {title: holdCompCommencedTitle, field: "commenced", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: holdCompCompletedTitle, field: "completed", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter},
+                {title: "Total Time", field: "total_time", widthGrow: 0.5, hozAlign: "center",
+                    formatter: holdTotalTimeFormatter}
+            ]
+        });
+        if (isDark) document.querySelector(`#hold_completion-table-${ldudId}`).classList.add('tabulator-dark');
+    }
+
+    function deleteButtonFormatter(cell) {
+        return '<button class="btn-sub-delete">X</button>';
+    }
+
+    function cloneCargoButtonFormatter(cell) {
+        const data = cell.getRow().getData();
+        if (!data.id) return '';
+        return '<button class="btn-sub-clone" title="Add another cargo for this same trip">+C</button>';
+    }
+
+    async function cloneBargeLineForCargo(rowData, ldudId) {
+        // Copy all fields except id, cargo_name and discharge_quantity
+        const cloned = {...rowData};
+        delete cloned.id;
+        cloned.ldud_id = ldudId;
+        cloned.cargo_name = null;
+        cloned.discharge_quantity = null;
+        // trip_number and barge_name are kept — backend will use the explicit trip_number
+
+        const res = await fetch('/api/module/LDUD01/barge_lines/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(cloned)
+        });
+        const result = await res.json();
+        if (result.success) {
+            // Reload the barge lines table so the cloned row appears
+            if (subTables[ldudId] && subTables[ldudId].barge_lines) {
+                subTables[ldudId].barge_lines.setData(`/api/module/LDUD01/barge_lines/${ldudId}`);
+            }
+        } else {
+            alert('Failed to clone row: ' + (result.error || 'Unknown error'));
+        }
+    }
+
+    async function saveExportVesselOpsTable(ldudId) {
+        const tableRef = subTables[ldudId] && subTables[ldudId].vessel_ops;
+        if (!tableRef) return;
+
+        // Fetch export cargo BL totals per cargo name for validation
+        const mainRow = table.getRows().find(r => r.getData().id === ldudId);
+        const vcnId = mainRow ? mainRow.getData().vcn_id : null;
+        const exportCargoTotals = {};
+        if (vcnId) {
+            const res = await fetch(`/api/module/VCN01/export_cargo/${vcnId}`);
+            const rows = await res.json();
+            rows.forEach(r => {
+                if (r.cargo_name) {
+                    exportCargoTotals[r.cargo_name] = (exportCargoTotals[r.cargo_name] || 0) + parseFloat(r.bl_quantity || 0);
+                }
+            });
+        }
+
+        // Sum vessel ops quantities per cargo name
+        const rows = tableRef.getRows();
+        const vesselOpsTotals = {};
+        rows.forEach(row => {
+            const d = row.getData();
+            if (d.cargo_name) {
+                vesselOpsTotals[d.cargo_name] = (vesselOpsTotals[d.cargo_name] || 0) + parseFloat(d.quantity || 0);
+            }
+        });
+
+        // Validate against export cargo BL totals
+        for (const [cargoName, total] of Object.entries(vesselOpsTotals)) {
+            const limit = exportCargoTotals[cargoName] || 0;
+            if (limit > 0 && total > limit) {
+                alert(`Total loading quantity for "${cargoName}" (${total}) exceeds declared BL quantity (${limit}).`);
+                return;
+            }
+        }
+
+        const savePromises = rows.filter(r => r.getData().id).map(async (row) => {
+            const d = row.getData();
+            const res = await fetch('/api/module/LDUD01/vessel_ops/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({...d, ldud_id: ldudId, end_time: null})
+            });
+            return res.json();
+        });
+        const results = await Promise.all(savePromises);
+        const savedCount = results.filter(r => r.success).length;
+        alert(`Saved ${savedCount} row(s)`);
+    }
+
+    function updateHoldSummary(ldudId) {
+        // Trigger recalc on the vessel_ops table so bottomCalc rows update
+        if (subTables[ldudId] && subTables[ldudId].vessel_ops) {
+            subTables[ldudId].vessel_ops.recalc();
+        }
+    }
+
+    async function addSubRow(type, ldudId) {
+        if (type === 'vessel_ops') {
+            addVesselOpsDateRow(ldudId);
+            return;
+        }
+
+        const res = await fetch(`/api/module/LDUD01/${type}/save`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ldud_id: ldudId})
+        });
+        const data = await res.json();
+        if (data.id && subTables[ldudId] && subTables[ldudId][type]) {
+            const newRow = {id: data.id, ldud_id: ldudId};
+            if (type === 'barge_lines' && data.trip_number) {
+                newRow.trip_number = data.trip_number;
+            }
+            if (type === 'barge_lines' && currentOperationTypes[ldudId] !== 'Export') {
+                const mainRow = table.getRows().find(r => r.getData().id === ldudId);
+                if (mainRow) {
+                    const stevedore = mainRow.getData().stevedore_name;
+                    if (stevedore) newRow.contractor_name = stevedore;
+                }
+            }
+            subTables[ldudId][type].addRow(newRow, false);
+        }
+    }
+
+    function validateDateSequence(rows, pairs) {
+        for (let i = 0; i < rows.length; i++) {
+            const d = rows[i].getData();
+            for (const [fieldA, labelA, fieldB, labelB] of pairs) {
+                if (d[fieldA] && d[fieldB]) {
+                    const dateA = new Date(d[fieldA]);
+                    const dateB = new Date(d[fieldB]);
+                    if (!isNaN(dateA) && !isNaN(dateB) && dateB < dateA) {
+                        alert(`Row ${i + 1}: "${labelB}" (${d[fieldB]}) must be same or after "${labelA}" (${d[fieldA]}).`);
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    async function saveSubTable(type, ldudId, silent = false) {
+        if (type === 'vessel_ops') {
+            await saveVesselOpsTable(ldudId, silent);
+            return;
+        }
+
+        if (!subTables[ldudId] || !subTables[ldudId][type]) return;
+
+        const rows = subTables[ldudId][type].getRows();
+
+        // ── Validation: barge_lines — date fields must be in chronological order ──
+        if (type === 'barge_lines') {
+            const isExport = currentOperationTypes[ldudId] === 'Export';
+            let pairs;
+            if (isExport) {
+                pairs = [
+                    ['trip_start',               'Trip Start',                   'amf_at_port',               'AMF at Port'],
+                    ['amf_at_port',              'AMF at Port',                  'along_side_berth',          'Alongside At Loading Berth'],
+                    ['along_side_berth',         'Alongside At Loading Berth',   'commenced_loading',         'Loading Start'],
+                    ['commenced_loading',        'Loading Start',                'completed_loading',         'Loading End'],
+                    ['completed_loading',        'Loading End',                  'cast_off_loading_berth',    'Cast Off from Berth'],
+                    ['cast_off_loading_berth',   'Cast Off from Berth',          'cast_off_port',             'Cast Off from Port'],
+                    ['cast_off_port',            'Cast Off from Port',           'anchored_gull_island',      'Anch Gull Island (Loaded)'],
+                    ['anchored_gull_island',     'Anch Gull Island (Loaded)',    'aweigh_gull_island',        'Aweigh Gull Island (Loaded)'],
+                    ['aweigh_gull_island',       'Aweigh Gull Island (Loaded)',  'along_side_vessel',         'Alongside Vessel'],
+                    ['along_side_vessel',        'Alongside Vessel',             'commence_discharge_berth',  'Unload Start'],
+                    ['commence_discharge_berth', 'Unload Start',                 'completed_discharge_berth', 'Unload End'],
+                    ['completed_discharge_berth','Unload End',                   'cast_off_berth',            'Cast Off Vessel'],
+                    ['cast_off_berth',           'Cast Off Vessel',              'anchored_gull_island_empty','Anch Gull Island (Empty)'],
+                    ['anchored_gull_island_empty','Anch Gull Island (Empty)',    'aweigh_gull_island_empty',  'Aweigh Gull Island (Empty)'],
+                ];
+            } else {
+                pairs = [
+                    ['trip_start',               'Trip Start',                   'anchored_gull_island',      'Anch Gull Island'],
+                    ['anchored_gull_island',     'Anch Gull Island',             'aweigh_gull_island',        'Aweigh Gull Island'],
+                    ['aweigh_gull_island',       'Aweigh Gull Island',           'along_side_vessel',         'Alongside Vessel'],
+                    ['along_side_vessel',        'Alongside Vessel',             'commenced_loading',         'Loading Start'],
+                    ['commenced_loading',        'Loading Start',                'completed_loading',         'Loading End'],
+                    ['completed_loading',        'Loading End',                  'cast_off_mv',               'Cast Off MV'],
+                    ['cast_off_mv',              'Cast Off MV',                  'anchored_gull_island_empty','Anch Gull Island (Loaded)'],
+                    ['anchored_gull_island_empty','Anch Gull Island (Loaded)',   'aweigh_gull_island_empty',  'Aweigh Gull Island (Loaded)'],
+                    ['aweigh_gull_island_empty', 'Aweigh Gull Island (Loaded)', 'amf_at_port',               'AMF at Port'],
+                    ['amf_at_port',              'AMF at Port',                  'along_side_berth',          'Alongside Berth'],
+                    ['along_side_berth',         'Alongside Berth',              'commence_discharge_berth',  'Discharge Start'],
+                    ['commence_discharge_berth', 'Discharge Start',              'completed_discharge_berth', 'Discharge End'],
+                    ['completed_discharge_berth','Discharge End',                'cast_off_berth',            'Cast Off Berth'],
+                    ['cast_off_berth',           'Cast Off Berth',               'cast_off_port',             'Cast Off Port'],
+                ];
+            }
+            if (!validateDateSequence(rows, pairs)) return;
+        }
+
+        // Validate hold_completion: completed must be after commenced
+        if (type === 'hold_completion') {
+            for (const row of rows) {
+                const d = row.getData();
+                if (d.commenced && d.completed) {
+                    const start = new Date(d.commenced.replace(' ', 'T'));
+                    const end = new Date(d.completed.replace(' ', 'T'));
+                    if (end < start) {
+                        if (!silent) showSubStatus(type, ldudId, `Error: Completed must be same or after Commenced for hold ${d.hold_name || ''}`, true);
+                        return;
+                    }
+                }
+            }
+        }
+
+        const savePromises = rows.filter(r => r.getData().id).map(async (row) => {
+            const data = row.getData();
+            const res = await fetch(`/api/module/LDUD01/${type}/save`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({...data, ldud_id: ldudId})
+            });
+            const result = await res.json();
+            return {row, result};
+        });
+
+        const results = await Promise.all(savePromises);
+        let savedCount = 0;
+        results.forEach(({row, result}) => {
+            if (result.success) {
+                savedCount++;
+                if (type === 'delays' && result.total_time_mins !== undefined) {
+                    row.update({total_time_mins: result.total_time_mins, total_time_hrs: result.total_time_hrs});
+                }
+                if (type === 'hold_completion') {
+                    row.reformat();
+                }
+                if (type === 'barge_lines' && result.trip_number !== undefined) {
+                    row.update({trip_number: result.trip_number});
+                }
+            }
+        });
+
+        clearDirty(type);
+        if (!silent) showSubStatus(type, ldudId, `Saved ${savedCount} row(s)`);
+    }
+
+    async function deleteSubRow(type, id, ldudId) {
+        if (!confirm('Delete this row?')) return;
+        await fetch(`/api/module/LDUD01/${type}/delete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: id})
+        });
+        if (subTables[ldudId] && subTables[ldudId][type]) {
+            const row = subTables[ldudId][type].getRows().find(r => r.getData().id === id);
+            if (row) row.delete();
+
+        }
+    }
+
+    function addRow() {
+        table.addRow({
+            created_by: currentUser,
+            created_date: getTodayDate(),
+            doc_status: 'Draft'
+        }, true);
+    }
+
+    function deleteSelected() {
+        const selected = table.getSelectedRows();
+        if (selected.length === 0) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+        selected.forEach(row => {
+            const id = row.getData().id;
+            if (id) {
+                // Close modal if this LDUD is open
+                if (currentLdudId === id) {
+                    closeDetailsModal();
+                }
+
+                // Clean up sub-tables if they exist
+                if (subTables[id]) {
+                    Object.values(subTables[id]).forEach(t => {
+                        if (t && typeof t.destroy === 'function') {
+                            t.destroy();
+                        }
+                    });
+                    delete subTables[id];
+                }
+
+                fetch("/api/module/LDUD01/delete", {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: id})
+                });
+            }
+            row.delete();
+        });
+    }
+
+    async function saveAll() {
+        _isSaving = true;
+        try {
+            showStatus('Saving...', 'saving');
+            const rows = table.getRows();
+            let savedCount = 0;
+            for (const row of rows) {
+                const data = row.getData();
+                if (data.id && !dirtyRowIds.has(String(data.id))) continue;
+                const res = await fetch("/api/module/LDUD01/save", {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (result.id) {
+                    row.update({id: result.id, doc_num: result.doc_num, doc_status: result.doc_status});
+                    savedCount++;
+                }
+            }
+            dirtyRowIds.clear();
+            showStatus(`Saved ${savedCount} row(s)`, 'saved');
+            hideUnsavedBanner();
+            editMode = false;
+            const editBtn = document.getElementById('editModeBtn');
+            if (editBtn) { editBtn.textContent = '✏️ Edit'; editBtn.style.background = '#805ad5'; }
+            const editBanner = document.getElementById('editModeBanner');
+            if (editBanner) editBanner.style.display = 'none';
+            await table.setData("/api/module/LDUD01/data");
+        } finally {
+            _isSaving = false;
+        }
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveAll(); }
+    });
+
+    function toggleEditMode() {
+        if (editMode) {
+            editMode = false;
+            table.deselectRow();
+            const btn = document.getElementById('editModeBtn');
+            if (btn) { btn.textContent = '✏️ Edit'; btn.style.background = '#805ad5'; }
+            document.getElementById('editModeBanner').style.display = 'none';
+            table.getRows().forEach(r => r.reformat());
+            hideUnsavedBanner();
+            table.setData('/api/module/LDUD01/data');
+        } else {
+            editMode = true;
+            const btn = document.getElementById('editModeBtn');
+            if (btn) { btn.textContent = '✖ Cancel Edit'; btn.style.background = '#e53e3e'; }
+            document.getElementById('editModeBanner').style.display = 'block';
+        }
+    }
+
+    // ── Closure functions ────────────────────────────────────────────────────
+    let closureTargetId = null;
+    let reopenTargetId = null;
+    let closureUploadedDocs = [];  // [{id, original_filename}]
+
+    async function openClosureModal(id) {
+        closureTargetId = id;
+        closureUploadedDocs = [];
+        document.getElementById('closurePassword').value = '';
+        document.getElementById('closureDocsList').innerHTML = '';
+        document.getElementById('closureDocsInput').value = '';
+        document.getElementById('closureDocsUploading').style.display = 'none';
+        document.getElementById('closureMissingSection').style.display = 'none';
+        document.getElementById('closureEligibleSection').style.display = 'none';
+        document.getElementById('closureModal').style.display = 'flex';
+
+        const res = await fetch(`/api/module/LDUD01/closure_check/${id}`);
+        const check = await res.json();
+
+        if (!check.eligible) {
+            const list = document.getElementById('closureMissingList');
+            list.innerHTML = check.missing.map(m => `<li>${m}</li>`).join('');
+            document.getElementById('closureMissingSection').style.display = 'block';
+        } else {
+            const diff = (check.ops_total - check.bl_total).toFixed(2);
+            const qty = document.getElementById('closureQtyInfo');
+            qty.innerHTML = check.can_full_close
+                ? `<strong>✓ Quantities match</strong> — Operations total: <strong>${check.ops_total.toFixed(2)}</strong> | BL total: <strong>${check.bl_total.toFixed(2)}</strong><br><small>Full Close Vessel available.</small>`
+                : `<strong>⚡ Partial quantities</strong> — Operations total: <strong>${check.ops_total.toFixed(2)}</strong> | BL total: <strong>${check.bl_total.toFixed(2)}</strong> | Remaining: <strong>${Math.abs(diff)}</strong><br><small>Only Partial Close available for billing cut-off.</small>`;
+            document.getElementById('btnCloseVessel').style.display = check.can_full_close ? 'block' : 'none';
+            document.getElementById('btnPartialClose').style.display = check.can_full_close ? 'none' : 'block';
+            document.getElementById('closureEligibleSection').style.display = 'block';
+        }
+    }
+
+    async function showClosureInfo(id) {
+        const res = await fetch(`/api/module/LDUD01/closure_check/${id}`);
+        const check = await res.json();
+        if (check.eligible) {
+            const msg = `✓ All requirements met.\nOperations total: ${check.ops_total.toFixed(2)} | BL total: ${check.bl_total.toFixed(2)}\n${check.can_full_close ? 'Full close available.' : 'Partial close available (quantities differ).'}`;
+            alert(msg);
+        } else {
+            alert('Requirements not yet met:\n\n• ' + check.missing.join('\n• '));
+        }
+    }
+
+    function closeClosureModal() {
+        document.getElementById('closureModal').style.display = 'none';
+        closureTargetId = null;
+    }
+
+    async function uploadProofDocs() {
+        const input = document.getElementById('closureDocsInput');
+        const files = input.files;
+        if (!files || !files.length) return;
+
+        document.getElementById('closureDocsUploading').style.display = 'block';
+        const fd = new FormData();
+        fd.append('ldud_id', closureTargetId);
+        for (const f of files) fd.append('files', f);
+
+        try {
+            const res = await fetch('/api/module/LDUD01/proof_docs/upload', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+
+            const list = document.getElementById('closureDocsList');
+            for (const doc of data.docs) {
+                closureUploadedDocs.push(doc);
+                const item = document.createElement('div');
+                item.style.cssText = 'font-size:12px;color:#276749;background:#f0fff4;padding:3px 8px;border-radius:4px;display:flex;align-items:center;gap:6px;';
+                item.innerHTML = `<span>✓</span><span>${doc.original_filename}</span>`;
+                list.appendChild(item);
+            }
+        } catch(e) {
+            alert('Upload failed. Please try again.');
+        } finally {
+            document.getElementById('closureDocsUploading').style.display = 'none';
+            input.value = '';
+        }
+    }
+
+    async function confirmClose(closeType) {
+        if (closureUploadedDocs.length === 0) {
+            alert('Please upload at least one Proof of Quantity document before closing.');
+            return;
+        }
+        const password = document.getElementById('closurePassword').value.trim();
+        if (!password) { alert('Please enter your password.'); return; }
+        const res = await fetch('/api/module/LDUD01/close', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: closureTargetId, close_type: closeType, password: password})
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        const row = table.getRows().find(r => r.getData().id === closureTargetId);
+        if (row) { row.update({doc_status: data.doc_status}); row.reformat(); }
+        closeClosureModal();
+    }
+
+    function reopenRow(id) {
+        reopenTargetId = id;
+        document.getElementById('reopenComment').value = '';
+        document.getElementById('reopenModal').style.display = 'flex';
+    }
+
+    function closeReopenModal() {
+        document.getElementById('reopenModal').style.display = 'none';
+        reopenTargetId = null;
+    }
+
+    async function confirmReopen() {
+        const comment = document.getElementById('reopenComment').value.trim();
+        if (!comment) { alert('Please enter a reason.'); return; }
+        const res = await fetch('/api/module/LDUD01/reopen', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: reopenTargetId, comment: comment})
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        const row = table.getRows().find(r => r.getData().id === reopenTargetId);
+        if (row) { row.update({doc_status: 'Draft'}); row.reformat(); }
+        closeReopenModal();
+    }
+
+    async function showClosureLog(id, event) {
+        event.stopPropagation();
+        const res = await fetch(`/api/module/LDUD01/closure-log/${id}`);
+        const log = await res.json();
+        if (!log.length) { alert('No closure history yet.'); return; }
+        const lines = log.map(e => `${e.actioned_at}  ${e.action} by ${e.actioned_by}${e.comment ? '\n  Reason: ' + e.comment : ''}`);
+        alert('Closure History:\n\n' + lines.join('\n\n'));
+    }
+
+    // ── Filter panel ──────────────────────────────────────────────────────────
+    let currentFilters = [];
+    let FILTER_CONFIG = {};
+
+    function initFilterConfig() {
+        FILTER_CONFIG = {
+            doc_num:        { label: 'LDUD Doc',       type: 'contains' },
+            vessel_name:    { label: 'Vessel Name',    type: 'contains' },
+            vcn_doc_num:    { label: 'VCN Doc',        type: 'contains' },
+            operation_type: { label: 'Operation Type', type: 'multi',   values: ['Import', 'Export'] },
+            cargo_type:     { label: 'Cargo Type',     type: 'multi',   values: cargoNames },
+            doc_date:       { label: 'Doc Date',       type: 'range' },
+            doc_status:     { label: 'Status',         type: 'multi',   values: ['Draft', 'Partial Close', 'Closed'] },
+        };
+    }
+
+    function toggleFilterPanel() {
+        const panel = document.getElementById('filterPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        if (panel.style.display === 'block') loadSavedFiltersBar();
+    }
+
+    function addFilterRow() {
+        const container = document.getElementById('filterRows');
+        const colOptions = Object.entries(FILTER_CONFIG)
+            .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+        const row = document.createElement('div');
+        row.className = 'filter-row';
+        row.innerHTML = `
+            <select class="filter-col-select" onchange="onFilterColChange(this)">
+                <option value="">-- Column --</option>${colOptions}
+            </select>
+            <div class="filter-value-container"></div>
+            <button class="filter-remove" onclick="this.closest('.filter-row').remove();updateFilterBadge();">×</button>`;
+        container.appendChild(row);
+    }
+
+    function onFilterColChange(sel) {
+        const container = sel.closest('.filter-row').querySelector('.filter-value-container');
+        const col = sel.value;
+        if (!col) { container.innerHTML = ''; return; }
+        const cfg = FILTER_CONFIG[col];
+        if (cfg.type === 'contains') {
+            container.innerHTML = `<input class="filter-text-input" type="text" placeholder="contains...">`;
+        } else if (cfg.type === 'multi') {
+            container.innerHTML = `<div class="filter-multi-list">${
+                cfg.values.map(v => `<label><input type="checkbox" class="filter-checkbox" value="${v}"> ${v}</label>`).join('')
+            }</div>`;
+        } else if (cfg.type === 'range') {
+            container.innerHTML = `<input class="filter-from" type="date"> <span style="font-size:12px">to</span> <input class="filter-to" type="date">`;
+        }
+    }
+
+    function collectFilters() {
+        const filters = [];
+        document.querySelectorAll('#filterRows .filter-row').forEach(row => {
+            const col = (row.querySelector('.filter-col-select') || {}).value;
+            if (!col) return;
+            const cfg = FILTER_CONFIG[col];
+            if (cfg.type === 'contains') {
+                const v = (row.querySelector('.filter-text-input') || {}).value || '';
+                if (v.trim()) filters.push({ field: col, type: 'contains', value: v.trim() });
+            } else if (cfg.type === 'multi') {
+                const checked = [...row.querySelectorAll('.filter-checkbox:checked')].map(cb => cb.value);
+                if (checked.length) filters.push({ field: col, type: 'multi', values: checked });
+            } else if (cfg.type === 'range') {
+                const from = (row.querySelector('.filter-from') || {}).value || '';
+                const to   = (row.querySelector('.filter-to')   || {}).value || '';
+                if (from || to) filters.push({ field: col, type: 'range', from, to });
+            }
+        });
+        return filters;
+    }
+
+    function applyFilters() {
+        currentFilters = collectFilters();
+        updateFilterBadge();
+        table.replaceData();
+    }
+
+    function clearFilters() {
+        document.getElementById('filterRows').innerHTML = '';
+        currentFilters = [];
+        updateFilterBadge();
+        table.replaceData();
+    }
+
+    function updateFilterBadge() {
+        const active = collectFilters().length;
+        const badge = document.getElementById('filterBadge');
+        if (badge) { badge.textContent = active; badge.style.display = active > 0 ? 'inline' : 'none'; }
+    }
+    // ── End filter panel ──────────────────────────────────────────────────────
+
+    // ── Saved Filters ─────────────────────────────────────────────────────────
+    const SAVED_FILTER_MODULE = 'LDUD01';
+    let savedFiltersCache = [];
+
+    async function loadSavedFiltersBar() {
+        try {
+            const res = await fetch(`/api/saved-filters/${SAVED_FILTER_MODULE}`);
+            savedFiltersCache = await res.json();
+            const bar = document.getElementById('savedFiltersBar');
+            const list = document.getElementById('savedFiltersList');
+            if (!savedFiltersCache.length) { bar.style.display = 'none'; return; }
+            bar.style.display = 'flex';
+            list.innerHTML = savedFiltersCache.map(f =>
+                `<span style="display:inline-flex;align-items:center;gap:4px;background:#ebf8ff;border:1px solid #bee3f8;border-radius:12px;padding:2px 10px;font-size:11px;">
+                    <span style="cursor:pointer;color:#2b6cb0;font-weight:600;" onclick="applySavedFilter(${f.id})">${f.name}</span>
+                    <button onclick="deleteSavedFilter(${f.id})" style="background:none;border:none;color:#e53e3e;cursor:pointer;font-size:14px;padding:0;line-height:1;margin-left:2px;">&times;</button>
+                </span>`
+            ).join('');
+        } catch(e) {}
+    }
+
+    function applySavedFilter(id) {
+        const f = savedFiltersCache.find(x => x.id === id);
+        if (!f) return;
+        const filters = JSON.parse(f.filters_json);
+        document.getElementById('filterRows').innerHTML = '';
+        filters.forEach(function(filter) {
+            addFilterRow();
+            const rows = document.querySelectorAll('#filterRows .filter-row');
+            const row = rows[rows.length - 1];
+            const sel = row.querySelector('.filter-col-select');
+            sel.value = filter.field;
+            onFilterColChange(sel);
+            if (filter.type === 'contains') {
+                const inp = row.querySelector('.filter-text-input');
+                if (inp) inp.value = filter.value;
+            } else if (filter.type === 'multi') {
+                row.querySelectorAll('.filter-checkbox').forEach(cb => {
+                    cb.checked = filter.values && filter.values.includes(cb.value);
+                });
+            } else if (filter.type === 'range') {
+                const from = row.querySelector('.filter-from');
+                const to = row.querySelector('.filter-to');
+                if (from) from.value = filter.from || '';
+                if (to) to.value = filter.to || '';
+            }
+        });
+        applyFilters();
+    }
+
+    async function saveCurrentFilter() {
+        const filters = collectFilters();
+        if (!filters.length) { alert('Add at least one filter condition before saving.'); return; }
+        const name = prompt('Name this saved filter:');
+        if (!name || !name.trim()) return;
+        try {
+            const res = await fetch('/api/saved-filters', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name.trim(), module_code: SAVED_FILTER_MODULE, filters})
+            });
+            if (res.ok) loadSavedFiltersBar();
+            else alert('Failed to save filter.');
+        } catch(e) { alert('Error saving filter.'); }
+    }
+
+    async function deleteSavedFilter(id) {
+        if (!confirm('Delete this saved filter?')) return;
+        try {
+            await fetch(`/api/saved-filters/${id}`, {method: 'DELETE'});
+            loadSavedFiltersBar();
+        } catch(e) {}
+    }
+    // ── End saved filters ──────────────────────────────────────────────────────
+
+    loadMasterData();
+</script>
+{% endblock %}

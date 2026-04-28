@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}Bills - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+
+    .toolbar { margin-bottom: 15px; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-primary { background: #3498db; color: white; }
+    .btn-success { background: #27ae60; color: white; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; }
+    .status { padding: 2px 6px; border-radius: 3px; font-size: 10px; color: white; }
+    .status-draft            { background: #95a5a6; }
+    .status-approved         { background: #27ae60; }
+    .status-rejected         { background: #e74c3c; }
+    .status-invoiced         { background: #3498db; }
+    .status-pending-approval { background: #f39c12; }
+    .filters { margin-bottom: 15px; display: flex; gap: 10px; }
+    .filters select { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .pagination { margin-top: 15px; display: flex; gap: 5px; justify-content: center; font-size: 11px; }
+
+    /* Dark theme overrides */
+    .dark-theme .data-table { background: #1e293b; color: #e2e8f0; }
+    .dark-theme .data-table th, .dark-theme .data-table td { border-bottom-color: #334155; }
+    .dark-theme .data-table tr:hover { background: #334155; }
+    .dark-theme .filters select { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+</style>
+
+<div class="module-header">
+    <h2>Billing and Invoicing</h2>
+    <span class="module-code">FIN01</span>
+</div>
+
+<div class="toolbar">
+    {% if perms.can_add %}
+    <button class="btn btn-primary" onclick="location.href='/module/FIN01/bill/generate'">+ Generate Bill</button>
+    <button class="btn btn-success" onclick="location.href='/module/FINV01/generate'">+ Generate Invoice</button>
+    {% endif %}
+    <button class="btn btn-primary" onclick="location.href='/module/FINV01/invoices'">View Invoices</button>
+</div>
+
+<div class="filters">
+    <label style="font-size: 11px; padding: 6px 0;">Filter by Status:</label>
+    <select onchange="location.href='?status='+this.value" style="padding: 6px; font-size: 11px;">
+        <option value="">All</option>
+        <option value="Draft" {% if status_filter == 'Draft' %}selected{% endif %}>Draft</option>
+        <option value="Pending Approval" {% if status_filter == 'Pending Approval' %}selected{% endif %}>Pending Approval</option>
+        <option value="Approved" {% if status_filter == 'Approved' %}selected{% endif %}>Approved</option>
+        <option value="Rejected" {% if status_filter == 'Rejected' %}selected{% endif %}>Rejected</option>
+        <option value="Invoiced" {% if status_filter == 'Invoiced' %}selected{% endif %}>Invoiced</option>
+    </select>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Bill Number</th>
+            <th>Bill Date</th>
+            <th>Agreement</th>
+            <th>Source</th>
+            <th>Customer</th>
+            <th>Subtotal</th>
+            <th>GST</th>
+            <th>Total</th>
+            <th>Currency</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in data %}
+        <tr>
+            <td>{{ row.bill_number }}</td>
+            <td>{{ row.bill_date[8:10] ~ '-' ~ row.bill_date[5:7] ~ '-' ~ row.bill_date[0:4] if row.bill_date else '' }}</td>
+            <td>{{ row.agreement_display or '-' }}</td>
+            <td>{{ row.source_display }}</td>
+            <td>{{ row.customer_name }}</td>
+            <td style="text-align: right;">{{ "%.2f"|format(row.subtotal) }}</td>
+            <td style="text-align: right;">{{ "%.2f"|format(row.cgst_amount + row.sgst_amount + row.igst_amount) }}</td>
+            <td style="text-align: right;">{{ "%.2f"|format(row.total_amount) }}</td>
+            <td>{{ row.currency_code }}</td>
+            <td>
+                <span class="status status-{{ row.bill_status|lower|replace(' ', '-') }}">{{ row.bill_status }}</span>
+            </td>
+            <td>
+                <button class="btn" style="background:#3498db;color:white;font-size:10px;padding:4px 8px;" onclick="location.href='/module/FIN01/bill/{{ row.id }}'">View</button>
+                {% if row.bill_status == 'Draft' or row.bill_status == 'Rejected' %}
+                    {% if perms.can_edit %}
+                    <button class="btn btn-primary" onclick="submitForApproval({{ row.id }})">Submit</button>
+                    {% endif %}
+                {% elif row.bill_status == 'Pending Approval' and is_approver %}
+                    <button class="btn btn-success" onclick="openApproveModal({{ row.id }})">Approve</button>
+                    <button class="btn status-rejected" onclick="rejectBill({{ row.id }})">Reject</button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="pagination">
+    {% if page > 1 %}
+    <button class="btn" onclick="location.href='?page={{ page - 1 }}&status={{ status_filter or '' }}'">Previous</button>
+    {% endif %}
+    <span style="padding: 5px 10px;">Page {{ page }} of {{ last_page }}</span>
+    {% if page < last_page %}
+    <button class="btn" onclick="location.href='?page={{ page + 1 }}&status={{ status_filter or '' }}'">Next</button>
+    {% endif %}
+</div>
+
+<script>
+try { addToRecent('FIN01', 'Billing & Invoicing'); } catch(e) {}
+
+async function submitForApproval(id) {
+    if (!confirm('Submit bill for approval?')) return;
+    const res = await fetch('/api/module/FIN01/bill/submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const result = await res.json();
+    if (result.success) {
+        location.reload();
+    } else {
+        alert('Error: ' + result.error);
+    }
+}
+
+let _approveBillId = null;
+
+async function openApproveModal(id) {
+    _approveBillId = id;
+    const modal    = document.getElementById('approveDocsModal');
+    const list     = document.getElementById('approveDocsList');
+    const checkbox = document.getElementById('approveDocsConfirm');
+    const btn      = document.getElementById('btnConfirmApprove');
+    list.innerHTML = '<span style="color:#718096;font-size:13px;">Loading documents…</span>';
+    checkbox.checked = false;
+    btn.disabled = true;
+    modal.style.display = 'flex';
+
+    const res  = await fetch(`/api/module/FIN01/proof_docs/by_bill/${id}`);
+    const data = await res.json();
+    if (!data.docs || !data.docs.length) {
+        list.innerHTML = '<div style="color:#c05621;font-size:13px;padding:8px 0;">⚠ No Proof of Quantity documents found for this bill\'s cargo. You may still approve.</div>';
+        checkbox.checked = true;
+        btn.disabled = false;
+        return;
+    }
+    list.innerHTML = data.docs.map(d => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e2e8f0;">
+            <span style="font-size:18px;">📄</span>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.original_filename}</div>
+                <div style="font-size:11px;color:#718096;">Uploaded by ${d.uploaded_by || '—'} · ${d.uploaded_at || ''}</div>
+            </div>
+            <a href="${d.file_url}" target="_blank"
+               style="padding:4px 12px;background:#2b6cb0;color:white;border-radius:4px;font-size:12px;text-decoration:none;white-space:nowrap;">View</a>
+        </div>
+    `).join('');
+}
+
+async function confirmApprove() {
+    if (!document.getElementById('approveDocsConfirm').checked) return;
+    const res = await fetch('/api/module/FIN01/bill/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: _approveBillId})
+    });
+    const result = await res.json();
+    document.getElementById('approveDocsModal').style.display = 'none';
+    if (result.success) { location.reload(); }
+    else { alert('Error: ' + result.error); }
+}
+
+async function rejectBill(id) {
+    const reason = prompt('Enter rejection reason:');
+    if (!reason) return;
+    const res = await fetch('/api/module/FIN01/bill/reject', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, reason})
+    });
+    const result = await res.json();
+    if (result.success) {
+        location.reload();
+    } else {
+        alert('Error: ' + result.error);
+    }
+}
+</script>
+
+<!-- Approve: Proof Docs Review Modal -->
+<div id="approveDocsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:520px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="margin:0;font-size:16px;font-weight:600;">📄 Review Proof of Quantity</h3>
+            <button onclick="document.getElementById('approveDocsModal').style.display='none'"
+                    style="background:#e53e3e;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:13px;">✕</button>
+        </div>
+        <p style="margin:0 0 12px;font-size:13px;color:#4a5568;">Please review the supporting documents before approving this bill.</p>
+        <div id="approveDocsList" style="margin-bottom:16px;"></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px;cursor:pointer;">
+            <input type="checkbox" id="approveDocsConfirm" onchange="document.getElementById('btnConfirmApprove').disabled=!this.checked;">
+            I have reviewed the Proof of Quantity documents
+        </label>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button onclick="document.getElementById('approveDocsModal').style.display='none'"
+                    style="padding:8px 18px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+            <button id="btnConfirmApprove" onclick="confirmApprove()" disabled
+                    style="padding:8px 18px;background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">✓ Approve Bill</button>
+        </div>
+    </div>
+</div>
+{% endblock %}

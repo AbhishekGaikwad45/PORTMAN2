@@ -1,0 +1,786 @@
+{% extends "base.html" %}
+
+{% block title %}Generate Bill - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .form-section { background: white; padding: 15px; margin-bottom: 15px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .form-section h3 { margin: 0 0 10px 0; font-size: 13px; color: #333; border-bottom: 2px solid #d90429; padding-bottom: 5px; }
+    .form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+    .form-field { display: flex; flex-direction: column; }
+    .form-field label { font-size: 10px; font-weight: 600; margin-bottom: 3px; color: #555; text-transform: uppercase; }
+    .form-field input, .form-field select { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .form-field input[readonly] { background: #ecf0f1; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-primary { background: #3498db; color: white; }
+    .btn-success { background: #27ae60; color: white; }
+    .btn-secondary { background: #95a5a6; color: white; }
+    .btn-danger { background: #e74c3c; color: white; }
+
+    /* Cargo handling cards */
+    .cargo-cards { display: flex; flex-direction: column; gap: 10px; }
+    .cargo-card { border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
+    .cargo-card.billable { border-color: #27ae60; }
+    .cargo-card.unbillable { border-color: #e74c3c; opacity: 0.7; }
+    .card-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; font-size: 12px; font-weight: 600; }
+    .cargo-card.billable .card-header { background: #d5f5e3; color: #1e8449; }
+    .cargo-card.unbillable .card-header { background: #fde8e8; color: #c0392b; }
+    .card-header .card-title { flex: 1; }
+    .card-header .card-badge { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+    .badge-open { background: #e74c3c; color: white; }
+    .badge-closed { background: #27ae60; color: white; }
+    .badge-partial { background: #f39c12; color: white; }
+    .card-body { padding: 10px 12px; font-size: 11px; }
+    .card-body table { width: 100%; border-collapse: collapse; }
+    .card-body table th { background: #f8f9fa; padding: 5px 8px; text-align: left; font-size: 10px; color: #555; font-weight: 600; }
+    .card-body table td { padding: 5px 8px; border-bottom: 1px solid #f0f0f0; }
+    .card-rate-row { display: flex; align-items: center; gap: 15px; padding: 8px 0; border-top: 1px solid #eee; margin-top: 8px; }
+    .card-rate-row label { font-size: 10px; font-weight: 600; color: #555; min-width: 60px; }
+    .card-rate-row input { padding: 4px 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; width: 100px; }
+    .lock-icon { font-size: 16px; }
+
+    /* Other services table */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; }
+
+    /* Billed section */
+    .billed-section { background: #f8f9fa; }
+    .billed-section h3 { color: #7f8c8d; }
+    .billed-table { opacity: 0.7; }
+
+    /* Collapsible */
+    .collapsible-header { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+    .collapsible-header .toggle-icon { font-size: 10px; transition: transform 0.2s; }
+    .collapsible-header.open .toggle-icon { transform: rotate(90deg); }
+    .collapsible-content { display: none; margin-top: 10px; }
+    .collapsible-content.open { display: block; }
+
+    /* Sticky total bar */
+    .total-bar {
+        position: sticky; bottom: 0; background: white; color: #333;
+        padding: 10px 15px; display: flex; align-items: center; gap: 20px;
+        font-size: 12px; z-index: 100; border-radius: 4px 4px 0 0;
+        box-shadow: 0 -2px 8px rgba(0,0,0,0.12); border-top: 2px solid #d90429;
+    }
+    .total-bar .total-item { display: flex; flex-direction: column; align-items: center; }
+    .total-bar .total-label { font-size: 9px; color: #888; text-transform: uppercase; font-weight: 600; }
+    .total-bar .total-value { font-size: 13px; font-weight: 700; color: #222; }
+    .total-bar .total-value.highlight { color: #d90429; font-size: 15px; }
+    .total-bar .spacer { flex: 1; }
+    .total-bar .selected-count { background: #3498db; color: white; padding: 3px 10px; border-radius: 10px; font-size: 11px; }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 30px; color: #95a5a6; font-size: 12px; }
+    .empty-state .icon { font-size: 32px; margin-bottom: 8px; }
+
+    /* Loading */
+    .loading { text-align: center; padding: 20px; color: #7f8c8d; font-size: 12px; }
+</style>
+
+<div class="module-header">
+    <h2>Generate Bill</h2>
+    <div>
+        <span class="module-code" style="margin-right: 10px;">FIN01</span>
+        <button class="btn btn-secondary" onclick="location.href='/module/FIN01/bills'">Back to Bills</button>
+    </div>
+</div>
+
+<!-- Section 1: Bill Header -->
+<div class="form-section">
+    <h3>Bill Header</h3>
+    <div class="form-grid">
+        <div class="form-field">
+            <label>Customer Type *</label>
+            <select id="customerType" onchange="loadCustomers()">
+                <option value="Customer" selected>Customer</option>
+                <option value="Agent">Agent</option>
+            </select>
+        </div>
+        <div class="form-field">
+            <label>Customer / Agent *</label>
+            <select id="customerId" onchange="onCustomerSelected()">
+                <option value="">-- Select Customer Type First --</option>
+            </select>
+        </div>
+        <div class="form-field">
+            <label>Agreement</label>
+            <select id="agreementId">
+                <option value="">-- Select Customer First --</option>
+            </select>
+        </div>
+        <div class="form-field">
+            <label>Bill Date *</label>
+            <input type="date" id="billDate" value="{{ current_date }}">
+        </div>
+    </div>
+    <div class="form-grid">
+        <div class="form-field">
+            <label>Bill Number</label>
+            <input type="text" id="billNumber" readonly placeholder="Auto-generated">
+        </div>
+        <div class="form-field">
+            <label>Currency</label>
+            <input type="text" id="currency" value="INR" placeholder="INR">
+        </div>
+        <div class="form-field">
+            <label>Remarks</label>
+            <input type="text" id="remarks" placeholder="Optional">
+        </div>
+        <div class="form-field" style="justify-content: flex-end;">
+            <button class="btn btn-primary" onclick="loadBillables()" id="loadBtn" style="margin-top: auto;">Load Billables</button>
+        </div>
+    </div>
+</div>
+
+<!-- Billables area (loaded after customer selection) -->
+<div id="billablesArea" style="display:none;">
+
+    <!-- Section A: Cargo Handling -->
+    <div class="form-section">
+        <h3>A. Cargo Handling (from Cargo Declarations)</h3>
+        <table class="data-table" id="cargoLinesTable">
+            <thead>
+                <tr>
+                    <th style="width:30px;"><input type="checkbox" id="selectAllCargo" onclick="toggleAllCargo(this)"></th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Service</th>
+                    <th>Cargo</th>
+                    <th>Proof Docs</th>
+                    <th>BL Date</th>
+                    <th>BL Qty</th>
+                    <th>Billed</th>
+                    <th>Balance</th>
+                    <th>Bill Qty</th>
+                    <th>Rate</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody id="cargoLinesBody">
+                <tr><td colspan="13" class="empty-state">Select customer and click Load Billables</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Section B: Other Services (collapsed by default) -->
+    <div class="form-section">
+        <h3 class="collapsible-header" onclick="toggleSection('otherServices')">
+            <span class="toggle-icon">▶</span>
+            B. Other Services
+            <span id="otherServicesBadge" style="font-size:10px; background:#3498db; color:white; padding:1px 7px; border-radius:10px; font-weight:normal;"></span>
+        </h3>
+        <div id="otherServicesContent" class="collapsible-content">
+            <table class="data-table" id="otherServicesTable">
+                <thead>
+                    <tr>
+                        <th style="width:30px;"><input type="checkbox" id="selectAllServices" onclick="toggleAllServices(this)"></th>
+                        <th>Record #</th>
+                        <th>Date</th>
+                        <th>Service Type</th>
+                        <th>Qty</th>
+                        <th>UOM</th>
+                        <th>Rate</th>
+                        <th>Amount</th>
+                        <th>Ref</th>
+                    </tr>
+                </thead>
+                <tbody id="otherServicesBody">
+                    <tr><td colspan="9" class="empty-state">No other services</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Section C: Already Billed (collapsed, read-only) -->
+    <div class="form-section billed-section">
+        <h3 class="collapsible-header" onclick="toggleSection('billedHistory')">
+            <span class="toggle-icon">▶</span>
+            C. Already Billed (Reference)
+        </h3>
+        <div id="billedHistoryContent" class="collapsible-content">
+            <table class="data-table billed-table" id="billedTable">
+                <thead>
+                    <tr>
+                        <th>Bill #</th>
+                        <th>Bill Date</th>
+                        <th>Agreement</th>
+                        <th>Service</th>
+                        <th>Qty</th>
+                        <th>Rate</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="billedBody">
+                    <tr><td colspan="8" class="empty-state">No billed history</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Sticky Total Bar -->
+<div class="total-bar" id="totalBar" style="display:none;">
+    <div class="total-item">
+        <span class="total-label">Selected</span>
+        <span class="total-value selected-count" id="totalSelectedCount">0 items</span>
+    </div>
+    <div class="total-item">
+        <span class="total-label">Subtotal</span>
+        <span class="total-value" id="totalSubtotal">₹0.00</span>
+    </div>
+    <div class="total-item">
+        <span class="total-label">GST</span>
+        <span class="total-value" id="totalGst">₹0.00</span>
+    </div>
+    <div class="total-item" id="tdsItem" style="display:none;">
+        <span class="total-label">TDS</span>
+        <span class="total-value" id="totalTds" style="color:#e74c3c;">-₹0.00</span>
+    </div>
+    <div class="total-item" id="tcsItem" style="display:none;">
+        <span class="total-label">TCS</span>
+        <span class="total-value" id="totalTcs" style="color:#e67e22;">+₹0.00</span>
+    </div>
+    <div class="total-item">
+        <span class="total-label">Total</span>
+        <span class="total-value highlight" id="totalAmount">₹0.00</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn btn-success" onclick="generateBill()" style="font-size: 12px; padding: 8px 20px;">
+        Generate Bill
+    </button>
+</div>
+
+<script>
+let billableData = null;
+let serviceTypesMap = {};
+let gstRatesMap = {};
+let customerData = null;
+
+function formatDateDMY(value) {
+    if (!value) return '';
+    const text = String(value).trim();
+    const m = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return text;
+}
+
+// Load service types with GST info
+async function loadServiceTypes() {
+    const resp = await fetch('/api/module/FIN01/service-types');
+    const json = await resp.json();
+    (json.data || []).forEach(st => { serviceTypesMap[st.id] = st; });
+}
+
+async function loadCustomers() {
+    const ct = document.getElementById('customerType').value;
+    const sel = document.getElementById('customerId');
+    document.getElementById('agreementId').innerHTML = '<option value="">-- Select Customer First --</option>';
+    if (!ct) {
+        sel.innerHTML = '<option value="">-- Select Customer Type First --</option>';
+        return;
+    }
+    sel.innerHTML = '<option value="">-- Loading... --</option>';
+    const resp = await fetch(`/api/module/FIN01/customers/${ct}`);
+    const json = await resp.json();
+    sel.innerHTML = '<option value="">-- Select --</option>';
+    (json.data || []).forEach(c => {
+        sel.innerHTML += `<option value="${c.id}" data-name="${c.name}" data-gstin="${c.gstin || ''}" data-state-code="${c.gst_state_code || ''}">${c.name}</option>`;
+    });
+}
+
+async function onCustomerSelected() {
+    const ct = document.getElementById('customerType').value;
+    const cid = document.getElementById('customerId').value;
+    const agreementSel = document.getElementById('agreementId');
+    agreementSel.innerHTML = '<option value="">-- Loading... --</option>';
+
+    if (!ct || !cid) {
+        agreementSel.innerHTML = '<option value="">-- Select Customer First --</option>';
+        return;
+    }
+
+    const resp = await fetch(`/api/module/FIN01/customer-agreements/${cid}`);
+    const json = await resp.json();
+    agreementSel.innerHTML = '<option value="">-- Auto-detect from agreement --</option>';
+    const agreements = json.data || [];
+    agreements.forEach(ag => {
+        const fromDate = formatDateDMY(ag.valid_from);
+        const toDate = ag.valid_to ? formatDateDMY(ag.valid_to) : 'Open';
+        agreementSel.innerHTML += `<option value="${ag.id}">${ag.agreement_code} - ${ag.agreement_name} (${fromDate} to ${toDate})</option>`;
+    });
+    // Auto-select if only one agreement exists
+    if (agreements.length === 1) {
+        agreementSel.value = agreements[0].id;
+    }
+}
+
+async function loadBillables() {
+    const ct = document.getElementById('customerType').value;
+    const cid = document.getElementById('customerId').value;
+    if (!ct || !cid) {
+        alert('Please select Customer Type and Customer.');
+        return;
+    }
+
+    document.getElementById('loadBtn').textContent = 'Loading...';
+    document.getElementById('loadBtn').disabled = true;
+
+    try {
+        const resp = await fetch(`/api/module/FIN01/customer-billables/${ct}/${cid}`);
+        billableData = await resp.json();
+
+        renderCargoCards(billableData.cargo_handling || []);
+        renderOtherServices(billableData.other_services || []);
+        renderBilledHistory(billableData.billed || []);
+
+        document.getElementById('billablesArea').style.display = 'block';
+        document.getElementById('totalBar').style.display = 'flex';
+        recalcTotals();
+    } catch(e) {
+        alert('Error loading billables: ' + e.message);
+    } finally {
+        document.getElementById('loadBtn').textContent = 'Load Billables';
+        document.getElementById('loadBtn').disabled = false;
+    }
+}
+
+function renderCargoCards(cards) {
+    const tbody = document.getElementById('cargoLinesBody');
+
+    if (!cards || cards.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="13" class="empty-state">No cargo handling lines found for this customer</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    cards.forEach((card, idx) => {
+        const isBillable = card.is_billable;
+        const totalQty   = parseFloat(card.total_quantity || 0);
+        const billedQty  = parseFloat(card.billed_quantity || 0);
+        const balance    = parseFloat(card.billable_quantity || 0);
+        const statusColor = isBillable
+            ? (card.doc_status === 'Closed' ? '#27ae60' : '#f39c12')
+            : '#e74c3c';
+        const statusLabel = card.doc_status || 'Not Closed';
+        const proofModule = card.ldud_id ? 'LDUD01' : (card.source_type === 'MBC' && card.source_id ? 'MBC01' : '');
+        const proofSourceId = card.ldud_id || (proofModule === 'MBC01' ? card.source_id : null);
+        const proofCell = proofSourceId
+            ? `<button onclick="viewProofDocs('${proofModule}', ${proofSourceId})" style="padding:2px 8px;background:#ebf8ff;border:1px solid #90cdf4;border-radius:4px;cursor:pointer;font-size:11px;color:#2b6cb0;font-weight:500;">View Docs</button>`
+            : `<span style="font-size:10px;color:#a0aec0;">${card.bl_no || '-'}</span>`;
+
+        const tr = document.createElement('tr');
+        if (!isBillable) tr.style.opacity = '0.6';
+
+        tr.innerHTML = `
+            <td>${isBillable ? `<input type="checkbox" class="cargo-line-check" data-idx="${idx}" onchange="recalcTotals()">` : '🔒'}</td>
+            <td style="font-size:10px;">${card.doc_label || card.source_type + '-' + card.source_id}</td>
+            <td><span style="background:${statusColor};color:white;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;">${statusLabel}</span></td>
+            <td style="font-size:10px;">${card.service_name || '-'}</td>
+            <td>${card.cargo_name || '-'}</td>
+            <td>${proofCell}</td>
+            <td style="font-size:10px;">${card.bl_date ? card.bl_date.substring(0, 10) : '-'}</td>
+            <td style="text-align:right;">${totalQty.toFixed(2)}</td>
+            <td style="text-align:right; color:${billedQty > 0 ? '#e67e22' : '#95a5a6'}; font-size:10px;">${billedQty > 0 ? billedQty.toFixed(2) : '-'}</td>
+            <td style="text-align:right; font-weight:600; color:${billedQty > 0 ? '#2980b9' : 'inherit'};">${balance.toFixed(2)} ${card.uom || ''}</td>
+            <td>${isBillable ? `<input type="number" step="0.01" min="0.01" max="${balance.toFixed(2)}" id="cargo_line_billqty_${idx}" value="${balance.toFixed(2)}" data-balance="${balance.toFixed(2)}" onchange="validateBillQty(this); recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;">` : '-'}</td>
+            <td>${isBillable ? `<input type="number" step="0.01" id="cargo_line_rate_${idx}" placeholder="0.00" onchange="recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;">` : '-'}</td>
+            <td style="text-align:right;font-weight:600;" id="cargo_line_amt_${idx}">-</td>
+        `;
+        tbody.appendChild(tr);
+
+        // Auto-load rate from agreement
+        if (isBillable && card.service_type_id) {
+            loadCargoLineRate(idx, card.service_type_id, card.cargo_name);
+        }
+    });
+}
+
+function toggleAllCargo(masterCb) {
+    document.querySelectorAll('.cargo-line-check').forEach(cb => {
+        cb.checked = masterCb.checked;
+    });
+    recalcTotals();
+}
+
+async function loadCargoLineRate(idx, serviceTypeId, cargoName) {
+    const ct = document.getElementById('customerType').value;
+    const cid = document.getElementById('customerId').value;
+    const agId = document.getElementById('agreementId').value;
+
+    // Try cargo-specific rate first
+    if (cargoName) {
+        let url = `/api/module/FIN01/cargo-rates/${ct}/${cid}/${serviceTypeId}`;
+        if (agId) url += `?agreement_id=${agId}`;
+        try {
+            const resp = await fetch(url);
+            const json = await resp.json();
+            if (json.success && json.rates && json.rates[cargoName] != null) {
+                const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
+                if (rateInput) {
+                    rateInput.value = parseFloat(json.rates[cargoName]).toFixed(2);
+                    recalcTotals();
+                    return;
+                }
+            }
+        } catch(e) {}
+    }
+
+    // Fallback to generic rate
+    let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
+    if (agId) url += `?agreement_id=${agId}`;
+    try {
+        const resp = await fetch(url);
+        const json = await resp.json();
+        if (json.success) {
+            const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
+            if (rateInput) {
+                rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
+                recalcTotals();
+            }
+        }
+    } catch(e) {}
+}
+
+function renderOtherServices(records) {
+    const tbody = document.getElementById('otherServicesBody');
+    const badge = document.getElementById('otherServicesBadge');
+    badge.textContent = records.length > 0 ? records.length : '';
+
+    if (records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No unbilled service records for this customer</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    records.forEach((rec, idx) => {
+        const st = serviceTypesMap[rec.service_type_id] || {};
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="checkbox" class="service-check" data-idx="${idx}" data-id="${rec.id}"
+                data-qty="${rec.billable_quantity || 0}" data-stype="${rec.service_type_id || ''}"
+                onchange="onServiceChecked(this)"></td>
+            <td>${rec.record_number}</td>
+            <td>${formatDateDMY(rec.record_date || '')}</td>
+            <td>${rec.service_name || ''}</td>
+            <td>${parseFloat(rec.billable_quantity || 0).toFixed(2)}</td>
+            <td>${rec.billable_uom || st.uom || ''}</td>
+            <td><input type="number" step="0.01" id="svc_rate_${idx}" placeholder="0.00"
+                data-idx="${idx}" onchange="recalcTotals()" style="width:80px; padding:3px 5px; font-size:11px;"></td>
+            <td id="svc_amount_${idx}" style="font-weight:600;">-</td>
+            <td style="font-size:10px; color:#7f8c8d;">${rec.ref_source_display || '-'}</td>
+        `;
+        tbody.appendChild(tr);
+
+        // Auto-load rate
+        if (rec.service_type_id) {
+            loadServiceRate(idx, rec.service_type_id);
+        }
+    });
+}
+
+async function loadServiceRate(idx, serviceTypeId) {
+    const ct = document.getElementById('customerType').value;
+    const cid = document.getElementById('customerId').value;
+    const agId = document.getElementById('agreementId').value;
+    let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
+    if (agId) url += `?agreement_id=${agId}`;
+
+    try {
+        const resp = await fetch(url);
+        const json = await resp.json();
+        if (json.success) {
+            const rateInput = document.getElementById(`svc_rate_${idx}`);
+            if (rateInput) {
+                rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
+                recalcTotals();
+            }
+        }
+    } catch(e) {}
+}
+
+function onServiceChecked(cb) {
+    recalcTotals();
+}
+
+function toggleAllServices(masterCb) {
+    document.querySelectorAll('.service-check').forEach(cb => {
+        cb.checked = masterCb.checked;
+    });
+    recalcTotals();
+}
+
+function renderBilledHistory(items) {
+    const tbody = document.getElementById('billedBody');
+    if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No prior billing history</td></tr>';
+        return;
+    }
+    tbody.innerHTML = items.map(item => `
+        <tr>
+            <td>${item.bill_number || ''}</td>
+            <td>${formatDateDMY(item.bill_date || '')}</td>
+            <td>${item.agreement_display || '-'}</td>
+            <td>${item.service_name || item.description || ''}</td>
+            <td>${parseFloat(item.quantity || 0).toFixed(2)}</td>
+            <td>${parseFloat(item.rate || 0).toFixed(2)}</td>
+            <td>₹${parseFloat(item.line_amount || 0).toFixed(2)}</td>
+            <td>${item.bill_status || ''}</td>
+        </tr>
+    `).join('');
+}
+
+function validateBillQty(input) {
+    const max = parseFloat(input.dataset.balance || 0);
+    let val = parseFloat(input.value || 0);
+    if (val > max) { input.value = max.toFixed(2); val = max; }
+    if (val < 0) { input.value = '0.00'; }
+}
+
+function recalcTotals() {
+    let subtotal = 0;
+    let tdsTotal = 0;
+    let tcsTotal = 0;
+    let selectedCount = 0;
+    const cargoHandling = billableData.cargo_handling || [];
+
+    // Cargo line items — use bill qty (not total line qty)
+    document.querySelectorAll('.cargo-line-check').forEach(cb => {
+        const idx = parseInt(cb.dataset.idx);
+        const billQtyInput = document.getElementById(`cargo_line_billqty_${idx}`);
+        const qty = parseFloat(billQtyInput ? billQtyInput.value : 0) || 0;
+        const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
+        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
+        const amount = qty * rate;
+        const amtEl = document.getElementById(`cargo_line_amt_${idx}`);
+        if (amtEl) amtEl.textContent = '₹' + amount.toFixed(2);
+        if (cb.checked) {
+            subtotal += amount;
+            selectedCount++;
+            const card = cargoHandling[idx];
+            if (card) {
+                // TDS on basic amount only
+                if (card.is_tds && card.tds_percent > 0) {
+                    tdsTotal += amount * card.tds_percent / 100;
+                }
+                // TCS on basic + GST (calculated below after GST is known)
+                if (card.is_tcs && card.tcs_percent > 0) {
+                    const lineGst = amount * 0.18;
+                    tcsTotal += (amount + lineGst) * card.tcs_percent / 100;
+                }
+            }
+        }
+    });
+
+    // Service record items
+    document.querySelectorAll('.service-check').forEach(cb => {
+        const idx = cb.dataset.idx;
+        const qty = parseFloat(cb.dataset.qty || 0);
+        const rateInput = document.getElementById(`svc_rate_${idx}`);
+        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
+        const amount = qty * rate;
+        const amtEl = document.getElementById(`svc_amount_${idx}`);
+        if (amtEl) amtEl.textContent = '₹' + amount.toFixed(2);
+        if (cb.checked) {
+            subtotal += amount;
+            selectedCount++;
+            const rec = billableData.other_services?.[idx];
+            if (rec) {
+                // TDS on basic amount only
+                if (rec.is_tds && rec.tds_percent > 0) {
+                    tdsTotal += amount * rec.tds_percent / 100;
+                }
+                // TCS on basic + GST
+                if (rec.is_tcs && rec.tcs_percent > 0) {
+                    const lineGst = amount * 0.18;
+                    tcsTotal += (amount + lineGst) * rec.tcs_percent / 100;
+                }
+            }
+        }
+    });
+
+    // GST (simplified — 18% on subtotal; real impl would use per-line GST rates)
+    const gst = subtotal * 0.18;
+    const total = subtotal + gst;
+
+    document.getElementById('totalSelectedCount').textContent = selectedCount + ' item' + (selectedCount !== 1 ? 's' : '');
+    document.getElementById('totalSubtotal').textContent = '₹' + subtotal.toFixed(2);
+    document.getElementById('totalGst').textContent = '₹' + gst.toFixed(2);
+    document.getElementById('totalAmount').textContent = '₹' + total.toFixed(2);
+
+    // Show TDS if applicable
+    const tdsItem = document.getElementById('tdsItem');
+    if (tdsTotal > 0) {
+        tdsItem.style.display = '';
+        document.getElementById('totalTds').textContent = '-₹' + tdsTotal.toFixed(2);
+    } else {
+        tdsItem.style.display = 'none';
+    }
+
+    // Show TCS if applicable
+    const tcsItem = document.getElementById('tcsItem');
+    if (tcsTotal > 0) {
+        tcsItem.style.display = '';
+        document.getElementById('totalTcs').textContent = '+₹' + tcsTotal.toFixed(2);
+    } else {
+        tcsItem.style.display = 'none';
+    }
+}
+
+async function generateBill() {
+    const ct = document.getElementById('customerType').value;
+    const cid = document.getElementById('customerId').value;
+    const billDate = document.getElementById('billDate').value;
+
+    if (!ct || !cid || !billDate) {
+        alert('Please fill in Customer Type, Customer, and Bill Date.');
+        return;
+    }
+
+    const lines = [];
+    const cargoHandling = billableData.cargo_handling || [];
+
+    // Collect selected cargo lines
+    document.querySelectorAll('.cargo-line-check:checked').forEach(cb => {
+        const idx = parseInt(cb.dataset.idx);
+        const card = cargoHandling[idx];
+        if (!card) return;
+        const billQtyInput = document.getElementById(`cargo_line_billqty_${idx}`);
+        const qty = parseFloat(billQtyInput ? billQtyInput.value : 0) || 0;
+        if (qty <= 0) return; // skip zero-qty selections
+        const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
+        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
+        lines.push({
+            line_type: 'cargo_handling',
+            service_type_id: card.service_type_id,
+            service_name: card.service_name || '',
+            description: (card.service_name || '') + ' — ' + (card.cargo_name || '') + ' — ' + card.doc_label,
+            quantity: qty,
+            rate: rate,
+            uom: card.uom || 'MT',
+            line_amount: qty * rate,
+            cargo_source_type: card.cargo_source_type,
+            cargo_source_id: card.cargo_source_id
+        });
+    });
+
+    // Collect other service lines
+    document.querySelectorAll('.service-check:checked').forEach(cb => {
+        const idx = parseInt(cb.dataset.idx);
+        const rec = billableData.other_services[idx];
+        const rateInput = document.getElementById(`svc_rate_${idx}`);
+        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
+        const qty = parseFloat(rec.billable_quantity || 0);
+        lines.push({
+            line_type: 'service_record',
+            service_type_id: rec.service_type_id,
+            description: rec.service_name,
+            quantity: qty,
+            rate: rate,
+            uom: rec.billable_uom || '',
+            line_amount: qty * rate,
+            service_record_id: rec.id
+        });
+    });
+
+    if (lines.length === 0) {
+        alert('Please select at least one item to bill.');
+        return;
+    }
+
+    // Cargo and other-service lines cannot be mixed in the same bill
+    const hasCargoLines   = lines.some(l => l.line_type === 'cargo_handling');
+    const hasServiceLines = lines.some(l => l.line_type === 'service_record');
+    if (hasCargoLines && hasServiceLines) {
+        alert('Cargo handling lines and other service lines cannot be combined in the same bill.\nPlease create separate bills for each type.');
+        return;
+    }
+
+    const customerOpt = document.getElementById('customerId').selectedOptions[0];
+    const agId = document.getElementById('agreementId').value;
+    const subtotal = lines.reduce((s, l) => s + l.line_amount, 0);
+
+    const payload = {
+        customer_type: ct,
+        customer_id: parseInt(cid),
+        customer_name: customerOpt ? customerOpt.dataset.name : '',
+        customer_gstin: customerOpt ? customerOpt.dataset.gstin : '',
+        customer_state_code: customerOpt ? customerOpt.dataset.stateCode : '',
+        agreement_id: agId ? parseInt(agId) : null,
+        bill_date: billDate,
+        currency_code: document.getElementById('currency').value || 'INR',
+        remarks: document.getElementById('remarks').value,
+        subtotal: subtotal,
+        lines: lines
+    };
+
+    const resp = await fetch('/api/module/FIN01/bill/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    const result = await resp.json();
+
+    if (result.success) {
+        alert('Bill generated: ' + result.bill_number);
+        window.location.href = `/module/FIN01/bill/${result.id}`;
+    } else {
+        alert('Error: ' + result.error);
+    }
+}
+
+function toggleSection(id) {
+    const content = document.getElementById(id + 'Content');
+    const header = content.previousElementSibling;
+    content.classList.toggle('open');
+    header.classList.toggle('open');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadServiceTypes();
+    loadCustomers();
+});
+
+try { addToRecent('FIN01', 'Finance Billing'); } catch(e) {}
+
+async function viewProofDocs(sourceModule, sourceId) {
+    const modal = document.getElementById('proofDocsModal');
+    const list  = document.getElementById('proofDocsList');
+    list.innerHTML = '<span style="color:#718096;font-size:13px;">Loading…</span>';
+    modal.style.display = 'flex';
+    const res  = await fetch(`/api/module/FIN01/proof_docs/by_source/${sourceModule}/${sourceId}`);
+    const data = await res.json();
+    if (!data.docs || !data.docs.length) {
+        list.innerHTML = '<span style="color:#c05621;font-size:13px;">No Proof of Quantity documents uploaded yet.</span>';
+        return;
+    }
+    list.innerHTML = data.docs.map(d => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e2e8f0;">
+            <span style="font-size:18px;">📄</span>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.original_filename}</div>
+                <div style="font-size:11px;color:#718096;">Uploaded by ${d.uploaded_by || '—'} · ${d.uploaded_at || ''}</div>
+            </div>
+            <a href="${d.file_url}" target="_blank"
+               style="padding:4px 12px;background:#2b6cb0;color:white;border-radius:4px;font-size:12px;text-decoration:none;white-space:nowrap;">View</a>
+        </div>
+    `).join('');
+}
+</script>
+
+<!-- Proof Docs Viewer Modal -->
+<div id="proofDocsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:520px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="margin:0;font-size:16px;font-weight:600;">📄 Proof of Quantity Documents</h3>
+            <button onclick="document.getElementById('proofDocsModal').style.display='none'"
+                    style="background:#e53e3e;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:13px;">✕</button>
+        </div>
+        <div id="proofDocsList"></div>
+    </div>
+</div>
+
+{% endblock %}

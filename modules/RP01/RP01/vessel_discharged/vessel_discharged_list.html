@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+
+{% block title %}Mother Vessel Discharged Report — RP01{% endblock %}
+
+{% block head %}
+<link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator.min.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+<style>
+    /* ── Page layout ─────────────────────────────────────────────── */
+    .page-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .page-header h2 { margin: 0; font-size: 18px; color: var(--text-primary); }
+    .module-badge {
+        background: #4a90d9;
+        color: #fff;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .breadcrumb {
+        font-size: 11px; color: var(--text-secondary); margin-bottom: 14px;
+    }
+    .breadcrumb a { color: #4a90d9; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+
+    /* ── Filter bar ──────────────────────────────────────────────── */
+    .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: flex-end;
+        margin-bottom: 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 12px 14px;
+    }
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .filter-group label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+    .filter-group input {
+        padding: 5px 9px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 12px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        height: 30px;
+    }
+    .filter-group input:focus {
+        outline: none;
+        border-color: #4a90d9;
+    }
+    .filter-btn {
+        padding: 0 18px;
+        height: 30px;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        align-self: flex-end;
+    }
+    .filter-btn.primary { background: #4a90d9; color: #fff; }
+    .filter-btn.primary:hover { background: #357abd; }
+    .filter-btn.reset { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-color); }
+    .filter-btn.reset:hover { background: var(--border-color); }
+    .filter-btn.dl-all { background: #27ae60; color: #fff; }
+    .filter-btn.dl-all:hover { background: #1e8449; }
+    .filter-btn.dl-all:disabled { background: #aaa; cursor: not-allowed; }
+
+    /* ── Row count ───────────────────────────────────────────────── */
+    .row-count {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-bottom: 6px;
+    }
+
+    /* ── Tabulator overrides ─────────────────────────────────────── */
+    #vd-table {
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        overflow: hidden;
+        font-size: 11.5px;
+    }
+    .tabulator-header .tabulator-col-title {
+        white-space: normal !important;
+        line-height: 1.3;
+        text-align: center;
+        color: #000000 !important;
+    }
+
+    /* Dark theme table */
+    .dark-theme #vd-table .tabulator-header { background: #1e1e2e; }
+    .dark-theme #vd-table .tabulator-row { background: #16161e; color: #cdd6f4; }
+    .dark-theme #vd-table .tabulator-row:nth-child(even) { background: #1c1c2a; }
+    .dark-theme #vd-table .tabulator-row:hover { background: #2a2a3e !important; }
+
+    /* ── Status badges ───────────────────────────────────────────── */
+    .status-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+    }
+    .status-badge.approved { background: #d4edda; color: #155724; }
+    .status-badge.pending  { background: #fff3cd; color: #856404; }
+    .status-badge.other    { background: #e2e3e5; color: #383d41; }
+    .dark-theme .status-badge.approved { background: #1a3a22; color: #68d391; }
+    .dark-theme .status-badge.pending  { background: #3a3000; color: #f6e05e; }
+    .dark-theme .status-badge.other    { background: #2a2a3a; color: #a0aec0; }
+
+    /* ── Download button in cell ─────────────────────────────────── */
+    .dl-btn {
+        padding: 2px 10px;
+        background: #27ae60;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .dl-btn:hover { background: #1e8449; }
+    .dark-theme .dl-btn { background: #1e6b3a; }
+    .dark-theme .dl-btn:hover { background: #27ae60; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Mother Vessel Discharged Report</h2>
+    <span class="module-badge">RP01</span>
+</div>
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a> &rsaquo; Mother Vessel Discharged
+</div>
+
+<!-- Filter bar -->
+<div class="filter-bar">
+    <div class="filter-group">
+        <label for="filter-date-field">Filter By Date</label>
+        <select id="filter-date-field" style="height:30px;padding:5px 9px;border:1px solid var(--border-color);border-radius:4px;font-size:12px;background:var(--bg-primary);color:var(--text-primary);min-width:180px;">
+            <option value="discharge_commenced">Discharge Commenced</option>
+            <option value="discharge_completed">Discharge Completed</option>
+            <option value="nor_tendered">NOR Tendered</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <label for="filter-from">From Date</label>
+        <input type="date" id="filter-from" title="From Date" value="">
+    </div>
+    <div class="filter-group">
+        <label for="filter-to">To Date</label>
+        <input type="date" id="filter-to" title="To Date" value="">
+    </div>
+    <button type="button" class="filter-btn primary" onclick="applyFilters()">Apply</button>
+    <button type="button" class="filter-btn reset"   onclick="resetFilters()">Reset</button>
+    <button type="button" class="filter-btn dl-all" id="dl-all-btn" onclick="downloadAll()">&#8595; Download All</button>
+</div>
+
+<!-- Row count -->
+<div class="row-count" id="row-count">Loading…</div>
+
+<!-- Tabulator table -->
+<div id="vd-table"></div>
+
+<script>
+/* ── Formatters ──────────────────────────────────────── */
+function statusFormatter(cell) {
+    const v = cell.getValue();
+    if (!v) return '<span style="color:var(--text-secondary)">—</span>';
+    let cls = 'other';
+    if (v === 'Approved') cls = 'approved';
+    else if (v === 'Pending') cls = 'pending';
+    const safe = v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<span class="status-badge ${cls}">${safe}</span>`;
+}
+
+function dtFormatter(cell) {
+    const v = cell.getValue();
+    if (!v) return '<span style="color:var(--text-secondary)">—</span>';
+    // Display as-is (ISO datetime string from API)
+    return v;
+}
+
+function numFormatter(cell) {
+    const v = cell.getValue();
+    if (v === '' || v === null || v === undefined) return '—';
+    return parseFloat(v).toLocaleString('en-IN');
+}
+
+function downloadBtnFormatter(cell) {
+    return '<button class="dl-btn">&#8595; Excel</button>';
+}
+
+/* ── Column definitions ──────────────────────────────── */
+function buildColumns() {
+    return [
+        {
+            title: 'Sr#',
+            field: '_sr',
+            width: 55,
+            hozAlign: 'center',
+            headerHozAlign: 'center',
+            formatter: function(cell, formatterParams, onRendered) {
+                return cell.getRow().getPosition(true);
+            },
+            headerSort: false,
+        },
+        {
+            title: 'VCN#',
+            field: 'vcn_doc_num',
+            width: 120,
+            headerHozAlign: 'center',
+        },
+        {
+            title: 'Doc#',
+            field: 'doc_num',
+            width: 120,
+            headerHozAlign: 'center',
+        },
+        {
+            title: 'Vessel Name',
+            field: 'vessel_name',
+            width: 180,
+            headerHozAlign: 'center',
+        },
+        {
+            title: 'Cargo',
+            field: 'cargo_names',
+            width: 160,
+            headerHozAlign: 'center',
+        },
+        {
+            title: 'BL Qty MT',
+            field: 'bl_qty',
+            width: 110,
+            hozAlign: 'right',
+            headerHozAlign: 'center',
+            formatter: numFormatter,
+        },
+        {
+            title: 'Discharge Commenced',
+            field: 'discharge_commenced',
+            width: 150,
+            headerHozAlign: 'center',
+            formatter: dtFormatter,
+        },
+        {
+            title: 'Discharge Completed',
+            field: 'discharge_completed',
+            width: 150,
+            headerHozAlign: 'center',
+            formatter: dtFormatter,
+        },
+        {
+            title: 'Status',
+            field: 'doc_status',
+            width: 100,
+            hozAlign: 'center',
+            headerHozAlign: 'center',
+            formatter: statusFormatter,
+        },
+        {
+            title: 'Download',
+            field: '_download',
+            width: 120,
+            hozAlign: 'center',
+            headerHozAlign: 'center',
+            headerSort: false,
+            formatter: downloadBtnFormatter,
+            cellClick: function(e, cell) {
+                const d = cell.getRow().getData();
+                downloadExcel(d.id, d.vessel_name);
+            },
+        },
+    ];
+}
+
+/* ── Table instance ──────────────────────────────────── */
+let table;
+
+function initTable(data) {
+    table = new Tabulator('#vd-table', {
+        data: data,
+        columns: buildColumns(),
+        layout: 'fitDataFill',
+        height: 'calc(100vh - 260px)',
+        rowHeight: 30,
+        placeholder: 'No records found.',
+    });
+    updateCount(data.length);
+}
+
+function updateCount(n) {
+    document.getElementById('row-count').textContent =
+        n === 1 ? '1 record' : `${n.toLocaleString('en-IN')} records`;
+}
+
+/* ── Filters ─────────────────────────────────────────── */
+function applyFilters() {
+    const fromDate  = document.getElementById('filter-from').value;
+    const toDate    = document.getElementById('filter-to').value;
+    const dateField = document.getElementById('filter-date-field').value;
+
+    const params = new URLSearchParams();
+    if (fromDate)  params.set('from_date',  fromDate);
+    if (toDate)    params.set('to_date',    toDate);
+    if (dateField) params.set('date_field', dateField);
+
+    document.getElementById('row-count').textContent = 'Loading…';
+
+    fetch('/api/module/RP01/vessel-discharged/data?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            if (table) {
+                table.setData(data);
+                updateCount(data.length);
+            } else {
+                initTable(data);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('row-count').textContent = 'Error loading data.';
+        });
+}
+
+function resetFilters() {
+    const now = new Date();
+    const year  = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day   = String(now.getDate()).padStart(2, '0');
+    document.getElementById('filter-from').value = `${year}-${month}-01`;
+    document.getElementById('filter-to').value   = `${year}-${month}-${day}`;
+    applyFilters();
+}
+
+/* ── Download Excel per vessel ───────────────────────── */
+function downloadExcel(ldudId, vesselName) {
+    const url = `/api/module/RP01/vessel-discharged/${ldudId}/download`;
+    fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error('Server error ' + res.status);
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename="(.+?)"/);
+            const filename = match ? match[1] : `MVDischarged_${vesselName}.xlsx`;
+            return res.blob().then(blob => ({ blob, filename }));
+        })
+        .then(({ blob, filename }) => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        })
+        .catch(err => {
+            console.error(err);
+            alert('Download failed. Please try again.');
+        });
+}
+
+/* ── Download All (multi-sheet) ──────────────────────── */
+function downloadAll() {
+    const fromDate  = document.getElementById('filter-from').value;
+    const toDate    = document.getElementById('filter-to').value;
+    const dateField = document.getElementById('filter-date-field').value;
+    const btn = document.getElementById('dl-all-btn');
+    btn.disabled = true;
+    btn.textContent = 'Preparing…';
+
+    const params = new URLSearchParams();
+    if (fromDate)  params.set('from_date',  fromDate);
+    if (toDate)    params.set('to_date',    toDate);
+    if (dateField) params.set('date_field', dateField);
+
+    fetch('/api/module/RP01/vessel-discharged/download-all?' + params.toString())
+        .then(res => {
+            if (!res.ok) throw new Error('Server error ' + res.status);
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename="(.+?)"/);
+            const filename = match ? match[1] : 'MVDischarged.xlsx';
+            return res.blob().then(blob => ({ blob, filename }));
+        })
+        .then(({ blob, filename }) => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        })
+        .catch(err => {
+            console.error(err);
+            alert('Download failed. Please try again.');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '\u2193 Download All';
+        });
+}
+
+/* ── On load ─────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', function () {
+    const now   = new Date();
+    const year  = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day   = String(now.getDate()).padStart(2, '0');
+
+    document.getElementById('filter-from').value = `${year}-${month}-01`;
+    document.getElementById('filter-to').value   = `${year}-${month}-${day}`;
+
+    applyFilters();
+});
+</script>
+{% endblock %}

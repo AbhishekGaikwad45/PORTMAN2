@@ -1,0 +1,456 @@
+{% extends "base.html" %}
+
+{% block title %}Generate Invoice - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .form-section { background: white; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .form-section h3 { margin: 0 0 10px 0; font-size: 13px; color: #333; border-bottom: 2px solid #d90429; padding-bottom: 5px; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-bottom: 10px; }
+    .form-field { display: flex; flex-direction: column; }
+    .form-field label { font-size: 11px; font-weight: 600; margin-bottom: 3px; color: #555; }
+    .form-field input, .form-field select, .form-field textarea { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; }
+    .data-table input[type="checkbox"] { cursor: pointer; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-primary { background: #3498db; color: white; }
+    .btn-success { background: #27ae60; color: white; }
+    .btn-secondary { background: #95a5a6; color: white; }
+    .info-box { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 10px; margin-bottom: 15px; font-size: 11px; }
+    .bill-expand-btn { cursor:pointer; color:#3498db; font-size:14px; padding:0 4px; }
+    .bill-expand-btn:hover { color:#1a5276; }
+    .bill-lines-row td { padding:0 !important; background:#f8f9fa; }
+    .bill-lines-panel { display:none; padding:8px 15px 12px 40px; }
+    .bill-lines-panel.open { display:block; }
+    .bill-lines-table { width:100%; border-collapse:collapse; font-size:10px; margin-top:4px; }
+    .bill-lines-table th { background:#5d6d7e; color:white; padding:5px 8px; text-align:left; font-weight:500; }
+    .bill-lines-table td { padding:5px 8px; border-bottom:1px solid #e0e0e0; }
+    .bill-lines-table tr:last-child td { border-bottom:none; }
+    .bill-lines-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .source-badge { background:#e8f5e9; color:#2e7d32; padding:2px 6px; border-radius:3px; font-size:9px; font-weight:500; }
+
+    /* Dark theme overrides */
+    .dark-theme .form-section { background: #1e293b; color: #e2e8f0; }
+    .dark-theme .form-section h3 { color: #e2e8f0; border-bottom-color: #c0392b; }
+    .dark-theme .form-field label { color: #94a3b8; }
+    .dark-theme .form-field input, .dark-theme .form-field select, .dark-theme .form-field textarea { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+    .dark-theme .form-field input[readonly] { background: #334155; }
+    .dark-theme .info-box { background: #1e3a5f; border-left-color: #3182ce; color: #e2e8f0; }
+    .dark-theme .data-table { background: #1e293b; color: #e2e8f0; }
+    .dark-theme .data-table th, .dark-theme .data-table td { border-bottom-color: #334155; }
+    .dark-theme .data-table tr:hover { background: #334155; }
+    .dark-theme .data-table input[type="number"] { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+    .dark-theme .bill-lines-row td { background: #0f172a; }
+    .dark-theme .bill-lines-panel { color: #e2e8f0; }
+    .dark-theme .bill-lines-table th { background: #334155; }
+    .dark-theme .bill-lines-table td { border-bottom-color: #334155; }
+    .dark-theme .source-badge { background: #1a4731; color: #6ee7b7; }
+</style>
+
+<div class="module-header">
+    <h2>Billing and Invoicing - Generate Invoice</h2>
+    <span class="module-code">FIN01</span>
+</div>
+
+<div class="info-box">
+    <strong>Note:</strong> Select multiple bills for the same customer to consolidate them into a single invoice. All selected bills must be for the same customer and in Approved status.
+</div>
+
+<form id="invoiceForm">
+    <div class="form-section">
+        <h3>Invoice Header</h3>
+        <div class="form-grid">
+            <div class="form-field">
+                <label>Invoice Date</label>
+                <input type="date" id="invoiceDate" value="{{ current_date }}" required>
+            </div>
+            <div class="form-field">
+                <label>Invoice Series</label>
+                <input type="text" id="invoiceSeries" value="INV" required maxlength="10">
+            </div>
+            <div class="form-field">
+                <label>Payment Terms (Days)</label>
+                <input type="number" id="paymentTerms" value="30" min="0">
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-field">
+                <label>Due Date</label>
+                <input type="date" id="dueDate">
+            </div>
+            <div class="form-field">
+                <label>Remarks</label>
+                <textarea id="remarks" rows="1"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h3>Approved Bills <span style="font-size:10px;color:#666;">(Select bills to consolidate into invoice)</span></h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width:30px"><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
+                    <th style="width:24px"></th>
+                    <th>Bill Number</th>
+                    <th>Bill Date</th>
+                    <th>Agreement</th>
+                    <th>Source</th>
+                    <th>Customer Type</th>
+                    <th>Customer Name</th>
+                    <th>Lines</th>
+                    <th>Subtotal</th>
+                    <th>GST</th>
+                    <th>Total</th>
+                    <th>Currency</th>
+                </tr>
+            </thead>
+            <tbody id="billsBody">
+                {% for row in approved_bills %}
+                <tr data-id="{{ row.id }}" data-customer="{{ row.customer_type }}:{{ row.customer_name }}"
+                    data-currency="{{ row.currency_code }}"
+                    data-subtotal="{{ row.subtotal }}"
+                    data-cgst="{{ row.cgst_amount }}"
+                    data-sgst="{{ row.sgst_amount }}"
+                    data-igst="{{ row.igst_amount }}"
+                    data-total="{{ row.total_amount }}"
+                    data-customer-id="{{ row.customer_id }}"
+                    data-gstin="{{ row.customer_gstin or '' }}"
+                    data-gst-state="{{ row.customer_gst_state_code or '' }}"
+                    data-gl-code="{{ row.customer_gl_code or '' }}">
+                    <td><input type="checkbox" class="bill-select" onchange="validateSelection()"></td>
+                    <td><span class="bill-expand-btn" onclick="toggleBillLines({{ row.id }}, this)" title="View bill lines">&#9654;</span></td>
+                    <td><strong>{{ row.bill_number }}</strong></td>
+                    <td>{{ row.bill_date[8:10] ~ '-' ~ row.bill_date[5:7] ~ '-' ~ row.bill_date[0:4] if row.bill_date else '' }}</td>
+                    <td>{{ row.agreement_display or '-' }}</td>
+                    <td>{% if row.source_display %}<span class="source-badge">{{ row.source_type }}: {{ row.source_display }}</span>{% endif %}</td>
+                    <td>{{ row.customer_type }}</td>
+                    <td>{{ row.customer_name }}</td>
+                    <td style="text-align:center;"><span id="linecount-{{ row.id }}" style="color:#888;">-</span></td>
+                    <td style="text-align:right;">{{ "%.2f"|format(row.subtotal) }}</td>
+                    <td style="text-align:right;">{{ "%.2f"|format(row.cgst_amount + row.sgst_amount + row.igst_amount) }}</td>
+                    <td style="text-align:right;font-weight:600;">{{ "%.2f"|format(row.total_amount) }}</td>
+                    <td>{{ row.currency_code }}</td>
+                </tr>
+                <tr class="bill-lines-row" id="lines-row-{{ row.id }}">
+                    <td colspan="13">
+                        <div class="bill-lines-panel" id="lines-panel-{{ row.id }}">
+                            <div style="font-size:10px;color:#555;margin-bottom:4px;font-weight:600;">
+                                Bill Lines for {{ row.bill_number }}
+                                {% if row.remarks %}<span style="font-weight:normal;color:#888;"> — {{ row.remarks }}</span>{% endif %}
+                            </div>
+                            <div id="lines-content-{{ row.id }}">
+                                <span style="color:#999;font-size:10px;">Loading...</span>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="13" style="text-align:center;color:#999;padding:20px;">No approved bills found for invoicing</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="form-section" id="customerDetails" style="display:none;">
+        <h3>Customer Details</h3>
+        <div class="form-grid">
+            <div class="form-field">
+                <label>Customer Type</label>
+                <input type="text" id="customerType" readonly>
+            </div>
+            <div class="form-field">
+                <label>Customer Name</label>
+                <input type="text" id="customerName" readonly>
+            </div>
+            <div class="form-field">
+                <label>GSTIN</label>
+                <input type="text" id="gstin">
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-field">
+                <label>Billing Address</label>
+                <textarea id="billingAddress" rows="2"></textarea>
+            </div>
+            <div class="form-field">
+                <label>City</label>
+                <input type="text" id="city">
+            </div>
+            <div class="form-field">
+                <label>Pincode</label>
+                <input type="text" id="pincode">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h3>Invoice Summary</h3>
+        <table class="data-table" style="width:400px;">
+            <tr>
+                <td style="font-weight:600;">Number of Bills</td>
+                <td style="text-align:right;"><span id="billCount">0</span></td>
+            </tr>
+            <tr>
+                <td style="font-weight:600;">Subtotal</td>
+                <td style="text-align:right;"><span id="subtotal">0.00</span></td>
+            </tr>
+            <tr>
+                <td style="font-weight:600;">CGST</td>
+                <td style="text-align:right;"><span id="cgst">0.00</span></td>
+            </tr>
+            <tr>
+                <td style="font-weight:600;">SGST</td>
+                <td style="text-align:right;"><span id="sgst">0.00</span></td>
+            </tr>
+            <tr>
+                <td style="font-weight:600;">IGST</td>
+                <td style="text-align:right;"><span id="igst">0.00</span></td>
+            </tr>
+            <tr>
+                <td style="font-weight:600;">Round Off</td>
+                <td style="text-align:right;"><input type="number" step="0.01" id="roundOff" value="0.00" style="width:80px;text-align:right;" onchange="calculateTotals()"></td>
+            </tr>
+            <tr style="border-top:2px solid #333;">
+                <td style="font-weight:600;font-size:12px;">Total Amount</td>
+                <td style="text-align:right;font-weight:600;font-size:12px;"><span id="totalAmount">0.00</span></td>
+            </tr>
+        </table>
+    </div>
+
+    <div style="margin-top:15px;">
+        {% if perms.can_add %}
+        <button type="button" class="btn btn-success" onclick="generateInvoice()">Generate Invoice</button>
+        {% endif %}
+        <button type="button" class="btn btn-secondary" onclick="location.href='/module/FIN01/invoices'">Cancel</button>
+    </div>
+</form>
+
+<script>
+addToRecent('FIN01', 'Billing & Invoicing');
+
+// Bill lines cache
+const billLinesCache = {};
+
+async function toggleBillLines(billId, btn) {
+    const panel = document.getElementById('lines-panel-' + billId);
+    const isOpen = panel.classList.contains('open');
+
+    if (isOpen) {
+        panel.classList.remove('open');
+        btn.innerHTML = '&#9654;'; // right arrow
+        return;
+    }
+
+    // Load lines if not cached
+    if (!billLinesCache[billId]) {
+        try {
+            const res = await fetch('/api/module/FIN01/bill-lines/' + billId);
+            const data = await res.json();
+            billLinesCache[billId] = data.lines || [];
+        } catch(e) {
+            document.getElementById('lines-content-' + billId).innerHTML =
+                '<span style="color:red;font-size:10px;">Failed to load bill lines</span>';
+            panel.classList.add('open');
+            btn.innerHTML = '&#9660;';
+            return;
+        }
+    }
+
+    const lines = billLinesCache[billId];
+    document.getElementById('linecount-' + billId).textContent = lines.length;
+
+    if (lines.length === 0) {
+        document.getElementById('lines-content-' + billId).innerHTML =
+            '<span style="color:#999;font-size:10px;">No lines found</span>';
+    } else {
+        let html = `<table class="bill-lines-table">
+            <thead><tr>
+                <th>#</th><th>Service</th><th>Description</th><th>Qty</th><th>UOM</th>
+                <th>Rate</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th>
+                <th>Total</th><th>GL Code</th><th>SAC</th>
+            </tr></thead><tbody>`;
+        lines.forEach((ln, i) => {
+            html += `<tr>
+                <td>${i+1}</td>
+                <td>${ln.service_name || ''}</td>
+                <td>${ln.service_description || ''}</td>
+                <td class="num">${ln.quantity || ''}</td>
+                <td>${ln.uom || ''}</td>
+                <td class="num">${(ln.rate||0).toFixed(2)}</td>
+                <td class="num">${(ln.line_amount||0).toFixed(2)}</td>
+                <td class="num">${(ln.cgst_amount||0).toFixed(2)}</td>
+                <td class="num">${(ln.sgst_amount||0).toFixed(2)}</td>
+                <td class="num">${(ln.igst_amount||0).toFixed(2)}</td>
+                <td class="num" style="font-weight:600;">${(ln.line_total||0).toFixed(2)}</td>
+                <td>${ln.gl_code || ''}</td>
+                <td>${ln.sac_code || ''}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('lines-content-' + billId).innerHTML = html;
+    }
+
+    panel.classList.add('open');
+    btn.innerHTML = '&#9660;'; // down arrow
+}
+
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.bill-select');
+    const selectAll = document.getElementById('selectAll').checked;
+    checkboxes.forEach(cb => cb.checked = selectAll);
+    validateSelection();
+}
+
+function validateSelection() {
+    const selected = document.querySelectorAll('.bill-select:checked');
+
+    if (selected.length === 0) {
+        document.getElementById('customerDetails').style.display = 'none';
+        calculateTotals();
+        return;
+    }
+
+    // Check if all selected bills are for the same customer
+    const firstBill = selected[0].closest('tr');
+    const firstCustomer = firstBill.dataset.customer;
+    const firstCurrency = firstBill.dataset.currency;
+
+    let allSame = true;
+    selected.forEach(cb => {
+        const row = cb.closest('tr');
+        if (row.dataset.customer !== firstCustomer || row.dataset.currency !== firstCurrency) {
+            allSame = false;
+        }
+    });
+
+    if (!allSame) {
+        alert('All selected bills must be for the same customer and currency!');
+        selected[selected.length - 1].checked = false;
+        validateSelection();
+        return;
+    }
+
+    // Show customer details auto-filled from bill data
+    const [customerType, customerName] = firstCustomer.split(':');
+    document.getElementById('customerType').value = customerType;
+    document.getElementById('customerName').value = customerName;
+    document.getElementById('gstin').value = firstBill.dataset.gstin || '';
+    document.getElementById('customerDetails').style.display = 'block';
+
+    calculateTotals();
+}
+
+function calculateTotals() {
+    const selected = document.querySelectorAll('.bill-select:checked');
+
+    let subtotal = 0;
+    let cgst = 0;
+    let sgst = 0;
+    let igst = 0;
+
+    selected.forEach(cb => {
+        const row = cb.closest('tr');
+        subtotal += parseFloat(row.dataset.subtotal) || 0;
+        cgst += parseFloat(row.dataset.cgst) || 0;
+        sgst += parseFloat(row.dataset.sgst) || 0;
+        igst += parseFloat(row.dataset.igst) || 0;
+    });
+
+    const roundOff = parseFloat(document.getElementById('roundOff').value) || 0;
+    const total = subtotal + cgst + sgst + igst + roundOff;
+
+    document.getElementById('billCount').textContent = selected.length;
+    document.getElementById('subtotal').textContent = subtotal.toFixed(2);
+    document.getElementById('cgst').textContent = cgst.toFixed(2);
+    document.getElementById('sgst').textContent = sgst.toFixed(2);
+    document.getElementById('igst').textContent = igst.toFixed(2);
+    document.getElementById('totalAmount').textContent = total.toFixed(2);
+
+    // Auto-calculate due date
+    const invoiceDate = document.getElementById('invoiceDate').value;
+    const paymentTerms = parseInt(document.getElementById('paymentTerms').value) || 30;
+    if (invoiceDate) {
+        const due = new Date(invoiceDate);
+        due.setDate(due.getDate() + paymentTerms);
+        document.getElementById('dueDate').value = due.toISOString().split('T')[0];
+    }
+}
+
+async function generateInvoice() {
+    const selected = document.querySelectorAll('.bill-select:checked');
+
+    if (selected.length === 0) {
+        alert('Please select at least one bill');
+        return;
+    }
+
+    const invoiceDate = document.getElementById('invoiceDate').value;
+    const invoiceSeries = document.getElementById('invoiceSeries').value;
+    const paymentTerms = document.getElementById('paymentTerms').value;
+    const dueDate = document.getElementById('dueDate').value;
+    const remarks = document.getElementById('remarks').value;
+
+    if (!invoiceDate || !invoiceSeries) {
+        alert('Please fill all required fields');
+        return;
+    }
+
+    const billIds = [];
+    selected.forEach(cb => {
+        billIds.push(parseInt(cb.closest('tr').dataset.id));
+    });
+
+    const firstBill = selected[0].closest('tr');
+    const [customerType, customerName] = firstBill.dataset.customer.split(':');
+
+    const invoiceData = {
+        bill_ids: billIds,
+        invoice_date: invoiceDate,
+        invoice_series: invoiceSeries,
+        customer_type: customerType,
+        customer_id: parseInt(firstBill.dataset.customerId),
+        customer_name: customerName,
+        customer_gstin: document.getElementById('gstin').value,
+        customer_gst_state_code: firstBill.dataset.gstState || '',
+        customer_gl_code: firstBill.dataset.glCode || '',
+        billing_address: document.getElementById('billingAddress').value,
+        customer_city: document.getElementById('city').value,
+        customer_pincode: document.getElementById('pincode').value,
+        currency_code: firstBill.dataset.currency,
+        subtotal: parseFloat(document.getElementById('subtotal').textContent),
+        cgst_amount: parseFloat(document.getElementById('cgst').textContent),
+        sgst_amount: parseFloat(document.getElementById('sgst').textContent),
+        igst_amount: parseFloat(document.getElementById('igst').textContent),
+        round_off: parseFloat(document.getElementById('roundOff').value),
+        total_amount: parseFloat(document.getElementById('totalAmount').textContent),
+        payment_terms: paymentTerms,
+        due_date: dueDate,
+        remarks: remarks
+    };
+
+    const res = await fetch('/api/module/FIN01/invoice/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(invoiceData)
+    });
+
+    const result = await res.json();
+    if (result.success) {
+        alert(`Invoice ${result.invoice_number} generated successfully!`);
+        location.href = '/module/FIN01/invoices';
+    } else {
+        alert('Error: ' + (result.error || 'Failed to generate invoice'));
+    }
+}
+
+// Auto-update due date when invoice date or payment terms change
+document.getElementById('invoiceDate').addEventListener('change', calculateTotals);
+document.getElementById('paymentTerms').addEventListener('change', calculateTotals);
+</script>
+{% endblock %}

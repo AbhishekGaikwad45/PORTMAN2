@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Invoice {{ invoice.invoice_number }} - JSW Dharamtar Port</title>
+    <style>
+        @media print {
+            body { margin: 0; }
+            .no-print { display: none; }
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            line-height: 1.4;
+            color: #333;
+            margin: 20px;
+        }
+        .invoice-container {
+            max-width: 210mm;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            border-bottom: 3px solid #d90429;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .company-info {
+            flex: 1;
+        }
+        .company-info img {
+            max-width: 200px;
+            height: auto;
+            margin-bottom: 10px;
+        }
+        .company-details {
+            font-size: 10px;
+            line-height: 1.6;
+        }
+        .invoice-title {
+            text-align: right;
+        }
+        .invoice-title h1 {
+            margin: 0;
+            font-size: 28px;
+            color: #d90429;
+        }
+        .invoice-number {
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .parties {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 20px;
+        }
+        .party-box {
+            flex: 1;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background: #f9f9f9;
+        }
+        .party-box h3 {
+            margin: 0 0 8px 0;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #666;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+        .party-box p {
+            margin: 3px 0;
+            font-size: 10px;
+        }
+        .invoice-details {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .detail-item {
+            font-size: 10px;
+        }
+        .detail-label {
+            color: #666;
+            font-weight: 600;
+        }
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        .items-table th {
+            background: #34495e;
+            color: white;
+            padding: 8px;
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        .items-table td {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 10px;
+        }
+        .items-table tr:hover {
+            background: #f9f9f9;
+        }
+        .text-right {
+            text-align: right;
+        }
+        .text-center {
+            text-align: center;
+        }
+        .totals-section {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 20px;
+        }
+        .totals-table {
+            width: 350px;
+            border-collapse: collapse;
+        }
+        .totals-table td {
+            padding: 5px 10px;
+            font-size: 10px;
+        }
+        .totals-table tr.subtotal {
+            border-top: 1px solid #ddd;
+        }
+        .totals-table tr.total {
+            border-top: 2px solid #333;
+            font-weight: bold;
+            font-size: 12px;
+            background: #f0f0f0;
+        }
+        .amount-words {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-size: 10px;
+        }
+        .amount-words strong {
+            text-transform: uppercase;
+        }
+        .tax-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tax-box {
+            border: 1px solid #ddd;
+            padding: 10px;
+            font-size: 10px;
+        }
+        .tax-box h4 {
+            margin: 0 0 5px 0;
+            font-size: 10px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .footer-section {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+        }
+        .signature-box {
+            text-align: center;
+        }
+        .signature-line {
+            border-top: 1px solid #333;
+            margin-top: 60px;
+            padding-top: 5px;
+            font-size: 10px;
+        }
+        .qr-code {
+            width: 120px;
+            height: 120px;
+            border: 1px solid #ddd;
+            background: #f9f9f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            color: #999;
+        }
+        .notes {
+            margin-top: 20px;
+            padding: 10px;
+            background: #fffbe6;
+            border-left: 4px solid #faad14;
+            font-size: 9px;
+        }
+        .notes h4 {
+            margin: 0 0 5px 0;
+            font-size: 10px;
+        }
+        .btn {
+            padding: 8px 16px;
+            font-size: 11px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        .btn-print {
+            background: #3498db;
+            color: white;
+        }
+        .btn-pdf {
+            background: #e74c3c;
+            color: white;
+        }
+        .btn-back {
+            background: #95a5a6;
+            color: white;
+        }
+        .toolbar {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar no-print">
+        <button class="btn btn-print" onclick="window.print()">Print Invoice</button>
+        <button class="btn btn-pdf" onclick="alert('PDF generation will be implemented')">Download PDF</button>
+        <button class="btn btn-back" onclick="location.href='/module/FINV01/invoices'">Back to Invoices</button>
+    </div>
+
+    <div class="invoice-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="company-info">
+                <img src="/static/img/logo31.png" alt="JSW Dharamtar Port">
+                <div class="company-details">
+                    <strong>JSW Dharamtar Port Private Limited</strong><br>
+                    Village Dharamtar, Taluka Pen, Dist. Raigad<br>
+                    Maharashtra - 402107<br>
+                    GSTIN: 27AABCP1234F1Z5<br>
+                    PAN: AABCP1234F<br>
+                    Email: accounts@jswdharamtar.com<br>
+                    Phone: +91-22-2345-6789
+                </div>
+            </div>
+            <div class="invoice-title">
+                <h1>TAX INVOICE</h1>
+                <div class="invoice-number">{{ invoice.invoice_number }}</div>
+                <div style="font-size:10px;margin-top:5px;">
+                    Date: {{ invoice.invoice_date }}<br>
+                    FY: {{ invoice.financial_year }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Bill To / Ship To -->
+        <div class="parties">
+            <div class="party-box">
+                <h3>Bill To</h3>
+                <p><strong>{{ invoice.customer_name }}</strong></p>
+                <p>{{ invoice.customer_type }}</p>
+                <p>{{ invoice.billing_address or 'N/A' }}</p>
+                <p>{{ invoice.customer_city }} - {{ invoice.customer_pincode }}</p>
+                {% if invoice.customer_gstin %}
+                <p><strong>GSTIN:</strong> {{ invoice.customer_gstin }}</p>
+                {% endif %}
+                {% if invoice.customer_pan %}
+                <p><strong>PAN:</strong> {{ invoice.customer_pan }}</p>
+                {% endif %}
+            </div>
+            <div class="party-box">
+                <h3>Ship To</h3>
+                <p><strong>{{ invoice.customer_name }}</strong></p>
+                <p>{{ invoice.billing_address or 'N/A' }}</p>
+                <p>{{ invoice.customer_city }} - {{ invoice.customer_pincode }}</p>
+                <p><strong>State:</strong> {{ invoice.customer_gst_state_name or 'N/A' }}</p>
+                <p><strong>State Code:</strong> {{ invoice.customer_gst_state_code or 'N/A' }}</p>
+            </div>
+        </div>
+
+        <!-- Invoice Details -->
+        <div class="invoice-details">
+            <div class="detail-item">
+                <div class="detail-label">Invoice Number</div>
+                <div>{{ invoice.invoice_number }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Invoice Date</div>
+                <div>{{ invoice.invoice_date }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Payment Terms</div>
+                <div>{{ invoice.payment_terms or 'N/A' }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Due Date</div>
+                <div>{{ invoice.due_date or 'N/A' }}</div>
+            </div>
+        </div>
+
+        <!-- Items Table -->
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th style="width:40px;">S.No</th>
+                    <th>Service Name</th>
+                    <th style="width:80px;" class="text-center">SAC Code</th>
+                    <th style="width:80px;" class="text-right">Quantity</th>
+                    <th style="width:60px;">UOM</th>
+                    <th style="width:100px;" class="text-right">Rate</th>
+                    <th style="width:100px;" class="text-right">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in invoice_lines %}
+                <tr>
+                    <td class="text-center">{{ loop.index }}</td>
+                    <td>{{ line.service_name }}</td>
+                    <td class="text-center">{{ line.sac_code or '-' }}</td>
+                    <td class="text-right">{{ "%.2f"|format(line.quantity) }}</td>
+                    <td>{{ line.uom }}</td>
+                    <td class="text-right">{{ "%.2f"|format(line.rate) }}</td>
+                    <td class="text-right">{{ "%.2f"|format(line.line_amount) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- Tax Details -->
+        <div class="tax-details">
+            <div class="tax-box">
+                <h4>HSN/SAC Summary</h4>
+                <table style="width:100%;font-size:9px;">
+                    <tr>
+                        <th>SAC</th>
+                        <th class="text-right">Taxable Value</th>
+                        <th class="text-right">CGST</th>
+                        <th class="text-right">SGST</th>
+                        <th class="text-right">IGST</th>
+                    </tr>
+                    {% for sac in sac_summary %}
+                    <tr>
+                        <td>{{ sac.sac_code }}</td>
+                        <td class="text-right">{{ "%.2f"|format(sac.taxable_value) }}</td>
+                        <td class="text-right">{{ "%.2f"|format(sac.cgst) }}</td>
+                        <td class="text-right">{{ "%.2f"|format(sac.sgst) }}</td>
+                        <td class="text-right">{{ "%.2f"|format(sac.igst) }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+            <div class="tax-box">
+                <h4>GST Details</h4>
+                <p><strong>Port State:</strong> Maharashtra (27)</p>
+                <p><strong>Customer State:</strong> {{ invoice.customer_gst_state_name or 'N/A' }} ({{ invoice.customer_gst_state_code or 'N/A' }})</p>
+                <p><strong>GST Type:</strong> {{ 'IGST' if invoice.igst_amount > 0 else 'CGST + SGST' }}</p>
+                {% if invoice.gst_irn %}
+                <p><strong>IRN:</strong> <span style="font-size:8px;">{{ invoice.gst_irn }}</span></p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Totals -->
+        <div class="totals-section">
+            <table class="totals-table">
+                <tr class="subtotal">
+                    <td>Subtotal</td>
+                    <td class="text-right">{{ "%.2f"|format(invoice.subtotal) }}</td>
+                </tr>
+                {% if invoice.cgst_amount > 0 %}
+                <tr>
+                    <td>CGST @ {{ "%.2f"|format((invoice.cgst_amount / invoice.subtotal * 100) if invoice.subtotal > 0 else 0) }}%</td>
+                    <td class="text-right">{{ "%.2f"|format(invoice.cgst_amount) }}</td>
+                </tr>
+                <tr>
+                    <td>SGST @ {{ "%.2f"|format((invoice.sgst_amount / invoice.subtotal * 100) if invoice.subtotal > 0 else 0) }}%</td>
+                    <td class="text-right">{{ "%.2f"|format(invoice.sgst_amount) }}</td>
+                </tr>
+                {% endif %}
+                {% if invoice.igst_amount > 0 %}
+                <tr>
+                    <td>IGST @ {{ "%.2f"|format((invoice.igst_amount / invoice.subtotal * 100) if invoice.subtotal > 0 else 0) }}%</td>
+                    <td class="text-right">{{ "%.2f"|format(invoice.igst_amount) }}</td>
+                </tr>
+                {% endif %}
+                {% if invoice.tds_amount > 0 %}
+                <tr>
+                    <td>TDS Deducted</td>
+                    <td class="text-right">(-) {{ "%.2f"|format(invoice.tds_amount) }}</td>
+                </tr>
+                {% endif %}
+                {% if invoice.round_off != 0 %}
+                <tr>
+                    <td>Round Off</td>
+                    <td class="text-right">{{ "%.2f"|format(invoice.round_off) }}</td>
+                </tr>
+                {% endif %}
+                <tr class="total">
+                    <td>Total Amount ({{ invoice.currency_code }})</td>
+                    <td class="text-right">{{ "%.2f"|format(invoice.total_amount) }}</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Amount in Words -->
+        <div class="amount-words">
+            <strong>Amount in Words:</strong> {{ invoice.amount_in_words or 'Rupees ' + (invoice.total_amount|round|int)|string + ' Only' }}
+        </div>
+
+        <!-- Footer -->
+        <div class="footer-section">
+            <div class="qr-code">
+                {% if invoice.gst_qr_code %}
+                <img src="{{ invoice.gst_qr_code }}" style="width:100%;height:100%;" alt="GST QR Code">
+                {% else %}
+                [QR Code]<br>GST E-Invoice
+                {% endif %}
+            </div>
+            <div class="signature-box">
+                <div class="signature-line">
+                    Authorized Signatory<br>
+                    <strong>PORTMAN</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        {% if invoice.remarks %}
+        <div class="notes">
+            <h4>Notes / Remarks:</h4>
+            <p>{{ invoice.remarks }}</p>
+        </div>
+        {% endif %}
+
+        <div class="notes">
+            <h4>Terms & Conditions:</h4>
+            <ul style="margin:5px 0;padding-left:20px;">
+                <li>Payment is due within {{ invoice.payment_terms or '30' }} days from invoice date.</li>
+                <li>Please quote invoice number when making payment.</li>
+                <li>This is a computer-generated invoice and does not require a signature.</li>
+                <li>Subject to Mumbai jurisdiction only.</li>
+            </ul>
+        </div>
+
+        <div style="text-align:center;margin-top:20px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#666;">
+            <p>This is a system-generated document from PORTMAN - Port Management System</p>
+            <p>Generated on: {{ current_datetime }}</p>
+        </div>
+    </div>
+</body>
+</html>

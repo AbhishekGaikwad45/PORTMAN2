@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+
+{% block title %}Credit Note Management - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .cn-detail { background: #f8f9fa; border: 2px solid #e74c3c; border-radius: 4px; padding: 15px; margin-top: 15px; display: none; }
+    .cn-detail h3 { margin: 0 0 10px 0; font-size: 13px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 5px; }
+    .cn-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px; }
+    .cn-field label { display: block; font-size: 10px; font-weight: 600; color: #34495e; text-transform: uppercase; margin-bottom: 3px; }
+    .cn-field input, .cn-field select, .cn-field textarea { width: 100%; padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box; }
+    .cn-field.span2 { grid-column: span 2; }
+    .lines-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; margin-top: 10px; }
+    .lines-table th, .lines-table td { padding: 5px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .lines-table th { background: #e74c3c; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .lines-table input { width: 100%; padding: 3px; font-size: 11px; border: 1px solid #ddd; box-sizing: border-box; }
+    .status-badge { padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+    .status-Draft { background: #fef9e7; color: #7d6608; }
+    .status-Posted { background: #d5f5e3; color: #1e8449; }
+    .status-Cancelled { background: #fadbd8; color: #c0392b; }
+</style>
+
+<div class="module-header">
+    <h2>Credit Note Management</h2>
+    <span class="module-code">FCN01</span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="newCreditNote()">+ New Credit Note</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+</div>
+
+<div id="table"></div>
+
+<!-- Credit Note Detail Panel -->
+<div id="cnDetail" class="cn-detail">
+    <h3>Credit Note: <span id="cnTitle">New</span>
+        <button type="button" class="btn" style="float:right;background:#95a5a6;color:white;padding:4px 10px;font-size:11px;" onclick="closeCNDetail()">Close</button>
+        {% if permissions.can_add or permissions.can_edit %}
+        <button type="button" class="btn btn-save" style="float:right;margin-right:5px;padding:4px 10px;font-size:11px;" onclick="saveCN()">Save</button>
+        {% endif %}
+    </h3>
+    <input type="hidden" id="cnId">
+    <div class="cn-grid">
+        <div class="cn-field">
+            <label>Invoice</label>
+            <select id="cnInvoiceId" onchange="onInvoiceSelect()">
+                <option value="">-- Select Invoice --</option>
+            </select>
+        </div>
+        <div class="cn-field">
+            <label>CN Number</label>
+            <input type="text" id="cnNumber" placeholder="Auto or manual">
+        </div>
+        <div class="cn-field">
+            <label>CN Date</label>
+            <input type="date" id="cnDate">
+        </div>
+        <div class="cn-field">
+            <label>Status</label>
+            <select id="cnStatus">
+                <option value="Draft">Draft</option>
+                <option value="Posted">Posted</option>
+                <option value="Cancelled">Cancelled</option>
+            </select>
+        </div>
+        <div class="cn-field span2">
+            <label>Reason</label>
+            <input type="text" id="cnReason" placeholder="Reason for credit note">
+        </div>
+        <div class="cn-field">
+            <label>SAP Doc Number</label>
+            <input type="text" id="cnSapDoc" readonly style="background:#f5f5f5">
+        </div>
+        <div class="cn-field">
+            <label>SAP Fiscal Year</label>
+            <input type="text" id="cnSapFY" readonly style="background:#f5f5f5">
+        </div>
+    </div>
+
+    <div class="toolbar" style="margin-bottom:5px">
+        {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-add" onclick="addCNLine()" style="font-size:10px;padding:3px 8px;">+ Add Line</button>{% endif %}
+        {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelectedLines()" style="font-size:10px;padding:3px 8px;">Delete Lines</button>{% endif %}
+    </div>
+    <table class="lines-table">
+        <thead>
+            <tr>
+                <th style="width:25px"><input type="checkbox" onclick="document.querySelectorAll('.ln-sel').forEach(c=>c.checked=this.checked)"></th>
+                <th>Service Name</th>
+                <th>Description</th>
+                <th style="width:70px">Qty</th>
+                <th style="width:80px">Rate</th>
+                <th style="width:90px">Amount</th>
+                <th style="width:60px">GST %</th>
+                <th style="width:80px">CGST</th>
+                <th style="width:80px">SGST</th>
+                <th style="width:80px">IGST</th>
+                <th>GL Code</th>
+                <th style="width:70px">SAP Tax</th>
+            </tr>
+        </thead>
+        <tbody id="cnLinesBody"></tbody>
+    </table>
+    <div style="margin-top:8px;text-align:right;font-size:12px;font-weight:600;">
+        Total: <span id="cnTotal">0.00</span> |
+        CGST: <span id="cnCGST">0.00</span> |
+        SGST: <span id="cnSGST">0.00</span> |
+        IGST: <span id="cnIGST">0.00</span> |
+        Grand Total: <span id="cnGrand" style="color:#e74c3c">0.00</span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('FCN01', 'Credit Note Management');
+    const MODULE = 'FCN01';
+    let table;
+    const canEdit = {{ permissions.can_edit|default(0) }} || {{ permissions.can_add|default(0) }};
+    let invoiceList = [];
+
+    async function loadInvoices() {
+        const res = await fetch(`/api/module/${MODULE}/invoices`);
+        invoiceList = await res.json();
+        const sel = document.getElementById('cnInvoiceId');
+        invoiceList.forEach(inv => {
+            const opt = document.createElement('option');
+            opt.value = inv.id;
+            opt.textContent = `${inv.invoice_number} - ${inv.customer_name} (${inv.grand_total})`;
+            sel.appendChild(opt);
+        });
+    }
+
+    function initTable() {
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 160px)",
+            layout: "fitData",
+            columns: [
+                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+                {title: "CN Number", field: "cn_number", width: 130},
+                {title: "CN Date", field: "cn_date", width: 100},
+                {title: "Invoice", field: "invoice_number", width: 130},
+                {title: "Reason", field: "reason", width: 200},
+                {title: "Total", field: "total_amount", width: 100, hozAlign: "right",
+                    formatter: "money", formatterParams: {precision: 2}},
+                {title: "Grand Total", field: "grand_total", width: 110, hozAlign: "right",
+                    formatter: "money", formatterParams: {precision: 2}},
+                {title: "Status", field: "status", width: 90, hozAlign: "center",
+                    formatter: function(cell) {
+                        const v = cell.getValue() || 'Draft';
+                        return `<span class="status-badge status-${v}">${v}</span>`;
+                    }},
+                {title: "SAP Doc #", field: "sap_document_number", width: 120},
+                {title: "", formatter: function(cell) {
+                    const id = cell.getRow().getData().id;
+                    return id ? '<button class="btn" style="background:#3498db;color:white;padding:2px 8px;font-size:10px" onclick="event.stopPropagation();openCNDetail('+id+')">View</button>' : '';
+                }, width: 60, headerSort: false, hozAlign: "center"}
+            ],
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 20,
+            ajaxURL: `/api/module/${MODULE}/data`,
+            ajaxResponse: function(url, params, response) {
+                document.getElementById('rowCount').textContent = response.data.length;
+                document.getElementById('totalCount').textContent = response.total;
+                return response;
+            },
+            selectable: true
+        });
+        if (localStorage.getItem('theme') === 'dark') {
+            document.getElementById('table').classList.add('tabulator-dark');
+        }
+    }
+
+    function newCreditNote() {
+        document.getElementById('cnId').value = '';
+        document.getElementById('cnNumber').value = '';
+        document.getElementById('cnDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('cnInvoiceId').value = '';
+        document.getElementById('cnReason').value = '';
+        document.getElementById('cnStatus').value = 'Draft';
+        document.getElementById('cnSapDoc').value = '';
+        document.getElementById('cnSapFY').value = '';
+        document.getElementById('cnLinesBody').innerHTML = '';
+        document.getElementById('cnTitle').textContent = 'New Credit Note';
+        updateTotals();
+        document.getElementById('cnDetail').style.display = 'block';
+        document.getElementById('cnDetail').scrollIntoView({behavior: 'smooth'});
+    }
+
+    async function openCNDetail(cnId) {
+        const res = await fetch(`/api/module/${MODULE}/detail/${cnId}`);
+        const data = await res.json();
+        const h = data.header;
+        document.getElementById('cnId').value = h.id;
+        document.getElementById('cnNumber').value = h.cn_number || '';
+        document.getElementById('cnDate').value = h.cn_date || '';
+        document.getElementById('cnInvoiceId').value = h.invoice_id || '';
+        document.getElementById('cnReason').value = h.reason || '';
+        document.getElementById('cnStatus').value = h.status || 'Draft';
+        document.getElementById('cnSapDoc').value = h.sap_document_number || '';
+        document.getElementById('cnSapFY').value = h.sap_fiscal_year || '';
+        document.getElementById('cnTitle').textContent = h.cn_number || `CN #${h.id}`;
+        const tbody = document.getElementById('cnLinesBody');
+        tbody.innerHTML = '';
+        (data.lines || []).forEach(l => addCNLineWithData(l));
+        updateTotals();
+        document.getElementById('cnDetail').style.display = 'block';
+        document.getElementById('cnDetail').scrollIntoView({behavior: 'smooth'});
+    }
+
+    function closeCNDetail() {
+        document.getElementById('cnDetail').style.display = 'none';
+    }
+
+    function addCNLine() { addCNLineWithData({}); }
+
+    function addCNLineWithData(l) {
+        const tbody = document.getElementById('cnLinesBody');
+        const tr = document.createElement('tr');
+        if (l.id) tr.setAttribute('data-line-id', l.id);
+        const esc = (v) => (v || '').toString().replace(/"/g, '&quot;');
+        tr.innerHTML = `
+            <td><input type="checkbox" class="ln-sel"></td>
+            <td><input type="text" class="ln-svc" value="${esc(l.service_name)}" ${!canEdit?'readonly':''}></td>
+            <td><input type="text" class="ln-desc" value="${esc(l.description)}" ${!canEdit?'readonly':''}></td>
+            <td><input type="number" class="ln-qty" value="${l.quantity||''}" step="0.01" onchange="calcLineAmount(this)" ${!canEdit?'readonly':''}></td>
+            <td><input type="number" class="ln-rate" value="${l.rate||''}" step="0.01" onchange="calcLineAmount(this)" ${!canEdit?'readonly':''}></td>
+            <td><input type="number" class="ln-amt" value="${l.amount||0}" step="0.01" readonly style="background:#f5f5f5"></td>
+            <td><input type="number" class="ln-gst" value="${l.gst_rate||''}" step="0.01" onchange="calcLineGST(this)" ${!canEdit?'readonly':''}></td>
+            <td><input type="number" class="ln-cgst" value="${l.cgst_amount||0}" step="0.01" readonly style="background:#f5f5f5"></td>
+            <td><input type="number" class="ln-sgst" value="${l.sgst_amount||0}" step="0.01" readonly style="background:#f5f5f5"></td>
+            <td><input type="number" class="ln-igst" value="${l.igst_amount||0}" step="0.01" readonly style="background:#f5f5f5"></td>
+            <td><input type="text" class="ln-gl" value="${esc(l.gl_code)}" ${!canEdit?'readonly':''}></td>
+            <td><input type="text" class="ln-tax" value="${esc(l.sap_tax_code)}" ${!canEdit?'readonly':''}></td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    function calcLineAmount(el) {
+        const row = el.closest('tr');
+        const qty = parseFloat(row.querySelector('.ln-qty').value) || 0;
+        const rate = parseFloat(row.querySelector('.ln-rate').value) || 0;
+        row.querySelector('.ln-amt').value = (qty * rate).toFixed(2);
+        calcLineGST(el);
+    }
+
+    function calcLineGST(el) {
+        const row = el.closest('tr');
+        const amt = parseFloat(row.querySelector('.ln-amt').value) || 0;
+        const gstRate = parseFloat(row.querySelector('.ln-gst').value) || 0;
+        const halfGst = (amt * gstRate / 100 / 2).toFixed(2);
+        row.querySelector('.ln-cgst').value = halfGst;
+        row.querySelector('.ln-sgst').value = halfGst;
+        row.querySelector('.ln-igst').value = '0.00';
+        updateTotals();
+    }
+
+    function updateTotals() {
+        let total = 0, cgst = 0, sgst = 0, igst = 0;
+        document.querySelectorAll('#cnLinesBody tr').forEach(tr => {
+            total += parseFloat(tr.querySelector('.ln-amt').value) || 0;
+            cgst += parseFloat(tr.querySelector('.ln-cgst').value) || 0;
+            sgst += parseFloat(tr.querySelector('.ln-sgst').value) || 0;
+            igst += parseFloat(tr.querySelector('.ln-igst').value) || 0;
+        });
+        document.getElementById('cnTotal').textContent = total.toFixed(2);
+        document.getElementById('cnCGST').textContent = cgst.toFixed(2);
+        document.getElementById('cnSGST').textContent = sgst.toFixed(2);
+        document.getElementById('cnIGST').textContent = igst.toFixed(2);
+        document.getElementById('cnGrand').textContent = (total + cgst + sgst + igst).toFixed(2);
+    }
+
+    async function saveCN() {
+        const cnId = document.getElementById('cnId').value;
+        const headerData = {
+            id: cnId, invoice_id: document.getElementById('cnInvoiceId').value,
+            cn_number: document.getElementById('cnNumber').value,
+            cn_date: document.getElementById('cnDate').value,
+            reason: document.getElementById('cnReason').value,
+            status: document.getElementById('cnStatus').value,
+            total_amount: document.getElementById('cnTotal').textContent,
+            cgst_amount: document.getElementById('cnCGST').textContent,
+            sgst_amount: document.getElementById('cnSGST').textContent,
+            igst_amount: document.getElementById('cnIGST').textContent,
+            grand_total: document.getElementById('cnGrand').textContent
+        };
+        const hRes = await fetch(`/api/module/${MODULE}/save`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(headerData)
+        });
+        const hResult = await hRes.json();
+        if (!hResult.success) { alert('Error saving: ' + (hResult.error || '')); return; }
+        const savedCnId = hResult.id;
+        document.getElementById('cnId').value = savedCnId;
+
+        // Save lines
+        const rows = document.querySelectorAll('#cnLinesBody tr');
+        for (let row of rows) {
+            const lineId = row.getAttribute('data-line-id') || '';
+            const lineData = {
+                id: lineId, credit_note_id: savedCnId,
+                service_name: row.querySelector('.ln-svc').value,
+                description: row.querySelector('.ln-desc').value,
+                quantity: row.querySelector('.ln-qty').value,
+                rate: row.querySelector('.ln-rate').value,
+                amount: row.querySelector('.ln-amt').value,
+                gst_rate: row.querySelector('.ln-gst').value,
+                cgst_amount: row.querySelector('.ln-cgst').value,
+                sgst_amount: row.querySelector('.ln-sgst').value,
+                igst_amount: row.querySelector('.ln-igst').value,
+                gl_code: row.querySelector('.ln-gl').value,
+                sap_tax_code: row.querySelector('.ln-tax').value
+            };
+            const lRes = await fetch(`/api/module/${MODULE}/save-line`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(lineData)
+            });
+            const lResult = await lRes.json();
+            if (lResult.id && !lineId) row.setAttribute('data-line-id', lResult.id);
+        }
+        alert('Credit note saved!');
+        table.setData(`/api/module/${MODULE}/data`);
+    }
+
+    function deleteSelected() {
+        const selected = table.getSelectedRows();
+        if (selected.length === 0) { alert('Select credit notes to delete'); return; }
+        if (!confirm(`Delete ${selected.length} credit note(s)?`)) return;
+        selected.forEach(async row => {
+            const id = row.getData().id;
+            if (id) {
+                await fetch(`/api/module/${MODULE}/delete`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: id})
+                });
+            }
+            row.delete();
+        });
+    }
+
+    async function deleteSelectedLines() {
+        const selected = document.querySelectorAll('.ln-sel:checked');
+        if (selected.length === 0) { alert('Select lines to delete'); return; }
+        if (!confirm(`Delete ${selected.length} line(s)?`)) return;
+        for (let cb of selected) {
+            const row = cb.closest('tr');
+            const id = row.getAttribute('data-line-id');
+            if (id) {
+                await fetch(`/api/module/${MODULE}/delete-line`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: id})
+                });
+            }
+            row.remove();
+        }
+        updateTotals();
+    }
+
+    function onInvoiceSelect() {}
+
+    loadInvoices();
+    initTable();
+</script>
+{% endblock %}

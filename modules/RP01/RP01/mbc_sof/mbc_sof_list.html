@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}MBC SOF — RP01{% endblock %}
+
+{% block head %}
+<style>
+    .page-header {
+        display: flex; align-items: center; gap: 12px;
+        margin-bottom: 8px; padding-bottom: 12px;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .page-header h2 { margin: 0; font-size: 20px; color: var(--text-primary); }
+    .module-badge {
+        background: #4a90d9; color: #fff;
+        padding: 3px 10px; border-radius: 4px;
+        font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .breadcrumb {
+        font-size: 11px; color: var(--text-secondary); margin-bottom: 20px;
+    }
+    .breadcrumb a { color: #4a90d9; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+
+    /* ── Section label bars ──────────────────────────────────── */
+    .section-label {
+        display: flex; align-items: center; gap: 8px;
+        padding: 6px 14px;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border-color);
+        border-top: 2px solid var(--border-color);
+        font-size: 10px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.6px;
+        color: var(--text-secondary);
+        margin-bottom: 0;
+    }
+    .section-label.first { border-top: none; margin-top: 0; }
+    .section-label .dot {
+        width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    }
+    .section-label.import-label { border-left: 3px solid #4a90d9; }
+    .section-label.export-label { border-left: 3px solid #48bb78; }
+    .section-label.import-label .dot { background: #4a90d9; }
+    .section-label.export-label .dot { background: #48bb78; }
+    .section-label .count-badge {
+        font-weight: 400; font-size: 10px; color: var(--text-secondary);
+        background: var(--border-color);
+        padding: 2px 8px; border-radius: 10px;
+    }
+
+    /* ── Tables (portal standard) ────────────────────────────── */
+    .data-table {
+        width: 100%; border-collapse: collapse; font-size: 11px;
+        margin-bottom: 0;
+    }
+    .data-table thead tr { background: var(--border-color); }
+    .data-table th {
+        padding: 8px 14px; text-align: left;
+        font-weight: 600; color: var(--text-secondary);
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+    }
+    .data-table td {
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--border-color);
+        color: var(--text-primary); vertical-align: middle;
+    }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: var(--hover-bg); }
+
+    /* ── Status badges ───────────────────────────────────────── */
+    .status-badge {
+        display: inline-block; padding: 2px 8px; border-radius: 3px;
+        font-size: 9px; font-weight: 600; text-transform: uppercase;
+    }
+    .status-badge.approved { background: #d4edda; color: #155724; }
+    .status-badge.pending  { background: #fff3cd; color: #856404; }
+    .status-badge.rejected { background: #f8d7da; color: #721c24; }
+
+    /* ── Button ──────────────────────────────────────────────── */
+    .btn-mbc-sof {
+        background: #4a90d9; color: #fff;
+        border: none; padding: 5px 13px; border-radius: 4px;
+        font-size: 10px; font-weight: 600; cursor: pointer;
+        text-decoration: none; display: inline-block;
+        transition: background 0.15s; white-space: nowrap;
+    }
+    .btn-mbc-sof:hover { background: #2d72c0; }
+
+    /* ── Empty state ─────────────────────────────────────────── */
+    .empty-section {
+        padding: 14px 16px;
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: 11px; font-style: italic;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .empty-state {
+        text-align: center; padding: 60px 20px; color: var(--text-secondary);
+    }
+    .empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; }
+    .empty-state p { font-size: 13px; }
+
+    /* ── Card wrapper ────────────────────────────────────────── */
+    .mbc-list-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>MBC Statement of Facts</h2>
+    <span class="module-badge">RP01</span>
+</div>
+
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a> &rsaquo; MBC SOF
+</div>
+
+{% if import_records or export_records %}
+<div class="mbc-list-card">
+
+    <!-- ── Import Records ── -->
+    <div class="section-label import-label first">
+        <span class="dot"></span>
+        Import
+        <span class="count-badge">{{ import_records | length }} record{{ 's' if import_records | length != 1 }}</span>
+    </div>
+
+    {% if import_records %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Doc No</th>
+                <th>MBC Name</th>
+                <th>Cargo</th>
+                <th>Quantity</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rec in import_records %}
+            <tr>
+                <td><strong>{{ rec.doc_num or '—' }}</strong></td>
+                <td>{{ rec.mbc_name or '—' }}</td>
+                <td>{{ rec.cargo_name or '—' }}</td>
+                <td>
+                    {% if rec.bl_quantity %}
+                        {{ rec.bl_quantity_display }} {{ rec.quantity_uom or 'MT' }}
+                    {% else %}—{% endif %}
+                </td>
+                <td>{{ rec.doc_date_display }}</td>
+                <td>
+                    {% set status = (rec.doc_status or 'Pending') | lower %}
+                    <span class="status-badge {{ status }}">{{ rec.doc_status or 'Pending' }}</span>
+                </td>
+                <td>
+                    <a class="btn-mbc-sof"
+                       href="/module/RP01/mbc-sof/{{ rec.id }}"
+                       target="_blank">Open MBC SOF</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-section">No import MBC records found.</div>
+    {% endif %}
+
+    <!-- ── Export Records ── -->
+    <div class="section-label export-label">
+        <span class="dot"></span>
+        Export
+        <span class="count-badge">{{ export_records | length }} record{{ 's' if export_records | length != 1 }}</span>
+    </div>
+
+    {% if export_records %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Doc No</th>
+                <th>MBC Name</th>
+                <th>Cargo</th>
+                <th>Quantity</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rec in export_records %}
+            <tr>
+                <td><strong>{{ rec.doc_num or '—' }}</strong></td>
+                <td>{{ rec.mbc_name or '—' }}</td>
+                <td>{{ rec.cargo_name or '—' }}</td>
+                <td>
+                    {% if rec.bl_quantity %}
+                        {{ rec.bl_quantity_display }} {{ rec.quantity_uom or 'MT' }}
+                    {% else %}—{% endif %}
+                </td>
+                <td>{{ rec.doc_date_display }}</td>
+                <td>
+                    {% set status = (rec.doc_status or 'Pending') | lower %}
+                    <span class="status-badge {{ status }}">{{ rec.doc_status or 'Pending' }}</span>
+                </td>
+                <td>
+                    <a class="btn-mbc-sof"
+                       href="/module/RP01/mbc-sof/{{ rec.id }}"
+                       target="_blank">Open MBC SOF</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-section">No export MBC records found.</div>
+    {% endif %}
+
+</div>
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">⛵</div>
+    <p>No MBC records found. Create MBC entries in the MBC module to generate SOF reports.</p>
+</div>
+{% endif %}
+
+{% endblock %}

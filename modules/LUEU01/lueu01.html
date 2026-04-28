@@ -1,0 +1,1248 @@
+{% extends "base.html" %}
+
+{% block title %}Load Unload Equipment Utilization - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .eu-btn-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 18px;
+        padding: 40px 20px;
+        min-height: calc(100vh - 200px);
+        align-content: start;
+    }
+    .eq-pushable {
+        position: relative;
+        border: none;
+        background: transparent;
+        padding: 0;
+        cursor: pointer;
+        outline-offset: 4px;
+        transition: filter 250ms;
+        user-select: none;
+        touch-action: manipulation;
+        width: 100%;
+    }
+    .eq-shadow {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        border-radius: 12px;
+        background: hsl(0deg 0% 0% / 0.25);
+        will-change: transform;
+        transform: translateY(2px);
+        transition: transform 600ms cubic-bezier(.3, .7, .4, 1);
+    }
+    .eq-edge {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        border-radius: 12px;
+        background: linear-gradient(
+            to left,
+            hsl(340deg 100% 16%) 0%,
+            hsl(340deg 100% 32%) 8%,
+            hsl(340deg 100% 32%) 92%,
+            hsl(340deg 100% 16%) 100%
+        );
+    }
+    .eq-front {
+        display: block;
+        position: relative;
+        padding: 14px 20px;
+        border-radius: 12px;
+        font-size: 1.1rem;
+        color: white;
+        background: hsl(345deg 100% 47%);
+        will-change: transform;
+        transform: translateY(-4px);
+        transition: transform 600ms cubic-bezier(.3, .7, .4, 1);
+        text-align: center;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .eq-pushable:hover { filter: brightness(110%); }
+    .eq-pushable:hover .eq-front {
+        transform: translateY(-6px);
+        transition: transform 250ms cubic-bezier(.3, .7, .4, 1.5);
+    }
+    .eq-pushable:active .eq-front {
+        transform: translateY(-2px);
+        transition: transform 34ms;
+    }
+    .eq-pushable:hover .eq-shadow {
+        transform: translateY(4px);
+        transition: transform 250ms cubic-bezier(.3, .7, .4, 1.5);
+    }
+    .eq-pushable:active .eq-shadow {
+        transform: translateY(1px);
+        transition: transform 34ms;
+    }
+    .eq-pushable:focus:not(:focus-visible) { outline: none; }
+
+    #equipmentView { display: none; }
+    #buttonView { display: block; }
+
+    /* ── New-row highlight ─────────────────────────────────── */
+    .tabulator-row.new-row-highlight { background: #fffde7 !important; border-left: 3px solid #f59e0b !important; }
+    .tabulator-row.new-row-highlight .tabulator-cell { background: #fffde7 !important; }
+    .tabulator-row.deleted-row { opacity: 0.45; text-decoration: line-through; }
+    .tabulator-row.deleted-row .tabulator-cell { background: #fff5f5 !important; }
+    .dark-theme .tabulator-row.deleted-row .tabulator-cell { background: #2d1a1a !important; }
+
+    /* ── Filter panel ──────────────────────────────────────── */
+    .filter-panel {
+        background: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-bottom: 8px;
+    }
+    .dark-theme .filter-panel { background: #1e293b; border-color: #334155; }
+    .filter-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+    }
+    .filter-col-select, .filter-text-input, .filter-from, .filter-to {
+        padding: 4px 8px;
+        border: 1px solid #cbd5e0;
+        border-radius: 4px;
+        font-size: 12px;
+        background: white;
+    }
+    .dark-theme .filter-col-select,
+    .dark-theme .filter-text-input,
+    .dark-theme .filter-from,
+    .dark-theme .filter-to { background: #0f172a; color: #e2e8f0; border-color: #334155; }
+    .filter-multi-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .filter-multi-list label { display: flex; gap: 4px; align-items: center; font-size: 12px; cursor: pointer; }
+    .filter-remove { background: none; border: none; color: #e53e3e; cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1; }
+    .filter-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .btn-filter-add { background: #edf2f7; color: #2d3748; border: 1px solid #cbd5e0; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-apply { background: #3182ce; color: white; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-clear { background: #e2e8f0; color: #2d3748; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+
+    /* ── BL Progress popup ─────────────────────────────────── */
+    .blp-overlay {
+        display: none;
+        position: fixed; inset: 0; z-index: 9000;
+    }
+    .blp-popup {
+        position: fixed;
+        z-index: 9001;
+        background: #fff;
+        border: 1px solid #cbd5e0;
+        border-radius: 8px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+        min-width: 380px;
+        max-width: 520px;
+        font-size: 12px;
+        overflow: hidden;
+    }
+    .dark-theme .blp-popup { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+    .blp-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 14px; background: #2d3748; color: #fff;
+        font-weight: 600; font-size: 12px; gap: 8px;
+    }
+    .blp-header-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .blp-close {
+        background: none; border: none; color: rgba(255,255,255,0.7);
+        font-size: 18px; cursor: pointer; line-height: 1; padding: 0 2px;
+    }
+    .blp-close:hover { color: #fff; }
+    .blp-body { padding: 12px 14px; max-height: 400px; overflow-y: auto; }
+    .blp-cargo-block { margin-bottom: 12px; }
+    .blp-cargo-block:last-child { margin-bottom: 0; }
+    .blp-cargo-name {
+        font-weight: 600; font-size: 11px; margin-bottom: 4px;
+        display: flex; align-items: center; gap: 6px;
+    }
+    .blp-decl-badge {
+        font-size: 9px; font-weight: 600; padding: 1px 5px;
+        border-radius: 8px; background: #e2e8f0; color: #4a5568;
+    }
+    .dark-theme .blp-decl-badge { background: #334155; color: #a0aec0; }
+    .blp-stats {
+        display: flex; gap: 16px; margin-bottom: 5px; font-size: 11px;
+    }
+    .blp-stat { display: flex; flex-direction: column; gap: 1px; }
+    .blp-stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: #718096; }
+    .dark-theme .blp-stat-label { color: #94a3b8; }
+    .blp-stat-value { font-weight: 600; }
+    .blp-stat-value.exceeded { color: #e53e3e; }
+    .blp-stat-value.ok { color: #38a169; }
+    .blp-progress-wrap {
+        background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden;
+    }
+    .dark-theme .blp-progress-wrap { background: #334155; }
+    .blp-progress-bar {
+        height: 100%; border-radius: 4px;
+        transition: width 0.4s ease;
+    }
+    .blp-progress-bar.ok { background: linear-gradient(90deg, #48bb78, #38a169); }
+    .blp-progress-bar.exceeded { background: linear-gradient(90deg, #fc8181, #e53e3e); }
+    .blp-exceeded-pill {
+        display: inline-block; margin-top: 4px;
+        background: #fff5f5; color: #c53030; border: 1px solid #fed7d7;
+        border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: 600;
+    }
+    .dark-theme .blp-exceeded-pill { background: #4a1a1a; border-color: #9b2c2c; color: #fc8181; }
+    .blp-no-decl-note {
+        font-size: 10px; color: #718096; margin-top: 4px; font-style: italic;
+    }
+    .blp-empty { padding: 16px; text-align: center; color: #a0aec0; font-size: 12px; }
+
+    /* Info icon in VCN/MBC cell */
+    .bl-info-icon {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 14px; height: 14px; border-radius: 50%;
+        background: #3182ce; color: #fff;
+        font-size: 9px; font-weight: 700; cursor: pointer;
+        margin-left: 5px; vertical-align: middle; flex-shrink: 0;
+        user-select: none; line-height: 1;
+    }
+    .bl-info-icon:hover { background: #2b6cb0; transform: scale(1.2); }
+
+    /* Exceeded warning on quantity cell */
+    .qty-exceeded-badge {
+        display: inline-block; margin-left: 4px;
+        background: #fff5f5; color: #c53030; border: 1px solid #feb2b2;
+        border-radius: 3px; padding: 0 4px; font-size: 9px; font-weight: 700;
+        vertical-align: middle; cursor: help;
+    }
+    .dark-theme .qty-exceeded-badge { background: #4a1a1a; border-color: #9b2c2c; color: #fc8181; }
+</style>
+<div class="module-header">
+    <h2>Load Unload Equipment Utilization</h2>
+    <span class="module-code">LUEU01</span>
+    <button onclick="window.open('/module/LUEU01/dashboard','lueu_dashboard','width=1920,height=1080,toolbar=0,menubar=0,scrollbars=1')" style="background:#1e3a5f;color:#e2e8f0;border:none;padding:4px 14px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.5px;margin-left:8px;">&#9646;&#9646; Live Dashboard</button>
+    <span id="saveStatus" class="save-status"></span>
+</div>
+
+<!-- Equipment Button Grid -->
+<div id="buttonView">
+    <div class="eu-btn-grid" id="eqButtonGrid">
+        <p style="color:#888;">Loading equipment...</p>
+    </div>
+</div>
+
+<!-- Equipment Table View (hidden initially) -->
+<div id="equipmentView">
+    <div class="toolbar">
+        <button class="btn" onclick="goBack()" style="background:#6c757d;color:#fff;">Back</button>
+        <span id="currentEquipLabel" style="font-weight:bold;font-size:1.1rem;margin:0 12px;"></span>
+        {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+        {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+        <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="toggleFilterPanel()">&#9881; Filters <span id="filterBadge" style="display:none;background:#3182ce;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+        <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+    </div>
+    <div id="filterPanel" class="filter-panel" style="display:none;">
+        <div id="filterRows"></div>
+        <div class="filter-actions">
+            <button class="btn-filter-add" onclick="addFilterRow()">+ Add Filter</button>
+            <button class="btn-filter-apply" onclick="applyFilters()">Apply</button>
+            <button class="btn-filter-clear" onclick="clearFilters()">Clear All</button>
+            <button onclick="saveCurrentFilter()" style="background:#48bb78;color:white;border:none;padding:5px 14px;border-radius:4px;font-size:12px;cursor:pointer;">💾 Save Filter</button>
+        </div>
+        <div id="savedFiltersBar" style="margin-top:8px;display:none;align-items:center;flex-wrap:wrap;gap:6px;">
+            <span style="font-size:11px;color:#718096;font-weight:600;white-space:nowrap;">Saved Filters:</span>
+            <div id="savedFiltersList" style="display:inline-flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
+    </div>
+    <div id="table"></div>
+</div>
+
+<!-- Delete Password Modal -->
+<div id="delPasswordModal" style="display:none;position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,0.45);display:none;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.25);width:340px;overflow:hidden;">
+        <div style="background:#c53030;color:#fff;padding:12px 16px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;">
+            <span>&#9888;</span> Confirm Deletion
+        </div>
+        <div style="padding:16px;">
+            <p style="font-size:12px;color:#4a5568;margin-bottom:12px;">This will soft-delete the EU line. Enter your login password to confirm.</p>
+            <input type="password" id="delPasswordInput" placeholder="Enter your password" autocomplete="current-password"
+                onkeydown="if(event.key==='Enter') document.getElementById('delPasswordConfirm').focus()"
+                style="width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;box-sizing:border-box;margin-bottom:8px;">
+            <input type="password" id="delPasswordConfirm" placeholder="Re-enter your password" autocomplete="current-password"
+                onkeydown="if(event.key==='Enter') confirmDelModal()"
+                style="width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;box-sizing:border-box;">
+            <p id="delPasswordError" style="color:#c53030;font-size:11px;margin-top:6px;display:none;"></p>
+        </div>
+        <div style="padding:0 16px 14px;display:flex;gap:8px;justify-content:flex-end;">
+            <button onclick="cancelDelModal()" style="padding:5px 14px;border:1px solid #cbd5e0;background:#e2e8f0;border-radius:4px;font-size:12px;cursor:pointer;">Cancel</button>
+            <button onclick="confirmDelModal()" style="padding:5px 14px;background:#c53030;color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- BL Progress Popup -->
+<div class="blp-overlay" id="blpOverlay" onclick="closeBlPopup()"></div>
+<div class="blp-popup" id="blpPopup" style="display:none;">
+    <div class="blp-header">
+        <span class="blp-header-title" id="blpTitle"></span>
+        <button class="blp-close" onclick="closeBlPopup()">&#x2715;</button>
+    </div>
+    <div class="blp-body" id="blpBody"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('LUEU01', 'Load Unload Equipment Utilization');
+
+    let table;
+    let dirtyRowIds = new Set();
+    let currentEquipment = null;
+    let autoSaveTimer = null;
+    let autoSaveCountdown = null;
+    const AUTOSAVE_DELAY = 5000; // ms of inactivity before autosave
+    let currentFilters = [];
+    let vcnOptions = [];
+    let mbcOptions = [];
+    let mbcNames = [];
+    let equipmentList = [];
+    let delayList = [];
+    let cargoList = [];
+    let operationTypes = [];
+    let uomList = [];
+    let defaultUom = '';
+    let routeList = [];
+    let systemList = [];
+    let berthList = [];
+    let shiftInchargeList = [];
+    let shiftOperatorList = [];
+    let blProgressCache = {};  // key: "SOURCE_TYPE:source_id" -> array of cargo progress
+    let _blIconClicked = false; // flag to suppress editor when info icon is clicked
+
+    const currentUser = '{{ session.username }}';
+    const permissions = {
+        can_read: {{ permissions.can_read|default(0) }},
+        can_add: {{ permissions.can_add|default(0) }},
+        can_edit: {{ permissions.can_edit|default(0) }},
+        can_delete: {{ permissions.can_delete|default(0) }}
+    };
+
+    function getTodayDate() {
+        return new Date().toISOString().split('T')[0];
+    }
+
+    function showStatus(message, type) {
+        const status = document.getElementById('saveStatus');
+        status.textContent = message;
+        status.className = 'save-status ' + type;
+        if (type === 'saved') {
+            setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
+        }
+    }
+
+    function scheduleAutoSave() {
+        // Clear any existing timer/countdown
+        if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+        if (autoSaveCountdown) { clearInterval(autoSaveCountdown); autoSaveCountdown = null; }
+
+        let remaining = Math.round(AUTOSAVE_DELAY / 1000);
+        showStatus(`Unsaved changes — autosaving in ${remaining}s`, 'saving');
+
+        autoSaveCountdown = setInterval(() => {
+            remaining--;
+            if (remaining > 0) {
+                showStatus(`Unsaved changes — autosaving in ${remaining}s`, 'saving');
+            }
+        }, 1000);
+
+        autoSaveTimer = setTimeout(() => {
+            if (autoSaveCountdown) { clearInterval(autoSaveCountdown); autoSaveCountdown = null; }
+            autoSaveTimer = null;
+            saveAll();
+        }, AUTOSAVE_DELAY);
+    }
+
+    function cancelAutoSave() {
+        if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+        if (autoSaveCountdown) { clearInterval(autoSaveCountdown); autoSaveCountdown = null; }
+    }
+
+    // ── BL Progress popup ─────────────────────────────────────────────────────
+    async function fetchBlProgress(sourceType, sourceId) {
+        const key = sourceType + ':' + sourceId;
+        if (blProgressCache[key] !== undefined) return blProgressCache[key];
+        blProgressCache[key] = null; // mark as fetching
+        try {
+            const res = await fetch(`/api/module/LUEU01/bl-progress/${sourceType}/${sourceId}`);
+            blProgressCache[key] = await res.json();
+        } catch(e) {
+            blProgressCache[key] = [];
+        }
+        return blProgressCache[key];
+    }
+
+    async function showBlProgress(sourceType, sourceId, label, anchorEl) {
+        const popup = document.getElementById('blpPopup');
+        const overlay = document.getElementById('blpOverlay');
+        const body = document.getElementById('blpBody');
+        const title = document.getElementById('blpTitle');
+
+        title.textContent = label || (sourceType + ' #' + sourceId);
+        body.innerHTML = '<div class="blp-empty">Loading...</div>';
+        popup.style.display = 'block';
+        overlay.style.display = 'block';
+        positionPopup(popup, anchorEl);
+
+        const data = await fetchBlProgress(sourceType, sourceId);
+        if (table) table.redraw(); // refresh qty cells with new cache
+
+        if (!data || data.length === 0) {
+            body.innerHTML = '<div class="blp-empty">No cargo declarations found for this source.</div>';
+            return;
+        }
+
+        body.innerHTML = data.map(function(d) {
+            const pct = d.bl_qty > 0 ? Math.min(100, (d.handled_qty / d.bl_qty) * 100) : 100;
+            const barClass = d.exceeded ? 'exceeded' : 'ok';
+            const remClass = d.exceeded ? 'exceeded' : (d.remaining < 0.01 ? 'ok' : '');
+            const noDecl = d.decl_type === 'No Declaration';
+            return `
+            <div class="blp-cargo-block">
+                <div class="blp-cargo-name">
+                    ${d.cargo_name || '<em style="opacity:0.5">Unspecified</em>'}
+                    <span class="blp-decl-badge">${d.decl_type}</span>
+                </div>
+                <div class="blp-stats">
+                    <div class="blp-stat">
+                        <span class="blp-stat-label">BL / Declared</span>
+                        <span class="blp-stat-value">${noDecl ? '—' : (d.bl_qty.toLocaleString() + (d.uom ? ' ' + d.uom : ''))}</span>
+                    </div>
+                    <div class="blp-stat">
+                        <span class="blp-stat-label">Handled</span>
+                        <span class="blp-stat-value ${barClass}">${d.handled_qty.toLocaleString() + (d.uom ? ' ' + d.uom : '')}</span>
+                    </div>
+                    <div class="blp-stat">
+                        <span class="blp-stat-label">Remaining</span>
+                        <span class="blp-stat-value ${remClass}">${noDecl ? '—' : ((d.remaining >= 0 ? '' : '') + d.remaining.toLocaleString() + (d.uom ? ' ' + d.uom : ''))}</span>
+                    </div>
+                </div>
+                ${noDecl ? '<div class="blp-no-decl-note">No declaration found — all quantity is unaccounted.</div>' : `
+                <div class="blp-progress-wrap">
+                    <div class="blp-progress-bar ${barClass}" style="width:${pct.toFixed(1)}%"></div>
+                </div>`}
+                ${d.exceeded ? `<div class="blp-exceeded-pill">&#9888; Exceeded by ${d.exceeded_by.toLocaleString()}${d.uom ? ' ' + d.uom : ''}</div>` : ''}
+            </div>`;
+        }).join('<hr style="border:none;border-top:1px solid var(--border-color);margin:8px 0;">');
+    }
+
+    function positionPopup(popup, anchorEl) {
+        const rect = anchorEl.getBoundingClientRect();
+        const popupW = 420;
+        let left = rect.left;
+        let top = rect.bottom + 6;
+        if (left + popupW > window.innerWidth - 16) left = window.innerWidth - popupW - 16;
+        if (left < 8) left = 8;
+        if (top + 300 > window.innerHeight) top = rect.top - 6 - Math.min(300, top + 300 - window.innerHeight);
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+    }
+
+    function closeBlPopup() {
+        document.getElementById('blpPopup').style.display = 'none';
+        document.getElementById('blpOverlay').style.display = 'none';
+    }
+
+    async function loadMasterData() {
+        const [vcn, mbc, mbcNamesRes, equip, delays, cargo, ops, uom, routes, systems, berths, incharge, operators] = await Promise.all([
+            fetch('/api/module/LUEU01/vcn-options').then(r => r.json()),
+            fetch('/api/module/LUEU01/mbc-options').then(r => r.json()),
+            fetch('/api/module/LUEU01/mbc-names').then(r => r.json()),
+            fetch('/api/module/LUEU01/equipment').then(r => r.json()),
+            fetch('/api/module/LUEU01/delays').then(r => r.json()),
+            fetch('/api/module/LUEU01/cargo').then(r => r.json()),
+            fetch('/api/module/LUEU01/operation-types').then(r => r.json()),
+            fetch('/api/module/LUEU01/uom').then(r => r.json()),
+            fetch('/api/module/LUEU01/routes').then(r => r.json()),
+            fetch('/api/module/LUEU01/systems').then(r => r.json()),
+            fetch('/api/module/LUEU01/berths').then(r => r.json()),
+            fetch('/api/module/LUEU01/shift-incharge').then(r => r.json()),
+            fetch('/api/module/LUEU01/shift-operators').then(r => r.json())
+        ]);
+
+        vcnOptions = vcn;
+        mbcOptions = mbc;
+        mbcNames = mbcNamesRes;
+        equipmentList = equip;
+        delayList = delays;
+        cargoList = cargo;
+        operationTypes = ops;
+        uomList = uom.names || uom;
+        defaultUom = uom.default || '';
+        routeList = routes;
+        systemList = systems;
+        berthList = berths;
+        shiftInchargeList = incharge;
+        shiftOperatorList = operators;
+
+        renderEquipmentButtons();
+    }
+
+    function renderEquipmentButtons() {
+        const grid = document.getElementById('eqButtonGrid');
+        if (equipmentList.length === 0) {
+            grid.innerHTML = '<p style="color:#888;">No equipment found. Add equipment in Equipment Master (VEM01).</p>';
+            return;
+        }
+        grid.innerHTML = '';
+        equipmentList.forEach(name => {
+            const btn = document.createElement('button');
+            btn.className = 'eq-pushable';
+            btn.onclick = () => openEquipmentTable(name);
+            btn.innerHTML = `
+                <span class="eq-shadow"></span>
+                <span class="eq-edge"></span>
+                <span class="eq-front">${name}</span>
+            `;
+            grid.appendChild(btn);
+        });
+    }
+
+    function openEquipmentTable(equipName) {
+        currentEquipment = equipName;
+        blProgressCache = {};  // reset cache per equipment view
+        document.getElementById('buttonView').style.display = 'none';
+        document.getElementById('equipmentView').style.display = 'block';
+        document.getElementById('currentEquipLabel').textContent = equipName;
+        initTable(equipName);
+    }
+
+    function goBack() {
+        cancelAutoSave();
+        currentEquipment = null;
+        currentFilters = [];
+        document.getElementById('filterRows').innerHTML = '';
+        updateFilterBadge();
+        document.getElementById('filterPanel').style.display = 'none';
+        document.getElementById('equipmentView').style.display = 'none';
+        document.getElementById('buttonView').style.display = 'block';
+        if (table) { table.destroy(); table = null; }
+    }
+
+    function toOptions(arr) {
+        const opts = {'': ''};
+        arr.forEach(item => { opts[item] = item; });
+        return opts;
+    }
+
+    function getVcnMbcOptions() {
+        const opts = {'': ''};
+        vcnOptions.forEach(opt => { opts[opt.label] = opt.label; });
+        mbcOptions.forEach(opt => { opts[opt.label] = opt.label; });
+        return opts;
+    }
+
+    // Dynamic barge editor based on VCN/MBC selection
+    var bargeEditor = function(cell, onRendered, success, cancel) {
+        const row = cell.getRow();
+        const rowData = row.getData();
+        const sourceDisplay = rowData.source_display || '';
+
+        // Declare select BEFORE any renderSelect calls
+        var select = document.createElement("select");
+        select.style.width = "100%";
+        select.style.boxSizing = "border-box";
+        select.style.padding = "4px";
+
+        function renderSelect(opts) {
+            select.innerHTML = '<option value=""></option>';
+            opts.forEach(opt => {
+                const option = document.createElement("option");
+                option.value = opt;
+                option.textContent = opt;
+                if (opt === cell.getValue()) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+
+        const vcnMatch = vcnOptions.find(v => v.label === sourceDisplay);
+        if (vcnMatch) {
+            renderSelect([]);
+            fetch(`/api/module/LUEU01/barges/${vcnMatch.id}`)
+                .then(r => r.json())
+                .then(barges => { renderSelect(barges); });
+        } else {
+            const mbcMatch = mbcOptions.find(m => m.label === sourceDisplay);
+            if (mbcMatch) { renderSelect(mbcNames); }
+            else { renderSelect([]); }
+        }
+
+        onRendered(function() { select.focus(); });
+        select.addEventListener("change", function() { success(select.value); });
+        select.addEventListener("blur", function() { success(select.value); });
+        select.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") success(select.value);
+            if (e.key === "Escape") cancel();
+        });
+        return select;
+    };
+
+    // Dynamic cargo editor - auto-picks if single cargo, dropdown if multiple
+    var cargoEditor = function(cell, onRendered, success, cancel) {
+        const row = cell.getRow();
+        const rowData = row.getData();
+        const sourceDisplay = rowData.source_display || '';
+        const bargeName = rowData.barge_name || '';
+
+        var select = document.createElement("select");
+        select.style.width = "100%";
+        select.style.boxSizing = "border-box";
+        select.style.padding = "4px";
+
+        function renderSelect(opts) {
+            select.innerHTML = '<option value=""></option>';
+            opts.forEach(opt => {
+                const option = document.createElement("option");
+                option.value = opt;
+                option.textContent = opt;
+                if (opt === cell.getValue()) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+
+        // Try to get cargo from barge (VCN) or from MBC
+        const vcnMatch = vcnOptions.find(v => v.label === sourceDisplay);
+        const mbcMatch = mbcOptions.find(m => m.label === sourceDisplay);
+        if (vcnMatch && bargeName) {
+            renderSelect([]);
+            fetch(`/api/module/LUEU01/barge-cargos/${vcnMatch.id}?barge=${encodeURIComponent(bargeName)}`)
+                .then(r => r.json())
+                .then(cargos => {
+                    if (cargos.length === 1) { success(cargos[0]); return; }
+                    renderSelect(cargos.length > 0 ? cargos : cargoList);
+                });
+        } else if (mbcMatch) {
+            // For MBC: show MBC's own cargo as first option, then full list
+            const mbcCargo = mbcMatch.cargo_name || '';
+            const opts = mbcCargo ? [mbcCargo, ...cargoList.filter(c => c !== mbcCargo)] : cargoList;
+            renderSelect(opts);
+            if (mbcCargo && !cell.getValue()) success(mbcCargo);
+        } else {
+            renderSelect(cargoList);
+        }
+
+        onRendered(function() { select.focus(); });
+        select.addEventListener("change", function() { success(select.value); });
+        select.addEventListener("blur", function() { success(select.value); });
+        select.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") success(select.value);
+            if (e.key === "Escape") cancel();
+        });
+        return select;
+    };
+
+    // HH:MM text editor (same style as global datetimeEditor — avoids browser spin-button issues)
+    var timeEditor = function(cell, onRendered, success, cancel) {
+        var input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "HH:MM";
+        input.maxLength = 5;
+        input.value = cell.getValue() ? String(cell.getValue()).slice(0, 5) : '';
+        input.style.width = "100%";
+        input.style.boxSizing = "border-box";
+        input.style.padding = "4px";
+        input.style.fontFamily = "monospace";
+        input.style.fontSize = "12px";
+        var resolved = false;
+
+        // Auto-insert colon after 2 digits
+        input.addEventListener('input', function() {
+            var raw = input.value.replace(/[^\d]/g, '');
+            var out = '';
+            for (var i = 0; i < raw.length && i < 4; i++) {
+                if (i === 2) out += ':';
+                out += raw[i];
+            }
+            input.value = out;
+        });
+
+        function complete() {
+            if (resolved) return;
+            resolved = true;
+            var val = input.value.trim();
+            if (/^\d{1,2}:\d{2}$/.test(val)) {
+                var parts = val.split(':');
+                val = parts[0].padStart(2, '0') + ':' + parts[1];
+            } else {
+                val = '';
+            }
+            success(val);
+        }
+
+        onRendered(function() { input.focus(); input.select(); input.style.height = "100%"; });
+        input.addEventListener("blur", function() { complete(); });
+        input.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") complete();
+            if (e.key === "Escape") { resolved = true; cancel(); }
+        });
+        return input;
+    };
+
+    function calcDiffHrs(from, to) {
+        if (!from || !to) return '';
+        var fp = String(from).split(':'), tp = String(to).split(':');
+        if (fp.length < 2 || tp.length < 2) return '';
+        var fromMins = parseInt(fp[0]) * 60 + parseInt(fp[1]);
+        var toMins   = parseInt(tp[0]) * 60 + parseInt(tp[1]);
+        if (isNaN(fromMins) || isNaN(toMins)) return '';
+        // If to <= from, assume to is next day
+        var diffMins = toMins > fromMins ? toMins - fromMins : 1440 - fromMins + toMins;
+        return (diffMins / 60).toFixed(2);
+    }
+
+    function initTable(equipName) {
+        if (table) { table.destroy(); table = null; }
+
+        const canEdit = permissions.can_edit || permissions.can_add;
+        // Returns false for deleted rows so they can't be edited
+        const editableCheck = canEdit ? function(cell) { return !cell.getRow().getData().is_deleted; } : false;
+
+        const columns = [
+            {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+            {title: "Date", field: "entry_date", width: 120, editor: canEdit ? "date" : false, editable: editableCheck, formatter: dateCellFormatter},
+            {title: "Shift", field: "shift", width: 80, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: {'': '', 'A': 'A', 'B': 'B', 'C': 'C'}}},
+            {title: "From", field: "from_time", width: 90, editor: canEdit ? timeEditor : false, editable: editableCheck},
+            {title: "To", field: "to_time", width: 90, editor: canEdit ? timeEditor : false, editable: editableCheck},
+            {title: "Diff (Hrs)", field: "diff_hrs", width: 80, hozAlign: "right", headerSort: false,
+                mutatorData: function(value, data) { return calcDiffHrs(data.from_time, data.to_time); },
+                formatter: function(cell) {
+                    var val = cell.getValue();
+                    if (!val && val !== 0) return '';
+                    return '<span style="font-weight:500">' + val + '</span>';
+                }},
+            {title: "VCN / MBC", field: "source_display", width: 300,
+                editor: canEdit ? "list" : false,
+                editable: canEdit ? function(cell) { if (_blIconClicked) { _blIconClicked = false; return false; } return !cell.getRow().getData().is_deleted; } : false,
+                editorParams: {values: getVcnMbcOptions(), autocomplete: true, allowEmpty: true, listOnEmpty: true},
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    const val = cell.getValue() || '';
+                    let html = val;
+                    if (data._multi_customer && data.customer_name) {
+                        html += ' <span style="background:#805ad5;color:white;padding:1px 5px;border-radius:8px;font-size:9px;font-weight:600;margin-left:4px;">' + data.customer_name + '</span>';
+                    }
+                    if (val && data.source_type && data.source_id) {
+                        html += ' <span class="bl-info-icon" data-src-type="' + data.source_type + '" data-src-id="' + data.source_id + '" data-label="' + val.replace(/"/g, '&quot;') + '" title="View BL vs Handled">i</span>';
+                    }
+                    return html;
+                },
+                cellClick: function(e, cell) {
+                    const icon = e.target.closest('.bl-info-icon');
+                    if (icon) {
+                        e.stopPropagation();
+                        showBlProgress(icon.dataset.srcType, parseInt(icon.dataset.srcId), icon.dataset.label, icon);
+                    }
+                }},
+            {title: "Barge / MBC Name", field: "barge_name", width: 150, editor: canEdit ? bargeEditor : false, editable: editableCheck},
+            {title: "Cargo", field: "cargo_name", width: 140, editor: canEdit ? cargoEditor : false, editable: editableCheck},
+            {title: "Delay", field: "delay_name", width: 140, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: toOptions(delayList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
+            {title: "System", field: "system_name", width: 130, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: toOptions(systemList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
+            {title: "Receiving Route", field: "route_name", width: 160, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: toOptions(routeList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
+            {title: "Berth", field: "berth_name", width: 130, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: toOptions(berthList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
+            {title: "Shift Incharge", field: "shift_incharge", width: 140, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: toOptions(shiftInchargeList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
+            {title: "Operator", field: "operator_name", width: 140, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: toOptions(shiftOperatorList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
+            {title: "Quantity", field: "quantity", width: 120, hozAlign: "right",
+                editor: canEdit ? "number" : false, editable: editableCheck, editorParams: {min: 0, step: 0.01},
+                formatter: function(cell) {
+                    const val = cell.getValue();
+                    if (val === null || val === undefined || val === '') return '';
+                    const data = cell.getRow().getData();
+                    const cacheKey = data.source_type + ':' + data.source_id;
+                    const progress = data.source_type && data.source_id ? blProgressCache[cacheKey] : null;
+                    let badge = '';
+                    if (progress && Array.isArray(progress)) {
+                        const cargoRow = progress.find(p => p.cargo_name === (data.cargo_name || ''));
+                        if (cargoRow && cargoRow.exceeded) {
+                            badge = '<span class="qty-exceeded-badge" title="BL exceeded by ' + cargoRow.exceeded_by.toLocaleString() + (cargoRow.uom ? ' ' + cargoRow.uom : '') + '">&#9888; OVR</span>';
+                        }
+                    }
+                    return '<span style="font-weight:500">' + parseFloat(val).toLocaleString() + '</span>' + badge;
+                }},
+            {title: "Qty UOM", field: "quantity_uom", width: 110, editor: canEdit ? "list" : false, editable: editableCheck,
+                editorParams: {values: toOptions(uomList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
+            {title: "Remarks", field: "remarks", width: 200, editor: canEdit ? "input" : false, editable: editableCheck},
+            {
+                title: "Del",
+                field: "is_deleted",
+                width: 50,
+                hozAlign: "center",
+                headerSort: false,
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    if (data.is_deleted) {
+                        return '<span style="color:#e74c3c;font-size:10px;font-weight:700;" title="Deleted by ' + (data.deleted_by||'?') + ' on ' + (data.deleted_date||'?') + '">DEL</span>';
+                    }
+                    return '<input type="checkbox" class="eu-del-cb" data-id="' + data.id + '" title="Mark for deletion" onclick="event.stopPropagation()">';
+                },
+                cellClick: function(e, cell) { /* prevent row selection on Del column */ }
+            }
+        ];
+
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 200px)",
+            layout: "fitDataFill",
+            columns: columns,
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 20,
+            paginationSizeSelector: [20, 50, 75, 100, true],
+            ajaxURL: "/api/module/LUEU01/data",
+            ajaxParams: function() {
+                var p = {equipment: currentEquipment};
+                if (currentFilters.length) p.filters = JSON.stringify(currentFilters);
+                return p;
+            },
+            ajaxResponse: function(url, params, response) {
+                document.getElementById('rowCount').textContent = response.data.length;
+                document.getElementById('totalCount').textContent = response.total;
+                // Pre-fetch BL progress for all unique sources in this page
+                const seen = new Set();
+                response.data.forEach(function(row) {
+                    if (row.source_type && row.source_id) {
+                        const key = row.source_type + ':' + row.source_id;
+                        if (!seen.has(key) && blProgressCache[key] === undefined) {
+                            seen.add(key);
+                            fetchBlProgress(row.source_type, row.source_id).then(function() {
+                                if (table) table.redraw();
+                            });
+                        }
+                    }
+                });
+                return response;
+            },
+            rowFormatter: function(row) {
+                var el = row.getElement();
+                var data = row.getData();
+                if (data._is_new) {
+                    el.classList.add('new-row-highlight');
+                    el.classList.remove('deleted-row');
+                } else if (data.is_deleted) {
+                    el.classList.add('deleted-row');
+                    el.classList.remove('new-row-highlight');
+                } else {
+                    el.classList.remove('new-row-highlight');
+                    el.classList.remove('deleted-row');
+                }
+            },
+            selectable: true
+        });
+
+        // Recompute Diff (Hrs) when from_time or to_time is edited; schedule autosave
+        table.on("cellEdited", function(cell) {
+            const id = cell.getRow().getData().id;
+            if (id) dirtyRowIds.add(String(id));
+            if (cell.getField() === "from_time" || cell.getField() === "to_time") {
+                var d = cell.getRow().getData();
+                cell.getRow().update({diff_hrs: calcDiffHrs(d.from_time, d.to_time)});
+            }
+            if (permissions.can_add || permissions.can_edit) scheduleAutoSave();
+        });
+
+        // Auto-fill barge_name / cargo_name when VCN/MBC changes
+        table.on("cellEdited", function(cell) {
+            if (cell.getField() === "source_display") {
+                const sourceDisplay = cell.getValue() || '';
+                const mbcMatch = mbcOptions.find(m => m.label === sourceDisplay);
+                if (mbcMatch) {
+                    const parts = sourceDisplay.split(' / ');
+                    const mbcName = parts.length >= 2 ? parts[1] : '';
+                    cell.getRow().update({
+                        barge_name: mbcName,
+                        cargo_name: mbcMatch.cargo_name || ''
+                    });
+                } else {
+                    cell.getRow().update({barge_name: '', cargo_name: ''});
+                }
+            }
+            // Auto-pick cargo when barge is selected and only one cargo
+            if (cell.getField() === "barge_name") {
+                const rowData = cell.getRow().getData();
+                const sourceDisplay = rowData.source_display || '';
+                const bargeName = cell.getValue() || '';
+                const vcnMatch = vcnOptions.find(v => v.label === sourceDisplay);
+                if (vcnMatch && bargeName) {
+                    fetch(`/api/module/LUEU01/barge-cargos/${vcnMatch.id}?barge=${encodeURIComponent(bargeName)}`)
+                        .then(r => r.json())
+                        .then(cargos => {
+                            if (cargos.length === 1) {
+                                cell.getRow().update({cargo_name: cargos[0]});
+                            }
+                        });
+                }
+            }
+        });
+
+        // Intercept mousedown on info icon so Tabulator doesn't open the editor
+        document.getElementById('table').addEventListener('mousedown', function(e) {
+            if (e.target.closest('.bl-info-icon')) {
+                _blIconClicked = true;
+                e.stopPropagation();
+            }
+        }, true); // capture phase — fires before Tabulator's listener
+
+        document.getElementById('table').addEventListener('change', function(e) {
+            if (e.target && e.target.classList.contains('eu-del-cb') && e.target.checked) {
+                handleSoftDelete(e.target);
+            }
+        });
+
+        if (localStorage.getItem('theme') === 'dark') {
+            document.getElementById('table').classList.add('tabulator-dark');
+        }
+    }
+
+    async function addRow() {
+        // Save any dirty rows before adding a new one
+        if (dirtyRowIds.size > 0) {
+            cancelAutoSave();
+            await saveAll();
+        }
+
+        // Always navigate to page 1 first so the new row appears at the top.
+        // Server returns ORDER BY id DESC, so newest entries are on page 1.
+        if (table.getPage() !== 1) {
+            await table.setPage(1);
+        }
+
+        var rows = table.getRows();
+        var newData = {
+            _is_new: true,
+            created_by: currentUser,
+            entry_date: getTodayDate(),
+            equipment_name: currentEquipment,
+            quantity_uom: defaultUom || undefined
+        };
+        if (rows.length > 0) {
+            var topData = rows[0].getData();
+            var copyFields = [
+                'source_type', 'source_id', 'source_display', 'barge_name', 'cargo_name',
+                'delay_name', 'operation_type', 'quantity_uom', 'route_name',
+                'entry_date', 'shift', 'system_name', 'berth_name', 'shift_incharge', 'operator_name', 'remarks'
+            ];
+            copyFields.forEach(function(f) {
+                if (topData[f] != null && topData[f] !== '') newData[f] = topData[f];
+            });
+            // from_time of new row = to_time of previous top row
+            if (topData.to_time) newData.from_time = topData.to_time;
+        }
+        table.addRow(newData, true);
+    }
+
+    let _pendingDeleteCheckbox = null;
+    let _pendingDeleteId = null;
+
+    function handleSoftDelete(checkbox) {
+        _pendingDeleteCheckbox = checkbox;
+        _pendingDeleteId = checkbox.getAttribute('data-id');
+        const modal = document.getElementById('delPasswordModal');
+        const input = document.getElementById('delPasswordInput');
+        const err = document.getElementById('delPasswordError');
+        input.value = '';
+        document.getElementById('delPasswordConfirm').value = '';
+        err.style.display = 'none';
+        modal.style.display = 'flex';
+        setTimeout(() => input.focus(), 50);
+    }
+
+    function cancelDelModal() {
+        document.getElementById('delPasswordModal').style.display = 'none';
+        if (_pendingDeleteCheckbox) _pendingDeleteCheckbox.checked = false;
+        _pendingDeleteCheckbox = null;
+        _pendingDeleteId = null;
+    }
+
+    function confirmDelModal() {
+        const password = document.getElementById('delPasswordInput').value;
+        const confirm = document.getElementById('delPasswordConfirm').value;
+        const err = document.getElementById('delPasswordError');
+        if (!password) {
+            err.textContent = 'Password is required.';
+            err.style.display = 'block';
+            return;
+        }
+        if (!confirm) {
+            err.textContent = 'Please re-enter your password.';
+            err.style.display = 'block';
+            return;
+        }
+        if (password !== confirm) {
+            err.textContent = 'Passwords do not match.';
+            err.style.display = 'block';
+            document.getElementById('delPasswordConfirm').value = '';
+            document.getElementById('delPasswordConfirm').focus();
+            return;
+        }
+
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+
+        fetch('/api/module/LUEU01/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ids: [parseInt(_pendingDeleteId)], password: password})
+        })
+        .then(r => r.json())
+        .then(result => {
+            btn.disabled = false;
+            btn.textContent = 'Delete';
+            if (!result.success) {
+                err.textContent = result.error || 'Deletion failed.';
+                err.style.display = 'block';
+                if (_pendingDeleteCheckbox) _pendingDeleteCheckbox.checked = false;
+                return;
+            }
+            document.getElementById('delPasswordModal').style.display = 'none';
+            _pendingDeleteCheckbox = null;
+            _pendingDeleteId = null;
+            table.replaceData();
+            if (result.auto_cn_created && result.auto_cn_created.length > 0) {
+                const cnNums = result.auto_cn_created.map(cn => cn.doc_number).join(', ');
+                alert('EU line deleted.\n\nCredit Note(s) automatically created in FDCN01:\n' + cnNums + '\n\nThese require approver sign-off before posting to SAP.');
+            }
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.textContent = 'Delete';
+            err.textContent = 'Network error. Please try again.';
+            err.style.display = 'block';
+            if (_pendingDeleteCheckbox) _pendingDeleteCheckbox.checked = false;
+        });
+    }
+
+    // Allow Enter key to submit the password modal
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.getElementById('delPasswordModal').style.display === 'flex') {
+            cancelDelModal();
+        }
+    });
+
+    async function saveAll() {
+        cancelAutoSave();
+        showStatus('Saving...', 'saving');
+        const rows = table.getRows();
+        let savedCount = 0;
+
+        for (const row of rows) {
+            const data = row.getData();
+            if (!data.id && !data.entry_date) continue;
+            // Skip unchanged existing rows
+            if (data.id && !dirtyRowIds.has(String(data.id))) continue;
+
+            // Set equipment name
+            data.equipment_name = currentEquipment;
+
+            // Determine source type and id
+            const vcnMatch = vcnOptions.find(v => v.label === data.source_display);
+            const mbcMatch = mbcOptions.find(m => m.label === data.source_display);
+            if (vcnMatch) { data.source_type = 'VCN'; data.source_id = vcnMatch.id; }
+            else if (mbcMatch) { data.source_type = 'MBC'; data.source_id = mbcMatch.id; }
+
+            // Strip local-only flag before sending to server
+            const payload = Object.assign({}, data);
+            delete payload._is_new;
+
+            const res = await fetch("/api/module/LUEU01/save", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.id) { row.update({id: result.id, _is_new: false}); savedCount++; }
+        }
+        dirtyRowIds.clear();
+        showStatus(`Saved ${savedCount} row(s)`, 'saved');
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveAll(); }
+    });
+
+    // ── Filter panel ──────────────────────────────────────────────────────────
+    const FILTER_CONFIG = {
+        entry_date:     { label: 'Date',            type: 'range' },
+        shift:          { label: 'Shift',           type: 'multi',   values: ['A', 'B', 'C'] },
+        source_display: { label: 'VCN / MBC',       type: 'contains' },
+        barge_name:     { label: 'Barge / MBC Name',type: 'contains' },
+        cargo_name:     { label: 'Cargo',           type: 'contains' },
+        delay_name:     { label: 'Delay',           type: 'contains' },
+        berth_name:     { label: 'Berth',           type: 'contains' },
+        operator_name:  { label: 'Operator',        type: 'contains' },
+        route_name:     { label: 'Route',           type: 'contains' },
+    };
+
+    function toggleFilterPanel() {
+        const panel = document.getElementById('filterPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        if (panel.style.display === 'block') loadSavedFiltersBar();
+    }
+
+    function addFilterRow() {
+        const container = document.getElementById('filterRows');
+        const colOptions = Object.entries(FILTER_CONFIG)
+            .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+        const row = document.createElement('div');
+        row.className = 'filter-row';
+        row.innerHTML = `
+            <select class="filter-col-select" onchange="onFilterColChange(this)">
+                <option value="">-- Column --</option>${colOptions}
+            </select>
+            <div class="filter-value-container"></div>
+            <button class="filter-remove" onclick="this.closest('.filter-row').remove();updateFilterBadge();">&times;</button>`;
+        container.appendChild(row);
+    }
+
+    function onFilterColChange(sel) {
+        const container = sel.closest('.filter-row').querySelector('.filter-value-container');
+        const col = sel.value;
+        if (!col) { container.innerHTML = ''; return; }
+        const cfg = FILTER_CONFIG[col];
+        if (cfg.type === 'contains') {
+            container.innerHTML = `<input class="filter-text-input" type="text" placeholder="contains...">`;
+        } else if (cfg.type === 'multi') {
+            container.innerHTML = `<div class="filter-multi-list">${
+                cfg.values.map(v => `<label><input type="checkbox" class="filter-checkbox" value="${v}"> ${v}</label>`).join('')
+            }</div>`;
+        } else if (cfg.type === 'range') {
+            container.innerHTML = `<input class="filter-from" type="datetime-local"> <span style="font-size:12px">to</span> <input class="filter-to" type="datetime-local">`;
+        }
+    }
+
+    function collectFilters() {
+        const filters = [];
+        document.querySelectorAll('#filterRows .filter-row').forEach(function(row) {
+            const col = (row.querySelector('.filter-col-select') || {}).value;
+            if (!col) return;
+            const cfg = FILTER_CONFIG[col];
+            if (cfg.type === 'contains') {
+                const v = (row.querySelector('.filter-text-input') || {}).value || '';
+                if (v.trim()) filters.push({ field: col, type: 'contains', value: v.trim() });
+            } else if (cfg.type === 'multi') {
+                const checked = [...row.querySelectorAll('.filter-checkbox:checked')].map(cb => cb.value);
+                if (checked.length) filters.push({ field: col, type: 'multi', values: checked });
+            } else if (cfg.type === 'range') {
+                const from = ((row.querySelector('.filter-from') || {}).value || '').slice(0, 10);
+                const to   = ((row.querySelector('.filter-to')   || {}).value || '').slice(0, 10);
+                if (from || to) filters.push({ field: col, type: 'range', from, to });
+            }
+        });
+        return filters;
+    }
+
+    function applyFilters() {
+        currentFilters = collectFilters();
+        updateFilterBadge();
+        if (table) table.replaceData();
+    }
+
+    function clearFilters() {
+        document.getElementById('filterRows').innerHTML = '';
+        currentFilters = [];
+        updateFilterBadge();
+        if (table) table.replaceData();
+    }
+
+    function updateFilterBadge() {
+        const active = collectFilters().length;
+        const badge = document.getElementById('filterBadge');
+        if (badge) { badge.textContent = active; badge.style.display = active > 0 ? 'inline' : 'none'; }
+    }
+    // ── End filter panel ──────────────────────────────────────────────────────
+
+    // ── Saved Filters ─────────────────────────────────────────────────────────
+    const SAVED_FILTER_MODULE = 'LUEU01';
+    let savedFiltersCache = [];
+
+    async function loadSavedFiltersBar() {
+        try {
+            const res = await fetch(`/api/saved-filters/${SAVED_FILTER_MODULE}`);
+            savedFiltersCache = await res.json();
+            const bar = document.getElementById('savedFiltersBar');
+            const list = document.getElementById('savedFiltersList');
+            if (!savedFiltersCache.length) { bar.style.display = 'none'; return; }
+            bar.style.display = 'flex';
+            list.innerHTML = savedFiltersCache.map(f =>
+                `<span style="display:inline-flex;align-items:center;gap:4px;background:#ebf8ff;border:1px solid #bee3f8;border-radius:12px;padding:2px 10px;font-size:11px;">
+                    <span style="cursor:pointer;color:#2b6cb0;font-weight:600;" onclick="applySavedFilter(${f.id})">${f.name}</span>
+                    <button onclick="deleteSavedFilter(${f.id})" style="background:none;border:none;color:#e53e3e;cursor:pointer;font-size:14px;padding:0;line-height:1;margin-left:2px;">&times;</button>
+                </span>`
+            ).join('');
+        } catch(e) {}
+    }
+
+    function applySavedFilter(id) {
+        const f = savedFiltersCache.find(x => x.id === id);
+        if (!f) return;
+        const filters = JSON.parse(f.filters_json);
+        document.getElementById('filterRows').innerHTML = '';
+        filters.forEach(function(filter) {
+            addFilterRow();
+            const rows = document.querySelectorAll('#filterRows .filter-row');
+            const row = rows[rows.length - 1];
+            const sel = row.querySelector('.filter-col-select');
+            sel.value = filter.field;
+            onFilterColChange(sel);
+            if (filter.type === 'contains') {
+                const inp = row.querySelector('.filter-text-input');
+                if (inp) inp.value = filter.value;
+            } else if (filter.type === 'multi') {
+                row.querySelectorAll('.filter-checkbox').forEach(cb => {
+                    cb.checked = filter.values && filter.values.includes(cb.value);
+                });
+            } else if (filter.type === 'range') {
+                const from = row.querySelector('.filter-from');
+                const to = row.querySelector('.filter-to');
+                if (from) from.value = filter.from || '';
+                if (to) to.value = filter.to || '';
+            }
+        });
+        applyFilters();
+    }
+
+    async function saveCurrentFilter() {
+        const filters = collectFilters();
+        if (!filters.length) { alert('Add at least one filter condition before saving.'); return; }
+        const name = prompt('Name this saved filter:');
+        if (!name || !name.trim()) return;
+        try {
+            const res = await fetch('/api/saved-filters', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name.trim(), module_code: SAVED_FILTER_MODULE, filters})
+            });
+            if (res.ok) loadSavedFiltersBar();
+            else alert('Failed to save filter.');
+        } catch(e) { alert('Error saving filter.'); }
+    }
+
+    async function deleteSavedFilter(id) {
+        if (!confirm('Delete this saved filter?')) return;
+        try {
+            await fetch(`/api/saved-filters/${id}`, {method: 'DELETE'});
+            loadSavedFiltersBar();
+        } catch(e) {}
+    }
+    // ── End saved filters ──────────────────────────────────────────────────────
+
+    loadMasterData();
+</script>
+{% endblock %}

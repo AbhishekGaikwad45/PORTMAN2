@@ -1,0 +1,683 @@
+{% extends "base.html" %}
+
+{% block title %}Service Type Master - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .toolbar { margin-bottom: 15px; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-add { background: #27ae60; color: white; }
+    .btn-save { background: #3498db; color: white; }
+    .btn-delete { background: #e74c3c; color: white; }
+    .btn-fields { background: #8e44ad; color: white; font-size: 10px; padding: 4px 8px; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; }
+    .data-table input, .data-table select { width: 100%; padding: 4px; font-size: 11px; border: 1px solid #ddd; }
+    .data-table input[readonly], .data-table input:disabled, .data-table select:disabled { background: #ecf0f1; color: #7f8c8d; cursor: not-allowed; }
+    .pagination { margin-top: 15px; display: flex; gap: 5px; justify-content: center; font-size: 11px; }
+    .system-row { background: #fdf6e3 !important; }
+    .system-row:hover { background: #fdf6e3 !important; }
+    .lock-badge { display: inline-block; background: #f39c12; color: white; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; vertical-align: middle; margin-left: 4px; }
+    .tds-pct-cell { display: none; }
+    .tds-pct-cell.visible { display: table-cell; }
+
+    /* Field config panel */
+    .field-panel { background: #f8f9fa; border: 2px solid #8e44ad; border-radius: 4px; padding: 15px; margin-top: 15px; display: none; }
+    .field-panel h3 { margin: 0 0 10px 0; font-size: 13px; color: #8e44ad; border-bottom: 2px solid #8e44ad; padding-bottom: 5px; }
+    .field-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; }
+    .field-table th, .field-table td { padding: 6px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .field-table th { background: #8e44ad; color: white; font-weight: 600; font-size: 10px; }
+    .field-table input, .field-table select { width: 100%; padding: 3px; font-size: 11px; border: 1px solid #ddd; }
+    .field-table input[type="checkbox"] { width: auto; }
+</style>
+
+<div class="module-header">
+    <h2>Service Type Master</h2>
+    <span class="module-code">FSTM01</span>
+</div>
+
+<div class="toolbar">
+    {% if perms.can_add %}
+    <button class="btn btn-add" onclick="addRow()">+ Add Row</button>
+    {% endif %}
+    {% if perms.can_delete %}
+    <button class="btn btn-delete" onclick="deleteRow()">Delete Selected</button>
+    {% endif %}
+    {% if perms.can_edit or perms.can_add %}
+    <button class="btn btn-save" onclick="saveAll()">Save All</button>
+    {% endif %}
+</div>
+
+<form id="dataForm">
+<table class="data-table">
+    <thead>
+        <tr>
+            <th style="width:30px"><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
+            <th>Service Code</th>
+            <th>Service Name</th>
+            <th>Category</th>
+            <th>GL Code</th>
+            <th>SAP GL Account</th>
+            <th>SAP Tax Code</th>
+            <th>SAP Profit Center</th>
+            <th>SAP Cost Center</th>
+            <th title="IGST GL Account for SAP staging">IGST GL</th>
+            <th title="CGST GL Account for SAP staging">CGST GL</th>
+            <th title="SGST GL Account for SAP staging">SGST GL</th>
+            <th title="Checked = Sale (A), Unchecked = Service (S)">Is Sale</th>
+            <th title="TDS GL Account for this service (overrides config default)">TDS GL</th>
+            <th title="TCS GL Account for this service (overrides config default)">TCS GL</th>
+            <th>SAC Code</th>
+            <th>GST Rate</th>
+            <th>UOM</th>
+            <th>Billable</th>
+            <th>TDS</th>
+            <th>TDS %</th>
+            <th>TCS</th>
+            <th>TCS %</th>
+            <th>Triplicate</th>
+            <th>Status</th>
+            <th>Fields</th>
+        </tr>
+    </thead>
+    <tbody id="tableBody">
+        {% for row in data %}
+        {% set locked = (row.is_system == 1 and not is_admin) or (not perms.can_edit and not is_admin) %}
+        <tr data-id="{{ row.id }}" {% if row.is_system %}class="system-row" data-system="1"{% endif %}>
+            <td>{% if not row.is_system %}<input type="checkbox" class="row-select">{% else %}<span title="System-managed — cannot be deleted">🔒</span>{% endif %}</td>
+            <td><input type="text" name="service_code[]" value="{{ row.service_code }}" {% if locked %}readonly{% endif %}></td>
+            <td>
+                <input type="text" name="service_name[]" value="{{ row.service_name }}" {% if locked %}readonly{% endif %}>
+                {% if row.is_system %}<span class="lock-badge">SYSTEM</span>{% endif %}
+            </td>
+            <td><input type="text" name="service_category[]" value="{{ row.service_category }}" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="gl_code[]" value="{{ row.gl_code }}" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_gl_account[]" value="{{ row.sap_gl_account or '' }}" placeholder="e.g. 4101076030" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_tax_code[]" value="{{ row.sap_tax_code or '' }}" placeholder="e.g. 50" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_profit_center[]" value="{{ row.sap_profit_center or '' }}" placeholder="e.g. 5171000000" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_cost_center[]" value="{{ row.sap_cost_center or '' }}" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_igst_gl[]" value="{{ row.sap_igst_gl or '' }}" placeholder="IGST GL" style="width:90px;" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_cgst_gl[]" value="{{ row.sap_cgst_gl or '' }}" placeholder="CGST GL" style="width:90px;" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_sgst_gl[]" value="{{ row.sap_sgst_gl or '' }}" placeholder="SGST GL" style="width:90px;" {% if locked %}readonly{% endif %}></td>
+            <td style="text-align:center;"><input type="checkbox" name="is_sale[]" {% if row.service_sale_flag == 'A' %}checked{% endif %} {% if locked %}disabled{% endif %} title="Is Sale?"></td>
+            <td><input type="text" name="sap_tds_gl[]" value="{{ row.sap_tds_gl or '' }}" placeholder="e.g. 2400001000" style="width:100px;" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sap_tcs_gl[]" value="{{ row.sap_tcs_gl or '' }}" placeholder="e.g. 2400007000" style="width:100px;" {% if locked %}readonly{% endif %}></td>
+            <td><input type="text" name="sac_code[]" value="{{ row.sac_code }}" {% if locked %}readonly{% endif %}></td>
+            <td><select name="gst_rate_id[]" {% if locked %}disabled{% endif %}>
+                <option value="">--Select--</option>
+                {% for gst in gst_rates %}
+                <option value="{{ gst.id }}" {% if row.gst_rate_id == gst.id %}selected{% endif %}>{{ gst.rate_name }}</option>
+                {% endfor %}
+            </select></td>
+            <td><input type="text" name="uom[]" value="{{ row.uom }}" {% if locked %}readonly{% endif %}></td>
+            <td><select name="is_billable[]" {% if locked %}disabled{% endif %}>
+                <option value="1" {% if row.is_billable %}selected{% endif %}>Yes</option>
+                <option value="0" {% if not row.is_billable %}selected{% endif %}>No</option>
+            </select></td>
+            <td><select name="is_tds[]" {% if locked %}disabled{% endif %} onchange="toggleTdsPct(this)">
+                <option value="0" {% if not row.is_tds %}selected{% endif %}>No</option>
+                <option value="1" {% if row.is_tds %}selected{% endif %}>Yes</option>
+            </select></td>
+            <td><input type="number" step="0.01" min="0" max="100" name="tds_percent[]"
+                value="{{ row.tds_percent or '' }}" placeholder="e.g. 2"
+                style="{% if not row.is_tds %}display:none;{% endif %} width:70px;"
+                {% if locked %}readonly{% endif %}></td>
+            <td><select name="is_tcs[]" {% if locked %}disabled{% endif %} onchange="toggleTcsPct(this)">
+                <option value="0" {% if not row.is_tcs %}selected{% endif %}>No</option>
+                <option value="1" {% if row.is_tcs %}selected{% endif %}>Yes</option>
+            </select></td>
+            <td><input type="number" step="0.01" min="0" max="100" name="tcs_percent[]"
+                value="{{ row.tcs_percent or '' }}" placeholder="e.g. 1"
+                style="{% if not row.is_tcs %}display:none;{% endif %} width:70px;"
+                {% if locked %}readonly{% endif %}></td>
+            <td><select name="is_triplicate[]" {% if locked %}disabled{% endif %}>
+                <option value="0" {% if not row.is_triplicate %}selected{% endif %}>No</option>
+                <option value="1" {% if row.is_triplicate %}selected{% endif %}>Yes</option>
+            </select></td>
+            <td><select name="is_active[]" {% if locked %}disabled{% endif %}>
+                <option value="1" {% if row.is_active %}selected{% endif %}>Active</option>
+                <option value="0" {% if not row.is_active %}selected{% endif %}>Inactive</option>
+            </select></td>
+            <td>{% if row.id and not row.is_system %}<button type="button" class="btn btn-fields" onclick="openFieldConfig({{ row.id }}, '{{ row.service_name }}')">Configure</button>{% elif row.id and row.is_system %}<span style="font-size:10px;color:#95a5a6;">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</form>
+
+<div class="pagination">
+    {% if page > 1 %}
+    <button class="btn" onclick="location.href='?page={{ page - 1 }}'">Previous</button>
+    {% endif %}
+    <span style="padding: 5px 10px;">Page {{ page }} of {{ last_page }}</span>
+    {% if page < last_page %}
+    <button class="btn" onclick="location.href='?page={{ page + 1 }}'">Next</button>
+    {% endif %}
+</div>
+
+<!-- Formula Builder Modal -->
+<div id="formulaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:6px;padding:20px;width:580px;max-width:96vw;box-shadow:0 4px 24px rgba(0,0,0,0.25)">
+        <h3 style="margin:0 0 12px 0;font-size:13px;color:#8e44ad;border-bottom:2px solid #8e44ad;padding-bottom:6px">Formula Builder</h3>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:11px">
+            <label style="font-weight:600;color:#555;white-space:nowrap">Result Type:</label>
+            <select id="fbResultType" style="padding:4px;font-size:11px;border:1px solid #ddd;border-radius:3px">
+                <option value="">number</option>
+                <option value="hours">hours (datetime diff)</option>
+                <option value="days">days (datetime diff)</option>
+                <option value="number">number</option>
+            </select>
+        </div>
+        <div style="background:#f5f0ff;border:1px solid #c39bd3;border-radius:4px;padding:10px;min-height:38px;font-family:monospace;font-size:13px;color:#6c3483;margin-bottom:14px;word-break:break-all;letter-spacing:.3px" id="fbPreview">—</div>
+        <div style="margin-bottom:12px">
+            <div style="font-size:10px;font-weight:700;color:#8e44ad;text-transform:uppercase;margin-bottom:6px;letter-spacing:.5px">Fields (click to insert)</div>
+            <div id="fbFieldBtns" style="display:flex;flex-wrap:wrap;gap:5px;min-height:28px">
+                <span style="font-size:11px;color:#aaa;font-style:italic">No other fields defined yet</span>
+            </div>
+        </div>
+        <div style="margin-bottom:16px">
+            <div style="font-size:10px;font-weight:700;color:#34495e;text-transform:uppercase;margin-bottom:6px;letter-spacing:.5px">Operators</div>
+            <div id="fbOpBtns" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #ecf0f1;padding-top:12px">
+            <button type="button" class="btn" style="background:#95a5a6;color:white" onclick="fbCancel()">Cancel</button>
+            <button type="button" class="btn btn-save" onclick="fbApply()">Apply Formula</button>
+        </div>
+    </div>
+</div>
+
+<!-- Field Configuration Panel -->
+<div id="fieldPanel" class="field-panel">
+    <h3>Custom Fields for: <span id="fieldServiceName"></span>
+        <button type="button" class="btn" style="float:right;background:#95a5a6;color:white;" onclick="closeFieldPanel()">Close</button>
+    </h3>
+    <input type="hidden" id="fieldServiceTypeId">
+    <div class="toolbar">
+        <button type="button" class="btn btn-add" onclick="addFieldRow()">+ Add Field</button>
+        <button type="button" class="btn btn-save" onclick="saveAllFields()">Save Fields</button>
+        <button type="button" class="btn btn-delete" onclick="deleteSelectedFields()">Delete Selected</button>
+    </div>
+    <table class="field-table">
+        <thead>
+            <tr>
+                <th style="width:25px"><input type="checkbox" onclick="toggleFieldSelectAll(this)"></th>
+                <th>Field Label</th>
+                <th>Internal Name</th>
+                <th style="width:100px">Type</th>
+                <th>Options / Formula</th>
+                <th style="width:80px">Result Type</th>
+                <th style="width:45px">Req</th>
+                <th style="width:55px">Bill Qty</th>
+                <th style="width:45px">Order</th>
+            </tr>
+        </thead>
+        <tbody id="fieldTableBody"></tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+addToRecent('FSTM01', 'Service Type Master');
+
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.row-select');
+    const selectAll = document.getElementById('selectAll').checked;
+    checkboxes.forEach(cb => cb.checked = selectAll);
+}
+
+function toggleTdsPct(sel) {
+    const row = sel.closest('tr');
+    const pctInput = row.querySelector('[name="tds_percent[]"]');
+    if (pctInput) {
+        pctInput.style.display = sel.value === '1' ? '' : 'none';
+        if (sel.value !== '1') pctInput.value = '';
+    }
+}
+
+function toggleTcsPct(sel) {
+    const row = sel.closest('tr');
+    const pctInput = row.querySelector('[name="tcs_percent[]"]');
+    if (pctInput) {
+        pctInput.style.display = sel.value === '1' ? '' : 'none';
+        if (sel.value !== '1') pctInput.value = '';
+    }
+}
+
+function addRow() {
+    const tbody = document.getElementById('tableBody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="checkbox" class="row-select"></td>
+        <td><input type="text" name="service_code[]" required></td>
+        <td><input type="text" name="service_name[]" required></td>
+        <td><input type="text" name="service_category[]"></td>
+        <td><input type="text" name="gl_code[]"></td>
+        <td><input type="text" name="sap_gl_account[]" placeholder="e.g. 4101076030"></td>
+        <td><input type="text" name="sap_tax_code[]" placeholder="e.g. 50"></td>
+        <td><input type="text" name="sap_profit_center[]" placeholder="e.g. 5171000000"></td>
+        <td><input type="text" name="sap_cost_center[]"></td>
+        <td><input type="text" name="sap_igst_gl[]" placeholder="IGST GL" style="width:90px;"></td>
+        <td><input type="text" name="sap_cgst_gl[]" placeholder="CGST GL" style="width:90px;"></td>
+        <td><input type="text" name="sap_sgst_gl[]" placeholder="SGST GL" style="width:90px;"></td>
+        <td style="text-align:center;"><input type="checkbox" name="is_sale[]" title="Is Sale?"></td>
+        <td><input type="text" name="sap_tds_gl[]" placeholder="e.g. 2400001000" style="width:100px;"></td>
+        <td><input type="text" name="sap_tcs_gl[]" placeholder="e.g. 2400007000" style="width:100px;"></td>
+        <td><input type="text" name="sac_code[]"></td>
+        <td><select name="gst_rate_id[]">
+            <option value="">--Select--</option>
+            {% for gst in gst_rates %}
+            <option value="{{ gst.id }}">{{ gst.rate_name }}</option>
+            {% endfor %}
+        </select></td>
+        <td><input type="text" name="uom[]"></td>
+        <td><select name="is_billable[]">
+            <option value="1" selected>Yes</option>
+            <option value="0">No</option>
+        </select></td>
+        <td><select name="is_tds[]" onchange="toggleTdsPct(this)">
+            <option value="0" selected>No</option>
+            <option value="1">Yes</option>
+        </select></td>
+        <td><input type="number" step="0.01" min="0" max="100" name="tds_percent[]" placeholder="e.g. 2" style="display:none; width:70px;"></td>
+        <td><select name="is_tcs[]" onchange="toggleTcsPct(this)">
+            <option value="0" selected>No</option>
+            <option value="1">Yes</option>
+        </select></td>
+        <td><input type="number" step="0.01" min="0" max="100" name="tcs_percent[]" placeholder="e.g. 1" style="display:none; width:70px;"></td>
+        <td><select name="is_triplicate[]">
+            <option value="0" selected>No</option>
+            <option value="1">Yes</option>
+        </select></td>
+        <td><select name="is_active[]">
+            <option value="1" selected>Active</option>
+            <option value="0">Inactive</option>
+        </select></td>
+        <td></td>
+    `;
+    tbody.appendChild(tr);
+}
+
+async function saveAll() {
+    const rows = document.querySelectorAll('#tableBody tr');
+    let saved = 0;
+
+    for (let row of rows) {
+        // Skip system rows for non-admins
+        if (row.dataset.system === '1' && !IS_ADMIN) continue;
+
+        const id = row.getAttribute('data-id') || '';
+        const isTds = row.querySelector('[name="is_tds[]"]').value;
+        const tdsPct = row.querySelector('[name="tds_percent[]"]').value;
+        const isTcs = row.querySelector('[name="is_tcs[]"]').value;
+        const tcsPct = row.querySelector('[name="tcs_percent[]"]').value;
+        const data = {
+            id: id,
+            service_code: row.querySelector('[name="service_code[]"]').value,
+            service_name: row.querySelector('[name="service_name[]"]').value,
+            service_category: row.querySelector('[name="service_category[]"]').value,
+            gl_code: row.querySelector('[name="gl_code[]"]').value,
+            sap_gl_account: row.querySelector('[name="sap_gl_account[]"]').value,
+            sap_tax_code: row.querySelector('[name="sap_tax_code[]"]').value,
+            sap_profit_center: row.querySelector('[name="sap_profit_center[]"]').value,
+            sap_cost_center: row.querySelector('[name="sap_cost_center[]"]').value,
+            sap_igst_gl: row.querySelector('[name="sap_igst_gl[]"]').value,
+            sap_cgst_gl: row.querySelector('[name="sap_cgst_gl[]"]').value,
+            sap_sgst_gl: row.querySelector('[name="sap_sgst_gl[]"]').value,
+            service_sale_flag: row.querySelector('[name="is_sale[]"]').checked ? 'A' : 'S',
+            sap_tds_gl: row.querySelector('[name="sap_tds_gl[]"]').value,
+            sap_tcs_gl: row.querySelector('[name="sap_tcs_gl[]"]').value,
+            sac_code: row.querySelector('[name="sac_code[]"]').value,
+            gst_rate_id: row.querySelector('[name="gst_rate_id[]"]').value,
+            uom: row.querySelector('[name="uom[]"]').value,
+            is_billable: row.querySelector('[name="is_billable[]"]').value,
+            is_tds: isTds,
+            tds_percent: (isTds === '1' && tdsPct) ? tdsPct : null,
+            is_tcs: isTcs,
+            tcs_percent: (isTcs === '1' && tcsPct) ? tcsPct : null,
+            is_triplicate: row.querySelector('[name="is_triplicate[]"]').value,
+            is_active: row.querySelector('[name="is_active[]"]').value,
+            is_system: row.dataset.system === '1' ? 1 : 0
+        };
+
+        if (!data.service_name) continue;
+
+        const res = await fetch('/api/module/FSTM01/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        if (result.success) {
+            saved++;
+            if (!id) row.setAttribute('data-id', result.id);
+        }
+    }
+
+    if (saved > 0) {
+        alert(`Saved ${saved} row(s)`);
+        location.reload();
+    }
+}
+
+async function deleteRow() {
+    const selected = document.querySelectorAll('.row-select:checked');
+    if (selected.length === 0) { alert('Select rows to delete'); return; }
+    if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+
+    for (let checkbox of selected) {
+        const row = checkbox.closest('tr');
+        if (row.dataset.system === '1') continue; // System rows cannot be deleted even by admins
+        const id = row.getAttribute('data-id');
+        if (id) {
+            await fetch('/api/module/FSTM01/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+        }
+        row.remove();
+    }
+    location.reload();
+}
+
+// ===== FIELD CONFIGURATION =====
+
+var currentFieldServiceTypeId = null;
+
+async function openFieldConfig(serviceTypeId, serviceName) {
+    currentFieldServiceTypeId = serviceTypeId;
+    document.getElementById('fieldServiceTypeId').value = serviceTypeId;
+    document.getElementById('fieldServiceName').textContent = serviceName;
+    document.getElementById('fieldPanel').style.display = 'block';
+
+    // Load existing fields
+    const res = await fetch(`/api/module/FSTM01/fields/${serviceTypeId}`);
+    const data = await res.json();
+    renderFieldRows(data.data || []);
+
+    // Scroll to panel
+    document.getElementById('fieldPanel').scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeFieldPanel() {
+    document.getElementById('fieldPanel').style.display = 'none';
+    currentFieldServiceTypeId = null;
+}
+
+function renderFieldRows(fields) {
+    const tbody = document.getElementById('fieldTableBody');
+    tbody.innerHTML = '';
+    fields.forEach(f => {
+        addFieldRowWithData(f);
+    });
+}
+
+function addFieldRow() {
+    addFieldRowWithData({});
+}
+
+function addFieldRowWithData(f) {
+    const tbody = document.getElementById('fieldTableBody');
+    const tr = document.createElement('tr');
+    if (f.id) tr.setAttribute('data-field-id', f.id);
+
+    const typeOptions = ['text', 'number', 'datetime', 'date', 'dropdown', 'checkbox', 'calculated'];
+    const resultTypeOptions = ['', 'hours', 'days', 'number'];
+    const esc = v => (v || '').toString().replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
+    const fType  = f.field_type || 'text';
+    const optVal = esc(f.field_options || '');
+    const fmlVal = esc(f.calculation_formula || '');
+    const isCalc = fType === 'calculated';
+    const isDrop = fType === 'dropdown';
+
+    tr.innerHTML = `
+        <td><input type="checkbox" class="field-select"></td>
+        <td><input type="text" class="f-label" value="${esc(f.field_label || '')}" placeholder="e.g. Grab Hiring Start"></td>
+        <td><input type="text" class="f-name" value="${esc(f.field_name || '')}" placeholder="e.g. grab_hire_start"></td>
+        <td><select class="f-type" onchange="handleTypeChange(this)">
+            ${typeOptions.map(t => `<option value="${t}" ${fType === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select></td>
+        <td class="f-options-cell">
+            <input type="text" class="f-options-vis" value="${optVal}" placeholder="opt1, opt2..."
+                style="${isDrop ? '' : 'display:none'}"
+                oninput="this.closest('tr').querySelector('.f-options').value=this.value">
+            <div class="f-formula-disp" style="${isCalc ? 'display:flex;align-items:center;gap:5px' : 'display:none'}">
+                <code class="f-formula-text" style="font-size:10px;color:#8e44ad;min-width:80px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmlVal || '—'}</code>
+                <button type="button" class="btn" style="background:#8e44ad;color:white;padding:2px 8px;font-size:10px;white-space:nowrap"
+                    onclick="openFormulaBuilder(this)">Build ▶</button>
+            </div>
+            <input type="hidden" class="f-options" value="${isCalc ? fmlVal : optVal}">
+        </td>
+        <td><select class="f-result-type">
+            ${resultTypeOptions.map(t => `<option value="${t}" ${f.calculation_result_type === t ? 'selected' : ''}>${t || '--'}</option>`).join('')}
+        </select></td>
+        <td style="text-align:center"><input type="checkbox" class="f-required" ${f.is_required ? 'checked' : ''}></td>
+        <td style="text-align:center"><input type="checkbox" class="f-billable" ${f.is_billable_qty ? 'checked' : ''}></td>
+        <td><input type="number" class="f-order" value="${f.display_order || 0}" style="width:40px"></td>
+    `;
+
+    // Auto-generate field_name from label
+    const labelInput = tr.querySelector('.f-label');
+    const nameInput  = tr.querySelector('.f-name');
+    labelInput.addEventListener('blur', function() {
+        if (!nameInput.value && labelInput.value) {
+            nameInput.value = labelInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+        }
+    });
+
+    tbody.appendChild(tr);
+}
+
+function toggleFieldSelectAll(masterCheckbox) {
+    document.querySelectorAll('.field-select').forEach(cb => cb.checked = masterCheckbox.checked);
+}
+
+async function saveAllFields() {
+    const serviceTypeId = document.getElementById('fieldServiceTypeId').value;
+    const rows = document.querySelectorAll('#fieldTableBody tr');
+    let saved = 0;
+
+    for (let row of rows) {
+        const fieldId = row.getAttribute('data-field-id') || '';
+        const fieldType = row.querySelector('.f-type').value;
+
+        const data = {
+            id: fieldId,
+            service_type_id: serviceTypeId,
+            field_label: row.querySelector('.f-label').value,
+            field_name: row.querySelector('.f-name').value,
+            field_type: fieldType,
+            is_required: row.querySelector('.f-required').checked ? 1 : 0,
+            is_billable_qty: row.querySelector('.f-billable').checked ? 1 : 0,
+            display_order: parseInt(row.querySelector('.f-order').value) || 0,
+            is_active: 1
+        };
+
+        // For calculated fields, formula goes in calculation_formula; for dropdown, options go in field_options
+        const optionsVal = row.querySelector('.f-options').value;
+        if (fieldType === 'calculated') {
+            data.calculation_formula = optionsVal;
+            data.calculation_result_type = row.querySelector('.f-result-type').value;
+            data.field_options = null;
+        } else if (fieldType === 'dropdown') {
+            data.field_options = optionsVal;
+            data.calculation_formula = null;
+            data.calculation_result_type = null;
+        } else {
+            data.field_options = null;
+            data.calculation_formula = null;
+            data.calculation_result_type = null;
+        }
+
+        if (!data.field_label || !data.field_name) continue;
+
+        const res = await fetch('/api/module/FSTM01/fields/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        if (result.success) {
+            saved++;
+            if (!fieldId) row.setAttribute('data-field-id', result.id);
+        }
+    }
+
+    if (saved > 0) {
+        alert(`Saved ${saved} field(s)`);
+        // Reload fields
+        openFieldConfig(serviceTypeId, document.getElementById('fieldServiceName').textContent);
+    }
+}
+
+async function deleteSelectedFields() {
+    const selected = document.querySelectorAll('.field-select:checked');
+    if (selected.length === 0) { alert('Select fields to delete'); return; }
+    if (!confirm(`Delete ${selected.length} field(s)?`)) return;
+
+    for (let checkbox of selected) {
+        const row = checkbox.closest('tr');
+        const id = row.getAttribute('data-field-id');
+        if (id) {
+            await fetch('/api/module/FSTM01/fields/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+        }
+        row.remove();
+    }
+}
+
+// ===== TYPE CHANGE HANDLER =====
+
+function handleTypeChange(sel) {
+    const tr   = sel.closest('tr');
+    const type = sel.value;
+    const vis  = tr.querySelector('.f-options-vis');
+    const fd   = tr.querySelector('.f-formula-disp');
+    if (type === 'dropdown') {
+        vis.style.display = '';
+        fd.style.display  = 'none';
+        tr.querySelector('.f-options').value = vis.value;
+    } else if (type === 'calculated') {
+        vis.style.display = 'none';
+        fd.style.display  = 'flex';
+        fd.style.alignItems = 'center';
+        fd.style.gap = '5px';
+    } else {
+        vis.style.display = 'none';
+        fd.style.display  = 'none';
+    }
+}
+
+// ===== FORMULA BUILDER =====
+
+var fbTokens    = [];
+var fbTargetRow = null;
+
+const FB_OPS = [
+    { label: '+',       val: '+' },
+    { label: '−',       val: '-' },
+    { label: '×',       val: '*' },
+    { label: '÷',       val: '/' },
+    { label: 'max( )',  val: 'max(' },
+    { label: 'min( )',  val: 'min(' },
+    { label: '(',       val: '(' },
+    { label: ')',       val: ')' },
+    { label: ',',       val: ',' },
+];
+
+function openFormulaBuilder(btn) {
+    fbTargetRow = btn.closest('tr');
+    const cur   = fbTargetRow.querySelector('.f-options').value || '';
+    fbTokens    = cur.trim() ? cur.trim().split(/\s+/) : [];
+
+    // Build field buttons from all OTHER rows in the field table
+    const fieldBtns = document.getElementById('fbFieldBtns');
+    fieldBtns.innerHTML = '';
+    let hasFields = false;
+    document.querySelectorAll('#fieldTableBody tr').forEach(row => {
+        if (row === fbTargetRow) return;
+        const fname  = (row.querySelector('.f-name')  || {}).value || '';
+        const flabel = (row.querySelector('.f-label') || {}).value || '';
+        if (!fname.trim()) return;
+        hasFields = true;
+        const b = document.createElement('button');
+        b.type      = 'button';
+        b.className = 'btn';
+        b.style.cssText = 'background:#ede0f7;color:#6c3483;padding:3px 10px;font-size:10px;font-family:monospace';
+        b.title     = flabel || fname;
+        b.textContent = fname;
+        b.onclick   = () => { fbTokens.push(fname.trim()); fbUpdateDisplay(); };
+        fieldBtns.appendChild(b);
+    });
+    if (!hasFields) fieldBtns.innerHTML = '<span style="font-size:11px;color:#aaa;font-style:italic">No other fields defined yet</span>';
+
+    // Build operator buttons
+    const opBtns = document.getElementById('fbOpBtns');
+    opBtns.innerHTML = '';
+    FB_OPS.forEach(op => {
+        const b = document.createElement('button');
+        b.type      = 'button';
+        b.className = 'btn';
+        b.style.cssText = 'background:#eaf2ff;color:#1a5276;padding:3px 11px;font-size:12px;font-family:monospace;font-weight:700';
+        b.textContent = op.label;
+        b.onclick   = () => { fbTokens.push(op.val); fbUpdateDisplay(); };
+        opBtns.appendChild(b);
+    });
+    const bkBtn = document.createElement('button');
+    bkBtn.type = 'button'; bkBtn.className = 'btn';
+    bkBtn.style.cssText = 'background:#fdecea;color:#c0392b;padding:3px 10px;font-size:11px';
+    bkBtn.textContent = '⌫ Back';
+    bkBtn.onclick = () => { fbTokens.pop(); fbUpdateDisplay(); };
+    opBtns.appendChild(bkBtn);
+
+    const clBtn = document.createElement('button');
+    clBtn.type = 'button'; clBtn.className = 'btn';
+    clBtn.style.cssText = 'background:#fdecea;color:#c0392b;padding:3px 10px;font-size:11px';
+    clBtn.textContent = '✕ Clear';
+    clBtn.onclick = () => { fbTokens = []; fbUpdateDisplay(); };
+    opBtns.appendChild(clBtn);
+
+    // Sync result type
+    document.getElementById('fbResultType').value = fbTargetRow.querySelector('.f-result-type').value || '';
+
+    fbUpdateDisplay();
+    document.getElementById('formulaModal').style.display = 'flex';
+}
+
+function fbBuildString() {
+    return fbTokens.join(' ')
+        .replace(/\( /g, '(')
+        .replace(/ \)/g, ')')
+        .replace(/ ,/g,  ',')
+        .replace(/,(?! )/g, ', ');
+}
+
+function fbUpdateDisplay() {
+    document.getElementById('fbPreview').textContent = fbBuildString() || '—';
+}
+
+function fbApply() {
+    const formula    = fbBuildString();
+    const resultType = document.getElementById('fbResultType').value;
+    if (fbTargetRow) {
+        fbTargetRow.querySelector('.f-options').value              = formula;
+        fbTargetRow.querySelector('.f-formula-text').textContent   = formula || '—';
+        fbTargetRow.querySelector('.f-result-type').value          = resultType;
+    }
+    document.getElementById('formulaModal').style.display = 'none';
+}
+
+function fbCancel() {
+    document.getElementById('formulaModal').style.display = 'none';
+}
+</script>
+{% endblock %}

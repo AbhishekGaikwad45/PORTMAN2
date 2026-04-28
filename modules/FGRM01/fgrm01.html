@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block title %}GST Rate Master - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .toolbar { margin-bottom: 15px; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px; }
+    .btn-add { background: #27ae60; color: white; }
+    .btn-save { background: #3498db; color: white; }
+    .btn-delete { background: #e74c3c; color: white; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; }
+    .data-table input, .data-table select { width: 100%; padding: 4px; font-size: 11px; border: 1px solid #ddd; }
+    .pagination { margin-top: 15px; display: flex; gap: 5px; justify-content: center; font-size: 11px; }
+</style>
+
+<div class="module-header">
+    <h2>GST Rate Master</h2>
+    <span class="module-code">FGRM01</span>
+</div>
+
+<div class="toolbar">
+    {% if perms.can_add %}
+    <button class="btn btn-add" onclick="addRow()">+ Add Row</button>
+    {% endif %}
+    {% if perms.can_delete %}
+    <button class="btn btn-delete" onclick="deleteRow()">Delete Selected</button>
+    {% endif %}
+    {% if perms.can_edit or perms.can_add %}
+    <button class="btn btn-save" onclick="saveAll()">Save All</button>
+    {% endif %}
+</div>
+
+<form id="dataForm">
+<table class="data-table">
+    <thead>
+        <tr>
+            <th style="width:30px"><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
+            <th>Rate Name</th>
+            <th>CGST %</th>
+            <th>SGST %</th>
+            <th>IGST %</th>
+            <th>Effective From</th>
+            <th>Effective To</th>
+            <th>Default</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody id="tableBody">
+        {% for row in data %}
+        <tr data-id="{{ row.id }}">
+            <td><input type="checkbox" class="row-select"></td>
+            <td><input type="text" name="rate_name[]" value="{{ row.rate_name }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+            <td><input type="number" step="0.01" name="cgst_rate[]" value="{{ row.cgst_rate }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+            <td><input type="number" step="0.01" name="sgst_rate[]" value="{{ row.sgst_rate }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+            <td><input type="number" step="0.01" name="igst_rate[]" value="{{ row.igst_rate }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+            <td><input type="date" name="effective_from[]" value="{{ row.effective_from }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+            <td><input type="date" name="effective_to[]" value="{{ row.effective_to }}" {% if not perms.can_edit %}readonly{% endif %}></td>
+            <td style="text-align:center"><input type="radio" name="is_default" value="{{ row.id }}" {% if row.is_default %}checked{% endif %} {% if not perms.can_edit %}disabled{% endif %}></td>
+            <td><select name="is_active[]" {% if not perms.can_edit %}disabled{% endif %}>
+                <option value="1" {% if row.is_active %}selected{% endif %}>Active</option>
+                <option value="0" {% if not row.is_active %}selected{% endif %}>Inactive</option>
+            </select></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</form>
+
+<div class="pagination">
+    {% if page > 1 %}
+    <button class="btn" onclick="location.href='?page={{ page - 1 }}'">Previous</button>
+    {% endif %}
+    <span style="padding: 5px 10px;">Page {{ page }} of {{ last_page }}</span>
+    {% if page < last_page %}
+    <button class="btn" onclick="location.href='?page={{ page + 1 }}'">Next</button>
+    {% endif %}
+</div>
+
+<script>
+addToRecent('FGRM01', 'GST Rate Master');
+
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.row-select');
+    const selectAll = document.getElementById('selectAll').checked;
+    checkboxes.forEach(cb => cb.checked = selectAll);
+}
+
+function addRow() {
+    const tbody = document.getElementById('tableBody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="checkbox" class="row-select"></td>
+        <td><input type="text" name="rate_name[]" required></td>
+        <td><input type="number" step="0.01" name="cgst_rate[]" required></td>
+        <td><input type="number" step="0.01" name="sgst_rate[]" required></td>
+        <td><input type="number" step="0.01" name="igst_rate[]" required></td>
+        <td><input type="date" name="effective_from[]"></td>
+        <td><input type="date" name="effective_to[]"></td>
+        <td style="text-align:center"><input type="radio" name="is_default" value="new"></td>
+        <td><select name="is_active[]">
+            <option value="1" selected>Active</option>
+            <option value="0">Inactive</option>
+        </select></td>
+    `;
+    tbody.appendChild(tr);
+}
+
+async function saveAll() {
+    const rows = document.querySelectorAll('#tableBody tr');
+    let saved = 0;
+
+    for (let row of rows) {
+        const id = row.getAttribute('data-id') || '';
+        const inputs = row.querySelectorAll('input, select');
+        const defaultRadio = row.querySelector('[name="is_default"]');
+        const isDefault = defaultRadio ? defaultRadio.checked : false;
+        const data = {
+            id: id,
+            rate_name: row.querySelector('[name="rate_name[]"]').value,
+            cgst_rate: row.querySelector('[name="cgst_rate[]"]').value,
+            sgst_rate: row.querySelector('[name="sgst_rate[]"]').value,
+            igst_rate: row.querySelector('[name="igst_rate[]"]').value,
+            effective_from: row.querySelector('[name="effective_from[]"]').value,
+            effective_to: row.querySelector('[name="effective_to[]"]').value,
+            is_active: row.querySelector('[name="is_active[]"]').value,
+            is_default: isDefault
+        };
+
+        if (!data.rate_name) continue;
+
+        const res = await fetch('/fgrm01/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        if (result.success) {
+            saved++;
+            if (!id) row.setAttribute('data-id', result.id);
+        }
+    }
+
+    if (saved > 0) {
+        alert(`Saved ${saved} row(s)`);
+        location.reload();
+    }
+}
+
+async function deleteRow() {
+    const selected = document.querySelectorAll('.row-select:checked');
+    if (selected.length === 0) {
+        alert('Select rows to delete');
+        return;
+    }
+    if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+
+    for (let checkbox of selected) {
+        const row = checkbox.closest('tr');
+        const id = row.getAttribute('data-id');
+        if (id) {
+            await fetch('/fgrm01/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+        }
+        row.remove();
+    }
+    location.reload();
+}
+</script>
+{% endblock %}

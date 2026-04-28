@@ -1,0 +1,704 @@
+{% extends "base.html" %}
+
+{% block title %}Service Recording - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .toolbar { margin-bottom: 15px; display: flex; gap: 5px; align-items: center; }
+    .btn { padding: 6px 12px; font-size: 11px; border: none; border-radius: 3px; cursor: pointer; }
+    .btn-add { background: #27ae60; color: white; }
+    .btn-save { background: #3498db; color: white; }
+    .btn-delete { background: #e74c3c; color: white; }
+    .btn-approve { background: #f39c12; color: white; }
+    .btn-cancel { background: #95a5a6; color: white; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    .data-table th { background: #34495e; color: white; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+    .data-table tr:hover { background: #f8f9fa; cursor: pointer; }
+    .pagination { margin-top: 15px; display: flex; gap: 5px; justify-content: center; font-size: 11px; }
+    .pagination a { padding: 4px 10px; border: 1px solid #ddd; text-decoration: none; color: #333; border-radius: 3px; }
+    .pagination a.active { background: #3498db; color: white; border-color: #3498db; }
+    .badge { padding: 2px 8px; border-radius: 3px; font-size: 10px; color: white; }
+    .badge-pending { background: #f39c12; }
+    .badge-approved { background: #27ae60; }
+    .badge-billed { background: #3498db; }
+
+    /* Entry form */
+    .entry-panel { background: #f8f9fa; border: 2px solid #3498db; border-radius: 4px; padding: 15px; margin-bottom: 15px; display: none; }
+    .entry-panel h3 { margin: 0 0 12px 0; font-size: 13px; color: #3498db; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label { font-size: 10px; font-weight: 600; color: #555; margin-bottom: 3px; text-transform: uppercase; }
+    .form-group input, .form-group select, .form-group textarea { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .form-group input[readonly] { background: #ecf0f1; }
+    .section-divider { border: none; border-top: 1px dashed #ccc; margin: 10px 0; }
+    .section-label { font-size: 10px; font-weight: 700; color: #8e44ad; text-transform: uppercase; margin: 0 0 8px 0; }
+
+    /* Dynamic fields */
+    .fields-section { border-top: 1px solid #ddd; padding-top: 12px; margin-top: 12px; }
+    .fields-section h4 { margin: 0 0 10px 0; font-size: 12px; color: #8e44ad; }
+    .field-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .field-row label { min-width: 150px; font-size: 11px; font-weight: 600; color: #555; }
+    .field-row input, .field-row select { flex: 1; max-width: 300px; padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .field-row input[type="checkbox"] { flex: none; width: auto; }
+    .field-row .calculated { background: #ecf0f1; font-weight: bold; }
+
+    /* Filters */
+    .filters { display: flex; gap: 10px; margin-bottom: 15px; align-items: center; font-size: 11px; }
+    .filters select { padding: 5px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
+    .filters label { font-weight: 600; color: #555; }
+
+    .ref-section { background: #fff8e1; border: 1px dashed #f39c12; border-radius: 4px; padding: 10px; margin-bottom: 12px; }
+    .ref-section .section-label { color: #e67e22; }
+</style>
+
+<div class="module-header">
+    <h2>Service Recording</h2>
+    <span class="module-code">SRV01</span>
+</div>
+
+<div class="toolbar">
+    {% if perms.can_add %}
+    <button class="btn btn-add" onclick="showEntryForm()">+ New Record</button>
+    {% endif %}
+</div>
+
+<!-- Entry Form Panel -->
+<div class="entry-panel" id="entryPanel">
+    <h3 id="entryTitle">New Service Record</h3>
+
+    <!-- Row 1: Record info -->
+    <div class="form-grid">
+        <div class="form-group">
+            <label>Record Number</label>
+            <input type="text" id="recordNumber" readonly placeholder="Auto-generated">
+        </div>
+        <div class="form-group">
+            <label>Record Date *</label>
+            <input type="date" id="recordDate">
+        </div>
+        <div class="form-group">
+            <label>Status</label>
+            <input type="text" id="docStatus" readonly value="Pending">
+        </div>
+    </div>
+
+    <!-- Row 2: Customer (primary source) -->
+    <p class="section-label">Bill To (Customer / Agent)</p>
+    <div class="form-grid">
+        <div class="form-group">
+            <label>Customer Type *</label>
+            <select id="customerType" onchange="loadCustomerOptions()">
+                <option value="">-- Select --</option>
+                <option value="Customer">Customer</option>
+                <option value="Agent">Agent</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Customer / Agent *</label>
+            <select id="customerId">
+                <option value="">-- Select Customer Type First --</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Service Type *</label>
+            <select id="serviceTypeId" onchange="loadFieldDefinitions()">
+                <option value="">-- Select --</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Row 3: Optional VCN/MBC reference -->
+    <div class="ref-section">
+        <p class="section-label">Optional Reference (VCN / MBC)</p>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Reference Type</label>
+                <select id="refSourceType" onchange="loadRefOptions()">
+                    <option value="">-- None --</option>
+                    <option value="VCN">VCN (Vessel Call)</option>
+                    <option value="MBC">MBC (MBC Operation)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Reference Document</label>
+                <select id="refSourceId">
+                    <option value="">-- Select Reference Type First --</option>
+                </select>
+            </div>
+            <div class="form-group"></div>
+        </div>
+    </div>
+
+    <!-- Row 4: Qty & Remarks -->
+    <div class="form-grid">
+        <div class="form-group">
+            <label>Remarks</label>
+            <textarea id="remarks" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Billable Quantity</label>
+            <input type="text" id="billableQty" readonly placeholder="Auto from fields">
+        </div>
+        <div class="form-group">
+            <label>UOM</label>
+            <input type="text" id="billableUom" readonly>
+        </div>
+    </div>
+
+    <!-- Dynamic fields rendered here -->
+    <div class="fields-section" id="fieldsSection" style="display:none;">
+        <h4>Service Fields</h4>
+        <div id="fieldsContainer"></div>
+    </div>
+
+    <div style="margin-top: 15px; display: flex; gap: 5px;">
+        {% if perms.can_add or perms.can_edit %}
+        <button class="btn btn-save" onclick="saveRecord()">Save</button>
+        {% endif %}
+        <button class="btn btn-cancel" onclick="hideEntryForm()">Cancel</button>
+    </div>
+
+    <input type="hidden" id="editRecordId" value="">
+</div>
+
+<!-- Filters -->
+<div class="filters">
+    <label>Customer Type:</label>
+    <select id="filterSource" onchange="applyFilters()">
+        <option value="">All</option>
+        <option value="Customer">Customer</option>
+        <option value="Agent">Agent</option>
+    </select>
+    <label>Status:</label>
+    <select id="filterBilled" onchange="applyFilters()">
+        <option value="">All</option>
+        <option value="unbilled">Unbilled</option>
+        <option value="billed">Billed</option>
+    </select>
+</div>
+
+<!-- Records List -->
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Record #</th>
+            <th>Date</th>
+            <th>Customer</th>
+            <th>Service Type</th>
+            <th>Reference</th>
+            <th>Billable Qty</th>
+            <th>UOM</th>
+            <th>Status</th>
+            <th>Billed</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody id="tableBody">
+        {% for row in data %}
+        <tr data-id="{{ row.id }}">
+            <td>{{ row.record_number }}</td>
+            <td>{{ row.record_date }}</td>
+            <td>{{ row.source_type }} - {{ row.source_display }}</td>
+            <td>{{ row.service_name }}</td>
+            <td>{{ row.ref_source_display or '-' }}</td>
+            <td>{{ row.billable_quantity }}</td>
+            <td>{{ row.billable_uom }}</td>
+            <td>
+                {% if row.doc_status == 'Approved' %}
+                <span class="badge badge-approved">Approved</span>
+                {% else %}
+                <span class="badge badge-pending">{{ row.doc_status }}</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if row.is_billed %}
+                <span class="badge badge-billed">Billed</span>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+            <td>
+                <button class="btn btn-save" onclick="editRecord({{ row.id }})" style="font-size:10px; padding:3px 8px;">Edit</button>
+                {% if is_approver and row.doc_status == 'Pending' %}
+                <button class="btn btn-approve" onclick="approveRecord({{ row.id }})" style="font-size:10px; padding:3px 8px;">Approve</button>
+                {% endif %}
+                {% if perms.can_delete and not row.is_billed %}
+                <button class="btn btn-delete" onclick="deleteRecord({{ row.id }})" style="font-size:10px; padding:3px 8px;">Del</button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Pagination -->
+{% if last_page > 1 %}
+<div class="pagination">
+    {% for p in range(1, last_page + 1) %}
+    <a href="?page={{ p }}" class="{% if p == page %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<script>
+let serviceTypesData = [];
+let fieldDefinitions = [];
+let currentRecordId = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadServiceTypes();
+    // Set filter values from URL
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('source_type')) document.getElementById('filterSource').value = params.get('source_type');
+    if (params.get('billed_status')) document.getElementById('filterBilled').value = params.get('billed_status');
+});
+
+async function loadServiceTypes() {
+    const resp = await fetch('/api/module/SRV01/service-types');
+    const json = await resp.json();
+    serviceTypesData = json.data || [];
+    const sel = document.getElementById('serviceTypeId');
+    sel.innerHTML = '<option value="">-- Select --</option>';
+    serviceTypesData.forEach(st => {
+        sel.innerHTML += `<option value="${st.id}" data-uom="${st.uom || ''}">${st.service_name}</option>`;
+    });
+}
+
+async function loadCustomerOptions() {
+    const customerType = document.getElementById('customerType').value;
+    const sel = document.getElementById('customerId');
+    if (!customerType) {
+        sel.innerHTML = '<option value="">-- Select Customer Type First --</option>';
+        return;
+    }
+    sel.innerHTML = '<option value="">-- Loading... --</option>';
+    const resp = await fetch(`/api/module/SRV01/customer-options/${customerType}`);
+    const json = await resp.json();
+    sel.innerHTML = '<option value="">-- Select --</option>';
+    (json.data || []).forEach(c => {
+        sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+    });
+}
+
+async function loadRefOptions() {
+    const refType = document.getElementById('refSourceType').value;
+    const sel = document.getElementById('refSourceId');
+    if (!refType) {
+        sel.innerHTML = '<option value="">-- Select Reference Type First --</option>';
+        return;
+    }
+    sel.innerHTML = '<option value="">-- Loading... --</option>';
+    const resp = await fetch(`/api/module/SRV01/source-options/${refType}`);
+    const json = await resp.json();
+    sel.innerHTML = '<option value="">-- None --</option>';
+    (json.data || []).forEach(opt => {
+        sel.innerHTML += `<option value="${opt.id}">${opt.display}</option>`;
+    });
+}
+
+function showEntryForm() {
+    document.getElementById('entryPanel').style.display = 'block';
+    document.getElementById('entryTitle').textContent = 'New Service Record';
+    resetForm();
+}
+
+function hideEntryForm() {
+    document.getElementById('entryPanel').style.display = 'none';
+    resetForm();
+}
+
+function resetForm() {
+    currentRecordId = null;
+    document.getElementById('editRecordId').value = '';
+    document.getElementById('recordNumber').value = '';
+    document.getElementById('recordDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('docStatus').value = 'Pending';
+    document.getElementById('customerType').value = '';
+    document.getElementById('customerId').innerHTML = '<option value="">-- Select Customer Type First --</option>';
+    document.getElementById('refSourceType').value = '';
+    document.getElementById('refSourceId').innerHTML = '<option value="">-- Select Reference Type First --</option>';
+    document.getElementById('serviceTypeId').value = '';
+    document.getElementById('remarks').value = '';
+    document.getElementById('billableQty').value = '';
+    document.getElementById('billableUom').value = '';
+    document.getElementById('fieldsSection').style.display = 'none';
+    document.getElementById('fieldsContainer').innerHTML = '';
+    fieldDefinitions = [];
+}
+
+async function loadFieldDefinitions() {
+    const serviceTypeId = document.getElementById('serviceTypeId').value;
+    const container = document.getElementById('fieldsContainer');
+    const section = document.getElementById('fieldsSection');
+
+    if (!serviceTypeId) {
+        section.style.display = 'none';
+        container.innerHTML = '';
+        fieldDefinitions = [];
+        document.getElementById('billableQty').value = '';
+        document.getElementById('billableUom').value = '';
+        return;
+    }
+
+    const stOpt = document.getElementById('serviceTypeId').selectedOptions[0];
+    document.getElementById('billableUom').value = stOpt.dataset.uom || '';
+
+    const resp = await fetch(`/api/module/SRV01/fields/${serviceTypeId}`);
+    const json = await resp.json();
+    fieldDefinitions = json.data || [];
+
+    if (fieldDefinitions.length === 0) {
+        section.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    section.style.display = 'block';
+    renderFields();
+}
+
+function renderFields(existingValues) {
+    const container = document.getElementById('fieldsContainer');
+    container.innerHTML = '';
+
+    const valuesMap = {};
+    if (existingValues) {
+        existingValues.forEach(v => { valuesMap[v.field_definition_id] = v.field_value; });
+    }
+
+    fieldDefinitions.forEach(fd => {
+        const div = document.createElement('div');
+        div.className = 'field-row';
+
+        const label = document.createElement('label');
+        label.textContent = fd.field_label + (fd.is_required ? ' *' : '');
+        if (fd.is_billable_qty) label.textContent += ' [Billable Qty]';
+        div.appendChild(label);
+
+        const existingVal = valuesMap[fd.id] || '';
+        let input;
+
+        switch (fd.field_type) {
+            case 'text':
+                input = document.createElement('input');
+                input.type = 'text';
+                input.value = existingVal;
+                break;
+            case 'number':
+                input = document.createElement('input');
+                input.type = 'number';
+                input.step = 'any';
+                input.value = existingVal;
+                break;
+            case 'datetime':
+                input = document.createElement('input');
+                input.type = 'datetime-local';
+                input.value = existingVal;
+                input.addEventListener('change', () => recalculate());
+                break;
+            case 'date':
+                input = document.createElement('input');
+                input.type = 'date';
+                input.value = existingVal;
+                input.addEventListener('change', () => recalculate());
+                break;
+            case 'dropdown':
+                input = document.createElement('select');
+                input.innerHTML = '<option value="">-- Select --</option>';
+                try {
+                    const options = JSON.parse(fd.field_options || '[]');
+                    options.forEach(opt => {
+                        const o = document.createElement('option');
+                        o.value = opt;
+                        o.textContent = opt;
+                        if (opt === existingVal) o.selected = true;
+                        input.appendChild(o);
+                    });
+                } catch (e) {
+                    (fd.field_options || '').split(',').map(s => s.trim()).filter(Boolean).forEach(opt => {
+                        const o = document.createElement('option');
+                        o.value = opt;
+                        o.textContent = opt;
+                        if (opt === existingVal) o.selected = true;
+                        input.appendChild(o);
+                    });
+                }
+                break;
+            case 'checkbox':
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = existingVal === '1' || existingVal === 'true';
+                break;
+            case 'calculated':
+                input = document.createElement('input');
+                input.type = 'text';
+                input.readOnly = true;
+                input.className = 'calculated';
+                input.value = existingVal;
+                break;
+            default:
+                input = document.createElement('input');
+                input.type = 'text';
+                input.value = existingVal;
+        }
+
+        input.dataset.fieldId = fd.id;
+        input.dataset.fieldName = fd.field_name;
+        input.dataset.fieldType = fd.field_type;
+        input.dataset.isBillableQty = fd.is_billable_qty || 0;
+        if (fd.calculation_formula) input.dataset.formula = fd.calculation_formula;
+        if (fd.calculation_result_type) input.dataset.resultType = fd.calculation_result_type;
+        if (fd.is_required) input.required = true;
+
+        div.appendChild(input);
+        container.appendChild(div);
+    });
+
+    if (existingValues && existingValues.length > 0) {
+        recalculate();
+    }
+}
+
+function recalculate() {
+    const container = document.getElementById('fieldsContainer');
+    const allInputs = container.querySelectorAll('[data-field-name]');
+
+    const fieldValues = {};
+    allInputs.forEach(inp => {
+        fieldValues[inp.dataset.fieldName] = inp.dataset.fieldType === 'checkbox'
+            ? (inp.checked ? '1' : '0') : inp.value;
+    });
+
+    allInputs.forEach(inp => {
+        if (inp.dataset.fieldType !== 'calculated') return;
+        const result = evaluateFormula(inp.dataset.formula || '', fieldValues, inp.dataset.resultType || '');
+        inp.value = result !== null ? result : '';
+        if (inp.dataset.isBillableQty == 1 && inp.value) {
+            document.getElementById('billableQty').value = inp.value;
+        }
+    });
+
+    allInputs.forEach(inp => {
+        if (inp.dataset.fieldType === 'calculated') return;
+        if (inp.dataset.isBillableQty == 1) {
+            document.getElementById('billableQty').value =
+                inp.dataset.fieldType === 'checkbox' ? (inp.checked ? '1' : '0') : inp.value;
+        }
+    });
+}
+
+function evaluateFormula(formula, fieldValues, resultType) {
+    if (!formula) return null;
+    formula = formula.trim();
+
+    const tokStr = '(?:(?:max|min)\\s*\\(\\s*\\w+\\s*,\\s*\\w+\\s*\\)|\\w+)';
+
+    function resolveToken(token) {
+        token = token.trim();
+        const m = token.match(/^(max|min)\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)$/i);
+        if (m) {
+            const fn = m[1].toLowerCase();
+            const aRaw = fieldValues[m[2]] || '', bRaw = fieldValues[m[3]] || '';
+            const aDate = aRaw ? new Date(aRaw) : null;
+            const bDate = bRaw ? new Date(bRaw) : null;
+            if (aDate && bDate && !isNaN(aDate) && !isNaN(bDate)) {
+                return fn === 'max' ? (aDate >= bDate ? aDate : bDate)
+                                    : (aDate <= bDate ? aDate : bDate);
+            }
+            const a = parseFloat(aRaw) || 0, b = parseFloat(bRaw) || 0;
+            return fn === 'max' ? Math.max(a, b) : Math.min(a, b);
+        }
+        const raw = fieldValues[token] || '';
+        if (raw) {
+            const d = new Date(raw);
+            if (!isNaN(d) && isNaN(parseFloat(raw))) return d;
+        }
+        return raw;
+    }
+
+    const compoundRe = new RegExp('^(' + tokStr + ')\\s*([\\+\\-\\*\\/])\\s*(' + tokStr + ')$', 'i');
+    const cm = formula.match(compoundRe);
+    if (cm) {
+        const left = resolveToken(cm[1]), op = cm[2], right = resolveToken(cm[3]);
+        if (op === '-' && left instanceof Date && right instanceof Date) {
+            const diffMs = left - right;
+            if (resultType === 'days') return (diffMs / 86400000).toFixed(2);
+            return (diffMs / 3600000).toFixed(2);
+        }
+        const a = left instanceof Date ? 0 : (parseFloat(left) || 0);
+        const b = right instanceof Date ? 0 : (parseFloat(right) || 0);
+        if (op === '+') return (a + b).toFixed(2);
+        if (op === '-') return (a - b).toFixed(2);
+        if (op === '*') return (a * b).toFixed(2);
+        if (op === '/') return b !== 0 ? (a / b).toFixed(2) : '0.00';
+    }
+
+    const funcM = formula.match(/^(max|min)\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)$/i);
+    if (funcM) {
+        const a = parseFloat(fieldValues[funcM[2]]) || 0;
+        const b = parseFloat(fieldValues[funcM[3]]) || 0;
+        return funcM[1].toLowerCase() === 'max' ? Math.max(a, b).toFixed(2) : Math.min(a, b).toFixed(2);
+    }
+
+    return null;
+}
+
+function collectFieldValues() {
+    const container = document.getElementById('fieldsContainer');
+    const allInputs = container.querySelectorAll('[data-field-id]');
+    const values = [];
+    allInputs.forEach(inp => {
+        let val = inp.dataset.fieldType === 'checkbox' ? (inp.checked ? '1' : '0') : inp.value;
+        values.push({ field_definition_id: parseInt(inp.dataset.fieldId), field_value: val });
+    });
+    return values;
+}
+
+async function saveRecord() {
+    const customerType = document.getElementById('customerType').value;
+    const customerId = document.getElementById('customerId').value;
+    const serviceTypeId = document.getElementById('serviceTypeId').value;
+    const recordDate = document.getElementById('recordDate').value;
+
+    if (!customerType || !customerId || !serviceTypeId || !recordDate) {
+        alert('Please fill in Customer Type, Customer/Agent, Service Type, and Date.');
+        return;
+    }
+
+    recalculate();
+
+    const customerOpt = document.getElementById('customerId').selectedOptions[0];
+    const refSourceType = document.getElementById('refSourceType').value || null;
+    const refSourceId = document.getElementById('refSourceId').value || null;
+    const refSourceOpt = document.getElementById('refSourceId').selectedOptions[0];
+    const refSourceDisplay = (refSourceId && refSourceOpt) ? refSourceOpt.textContent : null;
+
+    const payload = {
+        id: currentRecordId,
+        source_type: customerType,
+        source_id: parseInt(customerId),
+        source_display: customerOpt ? customerOpt.textContent : '',
+        ref_source_type: refSourceType,
+        ref_source_id: refSourceId ? parseInt(refSourceId) : null,
+        ref_source_display: refSourceDisplay,
+        service_type_id: parseInt(serviceTypeId),
+        record_date: recordDate,
+        billable_quantity: parseFloat(document.getElementById('billableQty').value) || 0,
+        billable_uom: document.getElementById('billableUom').value,
+        remarks: document.getElementById('remarks').value,
+        doc_status: document.getElementById('docStatus').value,
+        field_values: collectFieldValues()
+    };
+
+    const resp = await fetch('/api/module/SRV01/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    const json = await resp.json();
+
+    if (json.success) {
+        alert('Saved: ' + (json.record_number || ''));
+        location.reload();
+    } else {
+        alert('Error: ' + (json.error || 'Unknown'));
+    }
+}
+
+async function editRecord(recordId) {
+    const resp = await fetch(`/api/module/SRV01/record/${recordId}`);
+    const json = await resp.json();
+
+    if (!json.header) {
+        alert('Record not found');
+        return;
+    }
+
+    const h = json.header;
+    currentRecordId = h.id;
+    document.getElementById('editRecordId').value = h.id;
+    document.getElementById('entryTitle').textContent = 'Edit Service Record - ' + h.record_number;
+    document.getElementById('recordNumber').value = h.record_number;
+    document.getElementById('recordDate').value = h.record_date || '';
+    document.getElementById('docStatus').value = h.doc_status || 'Pending';
+    document.getElementById('remarks').value = h.remarks || '';
+    document.getElementById('billableQty').value = h.billable_quantity || '';
+    document.getElementById('billableUom').value = h.billable_uom || '';
+
+    // Set customer type and load customers
+    document.getElementById('customerType').value = h.source_type || '';
+    await loadCustomerOptions();
+    document.getElementById('customerId').value = h.source_id || '';
+
+    // Set optional ref source
+    document.getElementById('refSourceType').value = h.ref_source_type || '';
+    if (h.ref_source_type) {
+        await loadRefOptions();
+        document.getElementById('refSourceId').value = h.ref_source_id || '';
+    }
+
+    // Set service type and load fields
+    document.getElementById('serviceTypeId').value = h.service_type_id;
+    const stOpt = document.getElementById('serviceTypeId').selectedOptions[0];
+    if (stOpt) document.getElementById('billableUom').value = stOpt.dataset.uom || h.billable_uom || '';
+
+    const fieldsResp = await fetch(`/api/module/SRV01/fields/${h.service_type_id}`);
+    const fieldsJson = await fieldsResp.json();
+    fieldDefinitions = fieldsJson.data || [];
+
+    if (fieldDefinitions.length > 0) {
+        document.getElementById('fieldsSection').style.display = 'block';
+        renderFields(json.values);
+    }
+
+    document.getElementById('entryPanel').style.display = 'block';
+}
+
+async function approveRecord(recordId) {
+    if (!confirm('Approve this service record?')) return;
+
+    const resp = await fetch('/api/module/SRV01/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: recordId})
+    });
+    const json = await resp.json();
+
+    if (json.success) {
+        location.reload();
+    } else {
+        alert('Error: ' + (json.error || 'Unknown'));
+    }
+}
+
+async function deleteRecord(recordId) {
+    if (!confirm('Delete this service record?')) return;
+
+    const resp = await fetch('/api/module/SRV01/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: recordId})
+    });
+    const json = await resp.json();
+
+    if (json.success) {
+        location.reload();
+    } else {
+        alert('Error: ' + (json.error || 'Unknown'));
+    }
+}
+
+function applyFilters() {
+    const source = document.getElementById('filterSource').value;
+    const billed = document.getElementById('filterBilled').value;
+    let url = '/module/SRV01/?';
+    if (source) url += `source_type=${source}&`;
+    if (billed) url += `billed_status=${billed}&`;
+    window.location.href = url;
+}
+
+try { addToRecent('SRV01', 'Service Recording'); } catch(e) {}
+</script>
+{% endblock %}

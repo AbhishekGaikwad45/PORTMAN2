@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Equipment Master - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Equipment Master</h2>
+    <span class="module-code">VEM01</span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save</button>{% endif %}
+</div>
+
+<div id="table"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('VEM01', 'Equipment Master');
+
+    const permissions = {
+        can_edit: {{ permissions.can_edit|default(0) }},
+        can_add: {{ permissions.can_add|default(0) }},
+        can_delete: {{ permissions.can_delete|default(0) }}
+    };
+
+    const canEdit = permissions.can_edit || permissions.can_add;
+
+    const table = new Tabulator("#table", {
+        height: "calc(100vh - 160px)",
+        layout: "fitColumns",
+        ajaxURL: "/api/module/VEM01/data",
+        pagination: true,
+        paginationMode: "remote",
+        paginationSize: 20,
+        ajaxResponse: function(url, params, response) {
+            return response;
+        },
+        columns: [
+            {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+            {title: "ID", field: "id", width: 60},
+            {title: "Equipment Name", field: "name", editor: canEdit ? "input" : false, widthGrow: 1}
+        ],
+        selectable: true
+    });
+
+    if (localStorage.getItem('theme') === 'dark') {
+        document.getElementById('table').classList.add('tabulator-dark');
+    }
+
+    function addRow() {
+        table.addRow({}, false);
+    }
+
+    function deleteSelected() {
+        const rows = table.getSelectedRows();
+        if (!rows.length) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${rows.length} row(s)?`)) return;
+        rows.forEach(row => {
+            const id = row.getData().id;
+            if (id) {
+                fetch('/api/module/VEM01/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id})
+                });
+            }
+            row.delete();
+        });
+    }
+
+    async function saveAll() {
+        for (const row of table.getRows()) {
+            const data = row.getData();
+            if (data.name) {
+                const res = await fetch('/api/module/VEM01/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                row.update({id: result.id});
+            }
+        }
+        alert('Saved');
+    }
+</script>
+{% endblock %}
