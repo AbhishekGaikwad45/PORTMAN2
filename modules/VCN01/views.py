@@ -241,63 +241,10 @@ def get_export_cargo_names(vcn_id):
 def get_all_cargo_names(vcn_id):
     return jsonify(model.get_all_cargo_names_for_vcn(vcn_id))
 
-# Get cargo names for a specific VCN (for stowage plan dropdown)
-@bp.route('/api/module/VCN01/cargo_names/<int:vcn_id>')
-@login_required
-def get_cargo_names(vcn_id):
-    return jsonify(model.get_cargo_names_for_vcn(vcn_id))
-
-# Stowage Plan endpoints
-@bp.route('/api/module/VCN01/stowage/<int:vcn_id>')
-@login_required
-def get_stowage(vcn_id):
-    return jsonify(model.get_stowage_plan(vcn_id))
-
-@bp.route('/api/module/VCN01/stowage/save', methods=['POST'])
-@login_required
-def save_stowage():
-    perms = get_perms()
-    if not perms.get('can_add') and not perms.get('can_edit'):
-        return jsonify({'error': 'No permission'}), 403
-    row_id, error = model.save_stowage_plan(request.json)
-    if error:
-        return jsonify({'success': False, 'error': error}), 400
-    return jsonify({'success': True, 'id': row_id})
-
-@bp.route('/api/module/VCN01/stowage/delete', methods=['POST'])
-@login_required
-def delete_stowage():
-    perms = get_perms()
-    if not perms.get('can_delete'):
-        return jsonify({'error': 'No permission to delete'}), 403
-    model.delete_stowage_plan(request.json.get('id'))
-    return jsonify({'success': True})
-
 @bp.route('/api/module/VCN01/export_loading_totals/<int:vcn_id>')
 @login_required
 def get_export_loading_totals(vcn_id):
     return jsonify(model.get_export_loading_totals(vcn_id))
-
-@bp.route('/api/module/VCN01/stowage/total/<int:vcn_id>')
-@login_required
-def get_stowage_total(vcn_id):
-    # Check operation_type to determine which cargo total to use
-    conn = model.get_db()
-    cur = model.get_cursor(conn)
-    cur.execute('SELECT operation_type FROM vcn_header WHERE id=%s', (vcn_id,))
-    row = cur.fetchone()
-    conn.close()
-    op_type = row['operation_type'] if row else None
-
-    if op_type == 'Export':
-        cargo_total = model.get_export_cargo_total_quantity(vcn_id)
-    else:
-        cargo_total = model.get_cargo_total_quantity(vcn_id)
-
-    return jsonify({
-        'stowage_total': model.get_stowage_total_quantity(vcn_id),
-        'igm_total': cargo_total
-    })
 
 # Hold Completion (read-only view from LDUD data)
 @bp.route('/api/module/VCN01/hold_completion/<int:vcn_id>')
@@ -305,7 +252,3 @@ def get_stowage_total(vcn_id):
 def get_hold_completion(vcn_id):
     return jsonify(model.get_hold_completion_by_vcn(vcn_id))
 
-@bp.route('/api/module/VCN01/vessel_holds/<int:vcn_id>')
-@login_required
-def get_vessel_holds(vcn_id):
-    return jsonify({'no_of_holds': model.get_vessel_holds(vcn_id)})

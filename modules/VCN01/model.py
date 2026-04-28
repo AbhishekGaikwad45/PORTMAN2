@@ -177,15 +177,6 @@ def get_cargo_declarations(vcn_id):
     conn.close()
     return [dict(r) for r in rows]
 
-def get_cargo_names_for_vcn(vcn_id):
-    """Get cargo names from cargo declaration for a specific VCN (for stowage plan dropdown)"""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT DISTINCT cargo_name FROM vcn_cargo_declaration WHERE vcn_id=%s AND cargo_name IS NOT NULL', (vcn_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return [r['cargo_name'] for r in rows if r['cargo_name']]
-
 def get_all_cargo_names_for_vcn(vcn_id):
     """Get all cargo names for a VCN from both import and export declaration tables"""
     conn = get_db()
@@ -297,74 +288,6 @@ def get_cargo_total_quantity(vcn_id):
     conn.close()
     return result or 0
 
-# Stowage Plan sub-table operations
-def get_stowage_plan(vcn_id):
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT * FROM vcn_stowage_plan WHERE vcn_id=%s ORDER BY id ASC', (vcn_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-def get_stowage_total_quantity(vcn_id):
-    """Get total stowage quantity for a VCN"""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT SUM(hatchwise_quantity) FROM vcn_stowage_plan WHERE vcn_id=%s', (vcn_id,))
-    result = cur.fetchone()['sum']
-    conn.close()
-    return result or 0
-
-def save_stowage_plan(data):
-    _clean_empty(data)
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    # Validate that hatchwise quantity doesn't exceed cargo BL total
-    vcn_id = data.get('vcn_id')
-    if vcn_id:
-        # Check operation_type to use correct cargo total
-        cur.execute('SELECT operation_type FROM vcn_header WHERE id=%s', (vcn_id,))
-        header_row = cur.fetchone()
-        op_type = header_row['operation_type'] if header_row else None
-        if op_type == 'Export':
-            igm_total = get_export_cargo_total_quantity(vcn_id)
-        else:
-            igm_total = get_cargo_total_quantity(vcn_id)
-        current_stowage_total = get_stowage_total_quantity(vcn_id)
-        new_quantity = data.get('hatchwise_quantity') or 0
-
-        # If updating, subtract the old quantity
-        if data.get('id'):
-            cur.execute('SELECT hatchwise_quantity FROM vcn_stowage_plan WHERE id=%s', (data['id'],))
-            old_row = cur.fetchone()
-            if old_row:
-                current_stowage_total -= (old_row['hatchwise_quantity'] or 0)
-
-        # Check if new total would exceed IGM quantity
-        if current_stowage_total + new_quantity > igm_total:
-            conn.close()
-            return None, f"Total stowage quantity ({current_stowage_total + new_quantity}) cannot exceed cargo BL quantity ({igm_total})"
-
-    if data.get('id'):
-        cur.execute('UPDATE vcn_stowage_plan SET cargo_name=%s, hold_name=%s, hatchwise_quantity=%s WHERE id=%s',
-                   [data.get('cargo_name'), data.get('hold_name'), data.get('hatchwise_quantity'), data['id']])
-        row_id = data['id']
-    else:
-        cur.execute('INSERT INTO vcn_stowage_plan (vcn_id, cargo_name, hold_name, hatchwise_quantity) VALUES (%s, %s, %s, %s) RETURNING id',
-                   [data['vcn_id'], data.get('cargo_name'), data.get('hold_name'), data.get('hatchwise_quantity')])
-        row_id = cur.fetchone()['id']
-    conn.commit()
-    conn.close()
-    return row_id, None
-
-def delete_stowage_plan(row_id):
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('DELETE FROM vcn_stowage_plan WHERE id=%s', (row_id,))
-    conn.commit()
-    conn.close()
-
 def get_export_loading_totals(vcn_id):
     """Get loading totals from LDUD MV Anchorage Loading for a VCN, grouped by cargo_name for BL quantity"""
     conn = get_db()
@@ -391,21 +314,6 @@ def get_hold_completion_by_vcn(vcn_id):
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
-
-
-def get_vessel_holds(vcn_id):
-    """Return no_of_holds for the vessel linked to this VCN."""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('''
-        SELECT COALESCE(v.no_of_holds, 0) AS no_of_holds
-        FROM vcn_header h
-        LEFT JOIN vessels v ON v.vessel_name = h.vessel_name
-        WHERE h.id = %s
-    ''', (vcn_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row['no_of_holds'] if row else 0
 
 
 # Approval functions
@@ -460,26 +368,6 @@ def get_approval_eligibility(vcn_id):
                        AND bl_date IS NOT NULL''', (vcn_id,))
     if cur.fetchone()['cnt'] < 1:
         missing.append('Cargo Declaration (min 1 complete entry: cargo name, BL no, date, quantity, UOM)')
-
-    cur.execute('''SELECT COALESCE(v.no_of_holds, 0) AS no_of_holds
-                   FROM vcn_header h LEFT JOIN vessels v ON v.vessel_name = h.vessel_name
-                   WHERE h.id = %s''', (vcn_id,))
-    holds_row = cur.fetchone()
-    no_of_holds = holds_row['no_of_holds'] if holds_row else 0
-
-    cur.execute('''SELECT COUNT(DISTINCT hold_name) as distinct_holds
-                   FROM vcn_stowage_plan WHERE vcn_id=%s
-                   AND hold_name IS NOT NULL AND hold_name != \'\'
-                   AND cargo_name IS NOT NULL AND cargo_name != \'\'
-                   AND hatchwise_quantity IS NOT NULL AND hatchwise_quantity > 0''', (vcn_id,))
-    distinct_holds = cur.fetchone()['distinct_holds'] or 0
-
-    if no_of_holds > 0 and distinct_holds < no_of_holds:
-        missing.append(f'Stowage Plan ({distinct_holds}/{no_of_holds} holds covered — all holds need cargo & quantity)')
-    elif no_of_holds == 0:
-        cur.execute('SELECT COUNT(*) as cnt FROM vcn_stowage_plan WHERE vcn_id=%s', (vcn_id,))
-        if cur.fetchone()['cnt'] < 1:
-            missing.append('Stowage Plan (minimum 1 entry required)')
 
     conn.close()
     return {'eligible': len(missing) == 0, 'missing': missing}
