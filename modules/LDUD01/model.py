@@ -303,90 +303,6 @@ def delete_delay(row_id):
     conn.commit()
     conn.close()
 
-# Barge Lines sub-table operations
-def get_barge_lines(ldud_id):
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT * FROM ldud_barge_lines WHERE ldud_id=%s ORDER BY trip_number, id DESC', (ldud_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-def get_next_trip_number(ldud_id, barge_name):
-    """Get the next trip number for a barge in this LDUD"""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('''SELECT MAX(trip_number) FROM ldud_barge_lines
-                            WHERE ldud_id=%s AND barge_name=%s''', (ldud_id, barge_name))
-    result = cur.fetchone()['max']
-    conn.close()
-    return (result or 0) + 1
-
-def save_barge_line(data):
-    _clean_empty(data)
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    if data.get('id'):
-        # Check if barge_name changed, if so recalculate trip number
-        cur.execute('SELECT barge_name FROM ldud_barge_lines WHERE id=%s', (data['id'],))
-        existing = cur.fetchone()
-        trip_number = data.get('trip_number')
-        if existing and existing['barge_name'] != data.get('barge_name') and data.get('barge_name'):
-            trip_number = get_next_trip_number(data.get('ldud_id'), data.get('barge_name'))
-
-        cur.execute('''UPDATE ldud_barge_lines SET trip_number=%s, hold_name=%s, barge_name=%s, contractor_name=%s, cargo_name=%s,
-                      bpt_bfl=%s, along_side_vessel=%s, commenced_loading=%s, completed_loading=%s, cast_off_mv=%s,
-                      anchored_gull_island=%s, aweigh_gull_island=%s, along_side_berth=%s, commence_discharge_berth=%s,
-                      completed_discharge_berth=%s, cast_off_berth=%s, cast_off_berth_nt=%s, discharge_quantity=%s,
-                      crane_loaded_from=%s, trip_start=%s, amf_at_port=%s, cast_off_port=%s, port_crane=%s,
-                      cast_off_loading_berth=%s, anchored_gull_island_empty=%s, aweigh_gull_island_empty=%s WHERE id=%s''',
-                   [trip_number, data.get('hold_name'), data.get('barge_name'), data.get('contractor_name'), data.get('cargo_name'),
-                    data.get('bpt_bfl'), data.get('along_side_vessel'), data.get('commenced_loading'),
-                    data.get('completed_loading'), data.get('cast_off_mv'), data.get('anchored_gull_island'),
-                    data.get('aweigh_gull_island'), data.get('along_side_berth'), data.get('commence_discharge_berth'),
-                    data.get('completed_discharge_berth'), data.get('cast_off_berth'), data.get('cast_off_berth_nt'),
-                    data.get('discharge_quantity'), data.get('crane_loaded_from'), data.get('trip_start'),
-                    data.get('amf_at_port'), data.get('cast_off_port'), data.get('port_crane'),
-                    data.get('cast_off_loading_berth'), data.get('anchored_gull_island_empty'),
-                    data.get('aweigh_gull_island_empty'), data['id']])
-        row_id = data['id']
-    else:
-        # Use explicit trip_number if provided (e.g. cloning a row for multiple cargo on same trip)
-        trip_number = data.get('trip_number')
-        if not trip_number:
-            trip_number = 1
-            if data.get('barge_name'):
-                trip_number = get_next_trip_number(data['ldud_id'], data.get('barge_name'))
-
-        cur.execute('''INSERT INTO ldud_barge_lines (ldud_id, trip_number, hold_name, barge_name, contractor_name, cargo_name,
-                      bpt_bfl, along_side_vessel, commenced_loading, completed_loading, cast_off_mv,
-                      anchored_gull_island, aweigh_gull_island, along_side_berth, commence_discharge_berth,
-                      completed_discharge_berth, cast_off_berth, cast_off_berth_nt, discharge_quantity,
-                      crane_loaded_from, trip_start, amf_at_port, cast_off_port, port_crane,
-                      cast_off_loading_berth, anchored_gull_island_empty, aweigh_gull_island_empty)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id''',
-                   [data['ldud_id'], trip_number, data.get('hold_name'), data.get('barge_name'), data.get('contractor_name'), data.get('cargo_name'),
-                    data.get('bpt_bfl'), data.get('along_side_vessel'), data.get('commenced_loading'),
-                    data.get('completed_loading'), data.get('cast_off_mv'), data.get('anchored_gull_island'),
-                    data.get('aweigh_gull_island'), data.get('along_side_berth'), data.get('commence_discharge_berth'),
-                    data.get('completed_discharge_berth'), data.get('cast_off_berth'), data.get('cast_off_berth_nt'),
-                    data.get('discharge_quantity'), data.get('crane_loaded_from'), data.get('trip_start'),
-                    data.get('amf_at_port'), data.get('cast_off_port'), data.get('port_crane'),
-                    data.get('cast_off_loading_berth'), data.get('anchored_gull_island_empty'),
-                    data.get('aweigh_gull_island_empty')])
-        row_id = cur.fetchone()['id']
-    conn.commit()
-    conn.close()
-    return row_id, trip_number
-
-def delete_barge_line(row_id):
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('DELETE FROM ldud_barge_lines WHERE id=%s', (row_id,))
-    conn.commit()
-    conn.close()
-
 # Anchorage Recording sub-table operations
 def get_anchorage(ldud_id):
     conn = get_db()
@@ -462,51 +378,6 @@ def delete_vessel_operation(row_id):
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute('DELETE FROM ldud_vessel_operations WHERE id=%s', (row_id,))
-    conn.commit()
-    conn.close()
-
-
-# Barge Cleaning Lines sub-table operations
-def get_barge_cleaning(ldud_id):
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT * FROM ldud_barge_cleaning WHERE ldud_id=%s ORDER BY id DESC', (ldud_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def save_barge_cleaning(data):
-    _clean_empty(data)
-    conn = get_db()
-    cur = get_cursor(conn)
-    if data.get('id'):
-        cur.execute('''UPDATE ldud_barge_cleaning SET barge_name=%s, payloader_name=%s,
-                      hmr_start=%s, hmr_end=%s, diesel_start=%s, diesel_end=%s,
-                      start_time=%s, end_time=%s WHERE id=%s''',
-                   [data.get('barge_name'), data.get('payloader_name'),
-                    data.get('hmr_start'), data.get('hmr_end'),
-                    data.get('diesel_start'), data.get('diesel_end'),
-                    data.get('start_time'), data.get('end_time'), data['id']])
-        row_id = data['id']
-    else:
-        cur.execute('''INSERT INTO ldud_barge_cleaning (ldud_id, barge_name, payloader_name,
-                      hmr_start, hmr_end, diesel_start, diesel_end, start_time, end_time)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id''',
-                   [data['ldud_id'], data.get('barge_name'), data.get('payloader_name'),
-                    data.get('hmr_start'), data.get('hmr_end'),
-                    data.get('diesel_start'), data.get('diesel_end'),
-                    data.get('start_time'), data.get('end_time')])
-        row_id = cur.fetchone()['id']
-    conn.commit()
-    conn.close()
-    return row_id
-
-
-def delete_barge_cleaning(row_id):
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('DELETE FROM ldud_barge_cleaning WHERE id=%s', (row_id,))
     conn.commit()
     conn.close()
 
@@ -598,11 +469,6 @@ def get_closure_eligibility(ldud_id):
     cur.execute('SELECT COUNT(*) FROM ldud_vessel_operations WHERE ldud_id=%s', (ldud_id,))
     if cur.fetchone()['count'] == 0:
         missing.append('MV Anchorage Discharge/Loading — at least 1 entry required')
-
-    # Barge Lines: ≥1 row
-    cur.execute('SELECT COUNT(*) FROM ldud_barge_lines WHERE ldud_id=%s', (ldud_id,))
-    if cur.fetchone()['count'] == 0:
-        missing.append('Barge Lines — at least 1 entry required')
 
     # Hold Completion: ≥1 row, all with commenced AND completed
     cur.execute('SELECT COUNT(*) FROM ldud_hold_completion WHERE ldud_id=%s', (ldud_id,))

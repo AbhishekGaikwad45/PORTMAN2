@@ -299,31 +299,6 @@ def delete_delay():
     model.delete_delay(request.json['id'])
     return jsonify({'success': True})
 
-# Barge Lines sub-table endpoints
-@bp.route('/api/module/LDUD01/barge_lines/<int:ldud_id>')
-@login_required
-def get_barge_lines(ldud_id):
-    return jsonify(model.get_barge_lines(ldud_id))
-
-@bp.route('/api/module/LDUD01/barge_lines/save', methods=['POST'])
-@login_required
-def save_barge_line():
-    perms = get_perms()
-    if not perms.get('can_add') and not perms.get('can_edit'):
-        return jsonify({'error': 'No permission'}), 403
-    data = request.json
-    row_id, trip_number = model.save_barge_line(data)
-    return jsonify({'id': row_id, 'success': True, 'trip_number': trip_number})
-
-@bp.route('/api/module/LDUD01/barge_lines/delete', methods=['POST'])
-@login_required
-def delete_barge_line():
-    perms = get_perms()
-    if not perms.get('can_delete'):
-        return jsonify({'error': 'No permission to delete'}), 403
-    model.delete_barge_line(request.json['id'])
-    return jsonify({'success': True})
-
 # Anchorage Recording sub-table endpoints
 @bp.route('/api/module/LDUD01/anchorage/<int:ldud_id>')
 @login_required
@@ -370,30 +345,6 @@ def delete_vessel_operation():
     if not perms.get('can_delete'):
         return jsonify({'error': 'No permission to delete'}), 403
     model.delete_vessel_operation(request.json['id'])
-    return jsonify({'success': True})
-
-# Barge Cleaning Lines sub-table endpoints
-@bp.route('/api/module/LDUD01/barge_cleaning/<int:ldud_id>')
-@login_required
-def get_barge_cleaning(ldud_id):
-    return jsonify(model.get_barge_cleaning(ldud_id))
-
-@bp.route('/api/module/LDUD01/barge_cleaning/save', methods=['POST'])
-@login_required
-def save_barge_cleaning():
-    perms = get_perms()
-    if not perms.get('can_add') and not perms.get('can_edit'):
-        return jsonify({'error': 'No permission'}), 403
-    row_id = model.save_barge_cleaning(request.json)
-    return jsonify({'id': row_id, 'success': True})
-
-@bp.route('/api/module/LDUD01/barge_cleaning/delete', methods=['POST'])
-@login_required
-def delete_barge_cleaning():
-    perms = get_perms()
-    if not perms.get('can_delete'):
-        return jsonify({'error': 'No permission to delete'}), 403
-    model.delete_barge_cleaning(request.json['id'])
     return jsonify({'success': True})
 
 # Hold Completion sub-table endpoints
