@@ -215,10 +215,10 @@
         white-space: nowrap; flex-shrink: 0;
     }
 
-    /* ── VESSELS + MBC ───────────────────────────────────── */
+    /* ── VESSELS ─────────────────────────────────────────── */
     #vessels-section {
         width: 100vw; height: var(--vessels-h);
-        display: grid; grid-template-columns: 1fr 1fr;
+        display: grid; grid-template-columns: 1fr;
         gap: 1px; background: var(--border);
         border-bottom: 1px solid var(--border);
         overflow: hidden;
@@ -395,7 +395,7 @@
     <div id="equip-grid"></div>
 </div>
 
-<!-- VESSELS + MBC -->
+<!-- VESSELS -->
 <div id="vessels-section">
     <div class="vessel-panel">
         <div class="panel-header">
@@ -403,13 +403,6 @@
             <span class="panel-count" id="vcn-count"></span>
         </div>
         <div class="panel-body" id="vcn-body"></div>
-    </div>
-    <div class="vessel-panel">
-        <div class="panel-header">
-            <span class="panel-title">Active Mini Bulk Carrier(MBC)</span>
-            <span class="panel-count" id="mbc-count"></span>
-        </div>
-        <div class="panel-body" id="mbc-body"></div>
     </div>
 </div>
 
@@ -475,7 +468,7 @@
     function renderLastEntry(le) {
         const el = document.getElementById('last-entry-chip');
         if (!le) { el.innerHTML = '<span style="color:var(--muted);font-size:0.85vh;">No entries today</span>'; return; }
-        const src = le.barge_name ? `${le.source_display || ''} / ${le.barge_name}` : (le.source_display || '—');
+        const src = le.source_display || '—';
         el.innerHTML = `Last entry: <span>${le.to_time || '?'}</span> &nbsp;·&nbsp; ${le.equipment_name || ''} &nbsp;·&nbsp; ${src} &nbsp;·&nbsp; by <span>${le.created_by || '?'}</span>`;
     }
 
@@ -488,10 +481,7 @@
             const st = eq.status;
             const pillLabel = st === 'active' ? 'Active' : st === 'idle' ? 'Idle' : 'No Data';
             const hasData = st !== 'no_data';
-            const src = eq.source_display ? eq.source_display.split(' / ').slice(-1)[0] : '';
-            const assignment = eq.barge_name
-                ? `${src || eq.source_display || '—'} / <b>${eq.barge_name}</b>`
-                : (eq.source_display || null);
+            const assignment = eq.source_display || null;
             const delayTag = eq.delay_name
                 ? `<span class="delay-tag">&#9888; ${eq.delay_name}</span>`
                 : '';
@@ -557,39 +547,6 @@
         el.innerHTML = html;
     }
 
-    function renderMBC(rows) {
-        const el = document.getElementById('mbc-body');
-        document.getElementById('mbc-count').textContent = rows.length + ' row(s)';
-        if (!rows.length) { el.innerHTML = '<div class="empty-msg">No active MBCs</div>'; return; }
-        let html = `<table class="vtable"><thead><tr>
-            <th>MBC #</th><th>Name</th><th>Cargo</th><th>Status</th>
-            <th class="right">BL Qty</th><th class="right">Actual</th>
-            <th class="right">Remaining</th><th>Progress</th>
-        </tr></thead><tbody>`;
-        rows.sort((a,b) => b.pct - a.pct);
-        for (const r of rows) {
-            const pct = Math.min(r.pct, 100);
-            const col = pctColor(r.pct);
-            const remCls = r.remaining < 0 ? 'remaining-neg' : 'remaining-pos';
-            const nearCls = r.pct >= 85 && !r.exceeded ? 'near-complete' : r.exceeded ? 'exceeded' : '';
-            html += `<tr class="${nearCls}">
-                <td><span class="doc-chip">${r.doc_num||'—'}</span></td>
-                <td title="${r.mbc_name||''}">${(r.mbc_name||'—').substring(0,16)}</td>
-                <td title="${r.cargo_name||''}">${(r.cargo_name||'—').substring(0,12)}</td>
-                <td>${statusChip(r.status)}</td>
-                <td class="right">${fmt(r.bl_quantity)} <span style="color:var(--muted);font-size:0.75vh">${r.uom||''}</span></td>
-                <td class="right">${fmt(r.actual)}</td>
-                <td class="right ${remCls}">${fmt(r.remaining)}</td>
-                <td><div class="prog-wrap">
-                    <div class="prog-bar-bg"><div class="prog-bar-fill ${col}" style="width:${pct}%"></div></div>
-                    <span class="prog-pct ${col}">${r.pct}%</span>
-                </div></td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    }
-
     // ── Shifts ───────────────────────────────────────────────────────────────
     function renderShifts(shifts, dayKey, bodyId, dateId, dateLabel) {
         document.getElementById(dateId).textContent = dateLabel;
@@ -640,7 +597,6 @@
         checkStale(data.last_entry);
         renderEquipBoard(data.equipment_board);
         renderVCN(data.vcn);
-        renderMBC(data.mbc);
         renderShifts(data.shifts, 'yesterday', 'yest-body',  'yest-date',  fmtDateLabel(data.yesterday));
         renderShifts(data.shifts, 'today',     'today-body', 'today-date', fmtDateLabel(data.today));
 

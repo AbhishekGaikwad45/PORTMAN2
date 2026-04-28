@@ -305,8 +305,6 @@
     const AUTOSAVE_DELAY = 5000; // ms of inactivity before autosave
     let currentFilters = [];
     let vcnOptions = [];
-    let mbcOptions = [];
-    let mbcNames = [];
     let equipmentList = [];
     let delayList = [];
     let cargoList = [];
@@ -455,10 +453,8 @@
     }
 
     async function loadMasterData() {
-        const [vcn, mbc, mbcNamesRes, equip, delays, cargo, ops, uom, routes, systems, berths, incharge, operators] = await Promise.all([
+        const [vcn, equip, delays, cargo, ops, uom, routes, systems, berths, incharge, operators] = await Promise.all([
             fetch('/api/module/LUEU01/vcn-options').then(r => r.json()),
-            fetch('/api/module/LUEU01/mbc-options').then(r => r.json()),
-            fetch('/api/module/LUEU01/mbc-names').then(r => r.json()),
             fetch('/api/module/LUEU01/equipment').then(r => r.json()),
             fetch('/api/module/LUEU01/delays').then(r => r.json()),
             fetch('/api/module/LUEU01/cargo').then(r => r.json()),
@@ -472,8 +468,6 @@
         ]);
 
         vcnOptions = vcn;
-        mbcOptions = mbc;
-        mbcNames = mbcNamesRes;
         equipmentList = equip;
         delayList = delays;
         cargoList = cargo;
@@ -536,101 +530,27 @@
         return opts;
     }
 
-    function getVcnMbcOptions() {
+    function getVcnOptions() {
         const opts = {'': ''};
         vcnOptions.forEach(opt => { opts[opt.label] = opt.label; });
-        mbcOptions.forEach(opt => { opts[opt.label] = opt.label; });
         return opts;
     }
 
-    // Dynamic barge editor based on VCN/MBC selection
-    var bargeEditor = function(cell, onRendered, success, cancel) {
-        const row = cell.getRow();
-        const rowData = row.getData();
-        const sourceDisplay = rowData.source_display || '';
-
-        // Declare select BEFORE any renderSelect calls
-        var select = document.createElement("select");
-        select.style.width = "100%";
-        select.style.boxSizing = "border-box";
-        select.style.padding = "4px";
-
-        function renderSelect(opts) {
-            select.innerHTML = '<option value=""></option>';
-            opts.forEach(opt => {
-                const option = document.createElement("option");
-                option.value = opt;
-                option.textContent = opt;
-                if (opt === cell.getValue()) option.selected = true;
-                select.appendChild(option);
-            });
-        }
-
-        const vcnMatch = vcnOptions.find(v => v.label === sourceDisplay);
-        if (vcnMatch) {
-            renderSelect([]);
-            fetch(`/api/module/LUEU01/barges/${vcnMatch.id}`)
-                .then(r => r.json())
-                .then(barges => { renderSelect(barges); });
-        } else {
-            const mbcMatch = mbcOptions.find(m => m.label === sourceDisplay);
-            if (mbcMatch) { renderSelect(mbcNames); }
-            else { renderSelect([]); }
-        }
-
-        onRendered(function() { select.focus(); });
-        select.addEventListener("change", function() { success(select.value); });
-        select.addEventListener("blur", function() { success(select.value); });
-        select.addEventListener("keydown", function(e) {
-            if (e.key === "Enter") success(select.value);
-            if (e.key === "Escape") cancel();
-        });
-        return select;
-    };
-
-    // Dynamic cargo editor - auto-picks if single cargo, dropdown if multiple
+    // Dynamic cargo editor - dropdown from master list
     var cargoEditor = function(cell, onRendered, success, cancel) {
-        const row = cell.getRow();
-        const rowData = row.getData();
-        const sourceDisplay = rowData.source_display || '';
-        const bargeName = rowData.barge_name || '';
-
         var select = document.createElement("select");
         select.style.width = "100%";
         select.style.boxSizing = "border-box";
         select.style.padding = "4px";
 
-        function renderSelect(opts) {
-            select.innerHTML = '<option value=""></option>';
-            opts.forEach(opt => {
-                const option = document.createElement("option");
-                option.value = opt;
-                option.textContent = opt;
-                if (opt === cell.getValue()) option.selected = true;
-                select.appendChild(option);
-            });
-        }
-
-        // Try to get cargo from barge (VCN) or from MBC
-        const vcnMatch = vcnOptions.find(v => v.label === sourceDisplay);
-        const mbcMatch = mbcOptions.find(m => m.label === sourceDisplay);
-        if (vcnMatch && bargeName) {
-            renderSelect([]);
-            fetch(`/api/module/LUEU01/barge-cargos/${vcnMatch.id}?barge=${encodeURIComponent(bargeName)}`)
-                .then(r => r.json())
-                .then(cargos => {
-                    if (cargos.length === 1) { success(cargos[0]); return; }
-                    renderSelect(cargos.length > 0 ? cargos : cargoList);
-                });
-        } else if (mbcMatch) {
-            // For MBC: show MBC's own cargo as first option, then full list
-            const mbcCargo = mbcMatch.cargo_name || '';
-            const opts = mbcCargo ? [mbcCargo, ...cargoList.filter(c => c !== mbcCargo)] : cargoList;
-            renderSelect(opts);
-            if (mbcCargo && !cell.getValue()) success(mbcCargo);
-        } else {
-            renderSelect(cargoList);
-        }
+        select.innerHTML = '<option value=""></option>';
+        cargoList.forEach(opt => {
+            const option = document.createElement("option");
+            option.value = opt;
+            option.textContent = opt;
+            if (opt === cell.getValue()) option.selected = true;
+            select.appendChild(option);
+        });
 
         onRendered(function() { select.focus(); });
         select.addEventListener("change", function() { success(select.value); });
@@ -722,10 +642,10 @@
                     if (!val && val !== 0) return '';
                     return '<span style="font-weight:500">' + val + '</span>';
                 }},
-            {title: "VCN / MBC", field: "source_display", width: 300,
+            {title: "VCN", field: "source_display", width: 300,
                 editor: canEdit ? "list" : false,
                 editable: canEdit ? function(cell) { if (_blIconClicked) { _blIconClicked = false; return false; } return !cell.getRow().getData().is_deleted; } : false,
-                editorParams: {values: getVcnMbcOptions(), autocomplete: true, allowEmpty: true, listOnEmpty: true},
+                editorParams: {values: getVcnOptions(), autocomplete: true, allowEmpty: true, listOnEmpty: true},
                 formatter: function(cell) {
                     const data = cell.getRow().getData();
                     const val = cell.getValue() || '';
@@ -745,7 +665,6 @@
                         showBlProgress(icon.dataset.srcType, parseInt(icon.dataset.srcId), icon.dataset.label, icon);
                     }
                 }},
-            {title: "Barge / MBC Name", field: "barge_name", width: 150, editor: canEdit ? bargeEditor : false, editable: editableCheck},
             {title: "Cargo", field: "cargo_name", width: 140, editor: canEdit ? cargoEditor : false, editable: editableCheck},
             {title: "Delay", field: "delay_name", width: 140, editor: canEdit ? "list" : false, editable: editableCheck,
                 editorParams: {values: toOptions(delayList), autocomplete: true, allowEmpty: true, listOnEmpty: true}},
@@ -857,40 +776,6 @@
             if (permissions.can_add || permissions.can_edit) scheduleAutoSave();
         });
 
-        // Auto-fill barge_name / cargo_name when VCN/MBC changes
-        table.on("cellEdited", function(cell) {
-            if (cell.getField() === "source_display") {
-                const sourceDisplay = cell.getValue() || '';
-                const mbcMatch = mbcOptions.find(m => m.label === sourceDisplay);
-                if (mbcMatch) {
-                    const parts = sourceDisplay.split(' / ');
-                    const mbcName = parts.length >= 2 ? parts[1] : '';
-                    cell.getRow().update({
-                        barge_name: mbcName,
-                        cargo_name: mbcMatch.cargo_name || ''
-                    });
-                } else {
-                    cell.getRow().update({barge_name: '', cargo_name: ''});
-                }
-            }
-            // Auto-pick cargo when barge is selected and only one cargo
-            if (cell.getField() === "barge_name") {
-                const rowData = cell.getRow().getData();
-                const sourceDisplay = rowData.source_display || '';
-                const bargeName = cell.getValue() || '';
-                const vcnMatch = vcnOptions.find(v => v.label === sourceDisplay);
-                if (vcnMatch && bargeName) {
-                    fetch(`/api/module/LUEU01/barge-cargos/${vcnMatch.id}?barge=${encodeURIComponent(bargeName)}`)
-                        .then(r => r.json())
-                        .then(cargos => {
-                            if (cargos.length === 1) {
-                                cell.getRow().update({cargo_name: cargos[0]});
-                            }
-                        });
-                }
-            }
-        });
-
         // Intercept mousedown on info icon so Tabulator doesn't open the editor
         document.getElementById('table').addEventListener('mousedown', function(e) {
             if (e.target.closest('.bl-info-icon')) {
@@ -934,7 +819,7 @@
         if (rows.length > 0) {
             var topData = rows[0].getData();
             var copyFields = [
-                'source_type', 'source_id', 'source_display', 'barge_name', 'cargo_name',
+                'source_type', 'source_id', 'source_display', 'cargo_name',
                 'delay_name', 'operation_type', 'quantity_uom', 'route_name',
                 'entry_date', 'shift', 'system_name', 'berth_name', 'shift_incharge', 'operator_name', 'remarks'
             ];
@@ -1053,9 +938,7 @@
 
             // Determine source type and id
             const vcnMatch = vcnOptions.find(v => v.label === data.source_display);
-            const mbcMatch = mbcOptions.find(m => m.label === data.source_display);
             if (vcnMatch) { data.source_type = 'VCN'; data.source_id = vcnMatch.id; }
-            else if (mbcMatch) { data.source_type = 'MBC'; data.source_id = mbcMatch.id; }
 
             // Strip local-only flag before sending to server
             const payload = Object.assign({}, data);
@@ -1079,15 +962,14 @@
 
     // ── Filter panel ──────────────────────────────────────────────────────────
     const FILTER_CONFIG = {
-        entry_date:     { label: 'Date',            type: 'range' },
-        shift:          { label: 'Shift',           type: 'multi',   values: ['A', 'B', 'C'] },
-        source_display: { label: 'VCN / MBC',       type: 'contains' },
-        barge_name:     { label: 'Barge / MBC Name',type: 'contains' },
-        cargo_name:     { label: 'Cargo',           type: 'contains' },
-        delay_name:     { label: 'Delay',           type: 'contains' },
-        berth_name:     { label: 'Berth',           type: 'contains' },
-        operator_name:  { label: 'Operator',        type: 'contains' },
-        route_name:     { label: 'Route',           type: 'contains' },
+        entry_date:     { label: 'Date',     type: 'range' },
+        shift:          { label: 'Shift',    type: 'multi',   values: ['A', 'B', 'C'] },
+        source_display: { label: 'VCN',      type: 'contains' },
+        cargo_name:     { label: 'Cargo',    type: 'contains' },
+        delay_name:     { label: 'Delay',    type: 'contains' },
+        berth_name:     { label: 'Berth',    type: 'contains' },
+        operator_name:  { label: 'Operator', type: 'contains' },
+        route_name:     { label: 'Route',    type: 'contains' },
     };
 
     function toggleFilterPanel() {

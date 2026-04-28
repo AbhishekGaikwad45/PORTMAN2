@@ -7,7 +7,7 @@ def get_all_lines(page=1, size=20, equipment_name=None, filters=None):
     cur = get_cursor(conn)
     offset = (page - 1) * size
 
-    allowed = {'entry_date', 'shift', 'source_display', 'barge_name', 'cargo_name',
+    allowed = {'entry_date', 'shift', 'source_display', 'cargo_name',
                'delay_name', 'berth_name', 'operator_name', 'route_name'}
     where_clauses, params = [], []
 
@@ -43,7 +43,7 @@ def get_all_lines(page=1, size=20, equipment_name=None, filters=None):
                 params + [size, offset])
     rows = [dict(r) for r in cur.fetchall()]
 
-    # Look up customer names from cargo declarations for VCN/MBC sources
+    # Look up customer names from cargo declarations for VCN sources
     # and flag multi-customer sources
     source_keys = set()
     for r in rows:
@@ -65,13 +65,6 @@ def get_all_lines(page=1, size=20, equipment_name=None, filters=None):
             for cr in cur.fetchall():
                 if cr['cargo_name'] and cr['customer_name']:
                     cargo_customers[cr['cargo_name']] = cr['customer_name']
-        elif src_type == 'MBC':
-            cur.execute("""
-                SELECT cargo_name, customer_name FROM mbc_customer_details WHERE mbc_id = %s AND customer_name IS NOT NULL
-            """, [src_id])
-            for cr in cur.fetchall():
-                if cr['customer_name']:
-                    cargo_customers[cr.get('cargo_name') or '_all'] = cr['customer_name']
 
         source_customer_map[(src_type, src_id)] = cargo_customers
         unique_customers = set(cargo_customers.values())
@@ -115,7 +108,7 @@ def save_line(data):
     if line_id:
         cur.execute('''
             UPDATE lueu_lines SET
-                source_type = %s, source_id = %s, source_display = %s, barge_name = %s,
+                source_type = %s, source_id = %s, source_display = %s,
                 equipment_name = %s, operator_name = %s, delay_name = %s, cargo_name = %s,
                 operation_type = %s, quantity = %s, quantity_uom = %s, route_name = %s,
                 start_time = %s, end_time = %s, entry_date = %s,
@@ -124,7 +117,7 @@ def save_line(data):
             WHERE id = %s
         ''', [
             data.get('source_type'), data.get('source_id'), data.get('source_display'),
-            data.get('barge_name'), data.get('equipment_name'), data.get('operator_name'),
+            data.get('equipment_name'), data.get('operator_name'),
             data.get('delay_name'), data.get('cargo_name'), data.get('operation_type'),
             data.get('quantity'), data.get('quantity_uom'), data.get('route_name'),
             data.get('start_time'), data.get('end_time'), data.get('entry_date'),
@@ -134,15 +127,15 @@ def save_line(data):
     else:
         cur.execute('''
             INSERT INTO lueu_lines
-            (source_type, source_id, source_display, barge_name, equipment_name, operator_name,
+            (source_type, source_id, source_display, equipment_name, operator_name,
              delay_name, cargo_name, operation_type, quantity, quantity_uom, route_name,
              start_time, end_time, entry_date, created_by, created_date,
              shift, from_time, to_time, system_name, berth_name, shift_incharge, remarks)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         ''', [
             data.get('source_type'), data.get('source_id'), data.get('source_display'),
-            data.get('barge_name'), data.get('equipment_name'), data.get('operator_name'),
+            data.get('equipment_name'), data.get('operator_name'),
             data.get('delay_name'), data.get('cargo_name'), data.get('operation_type'),
             data.get('quantity'), data.get('quantity_uom'), data.get('route_name'),
             data.get('start_time'), data.get('end_time'), data.get('entry_date'),
@@ -193,17 +186,17 @@ def split_line(line_id, split_qty, split_remark, created_by=None):
     # Create child line with split quantity
     cur.execute('''
         INSERT INTO lueu_lines
-        (source_type, source_id, source_display, barge_name, equipment_name, operator_name,
+        (source_type, source_id, source_display, equipment_name, operator_name,
          delay_name, cargo_name, operation_type, quantity, quantity_uom, route_name,
          start_time, end_time, entry_date, created_by, created_date,
          shift, from_time, to_time, system_name, berth_name, shift_incharge, remarks,
          is_split, parent_line_id, split_quantity, split_remark)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s)
         RETURNING id
     ''', [
         parent.get('source_type'), parent.get('source_id'), parent.get('source_display'),
-        parent.get('barge_name'), parent.get('equipment_name'), parent.get('operator_name'),
+        parent.get('equipment_name'), parent.get('operator_name'),
         parent.get('delay_name'), parent.get('cargo_name'), parent.get('operation_type'),
         split_qty, parent.get('quantity_uom'), parent.get('route_name'),
         parent.get('start_time'), parent.get('end_time'), parent.get('entry_date'),
@@ -239,100 +232,9 @@ def get_vcn_options():
     return [dict(r) for r in rows]
 
 
-def get_mbc_options():
-    """Get MBC entries for dropdown — excludes MBCs where LUEU handled qty >= BL qty."""
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    # BL quantity per MBC (customer_details sum if rows exist, else header bl_quantity)
-    cur.execute('''
-        SELECT m.id, m.doc_num, m.mbc_name, m.doc_date, m.cargo_name,
-               CASE WHEN COUNT(cd.id) > 0 THEN COALESCE(SUM(cd.quantity), 0)
-                    ELSE COALESCE(m.bl_quantity, 0) END AS bl_qty
-        FROM mbc_header m
-        LEFT JOIN mbc_customer_details cd ON cd.mbc_id = m.id
-        GROUP BY m.id, m.doc_num, m.mbc_name, m.doc_date, m.cargo_name, m.bl_quantity
-        ORDER BY m.doc_num DESC
-    ''')
-    mbcs = cur.fetchall()
-
-    # LUEU handled quantity per MBC
-    cur.execute('''
-        SELECT source_id, COALESCE(SUM(quantity), 0) AS handled_qty
-        FROM lueu_lines
-        WHERE source_type = 'MBC' AND (is_deleted IS NOT TRUE)
-        GROUP BY source_id
-    ''')
-    handled_map = {r['source_id']: float(r['handled_qty'] or 0) for r in cur.fetchall()}
-
-    conn.close()
-
-    result = []
-    for m in mbcs:
-        bl = float(m['bl_qty'] or 0)
-        handled = handled_map.get(m['id'], 0)
-        if bl > 0 and handled >= bl:
-            continue
-        result.append(dict(m))
-    return result
-
-
-def get_vcn_barges(vcn_id):
-    """Get barge trips for a VCN — excludes trips where handled qty >= discharge_quantity."""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT id FROM ldud_header WHERE vcn_id = %s', [vcn_id])
-    ldud = cur.fetchone()
-    if ldud:
-        ldud_id = ldud['id']
-        cur.execute('''
-            SELECT barge_name, trip_number, COALESCE(discharge_quantity, 0) AS expected_qty
-            FROM ldud_barge_lines
-            WHERE ldud_id = %s AND barge_name IS NOT NULL AND barge_name != ''
-            ORDER BY trip_number, barge_name
-        ''', [ldud_id])
-        trip_rows = cur.fetchall()
-
-        # Handled quantity per barge/trip display label in LUEU
-        cur.execute('''
-            SELECT barge_name, COALESCE(SUM(quantity), 0) AS handled_qty
-            FROM lueu_lines
-            WHERE source_type = 'VCN' AND source_id = %s AND (is_deleted IS NOT TRUE)
-              AND barge_name IS NOT NULL
-            GROUP BY barge_name
-        ''', [vcn_id])
-        handled_map = {r['barge_name']: float(r['handled_qty'] or 0) for r in cur.fetchall()}
-
-        conn.close()
-        seen = set()
-        result = []
-        for r in trip_rows:
-            trip = r['trip_number'] or ''
-            display = f"{r['barge_name']} / {trip}" if trip else r['barge_name']
-            expected = float(r['expected_qty'] or 0)
-            handled = handled_map.get(display, 0)
-            if expected > 0 and handled >= expected:
-                continue
-            if display not in seen:
-                seen.add(display)
-                result.append(display)
-        return result
-    conn.close()
-    return []
-
-
-def get_mbc_names():
-    """Get all MBC names from master"""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT mbc_name FROM mbc_master ORDER BY mbc_name')
-    rows = cur.fetchall()
-    conn.close()
-    return [r['mbc_name'] for r in rows]
-
 
 def get_bl_progress(source_type, source_id):
-    """Return BL declared qty vs handled qty per cargo for a VCN or MBC source."""
+    """Return BL declared qty vs handled qty per cargo for a VCN source."""
     conn = get_db()
     cur = get_cursor(conn)
 
@@ -350,14 +252,6 @@ def get_bl_progress(source_type, source_id):
         ''', [source_id])
         for r in cur.fetchall():
             declared.append({'cargo_name': r['cargo_name'], 'bl_qty': float(r['bl_qty'] or 0), 'decl_type': 'Export'})
-    elif source_type == 'MBC':
-        cur.execute('''
-            SELECT COALESCE(cargo_name, '') as cargo_name, COALESCE(quantity, 0) as bl_qty
-            FROM mbc_customer_details WHERE mbc_id = %s
-        ''', [source_id])
-        for r in cur.fetchall():
-            declared.append({'cargo_name': r['cargo_name'], 'bl_qty': float(r['bl_qty'] or 0), 'decl_type': 'MBC'})
-
     # Sum handled quantities from lueu_lines per cargo (exclude deleted)
     cur.execute('''
         SELECT COALESCE(cargo_name, '') as cargo_name,
@@ -409,25 +303,6 @@ def get_bl_progress(source_type, source_id):
 
     return result
 
-
-def get_barge_cargos(vcn_id, barge_name):
-    """Get cargo names for a specific barge from a VCN's LDUD"""
-    # Strip trip number if barge_name is in "barge / trip" format
-    if ' / ' in barge_name:
-        barge_name = barge_name.split(' / ')[0].strip()
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT id FROM ldud_header WHERE vcn_id = %s', [vcn_id])
-    ldud = cur.fetchone()
-    cargos = []
-    if ldud:
-        cur.execute('''
-            SELECT DISTINCT cargo_name FROM ldud_barge_lines
-            WHERE ldud_id = %s AND barge_name = %s AND cargo_name IS NOT NULL AND cargo_name != ''
-        ''', [ldud['id'], barge_name])
-        cargos = [r['cargo_name'] for r in cur.fetchall()]
-    conn.close()
-    return cargos
 
 
 def get_dashboard_data():
@@ -531,56 +406,6 @@ def get_dashboard_data():
             'exceeded': actual > bl and bl > 0,
         })
 
-    # ── Active MBCs ──────────────────────────────────────────────────────────
-    # Aggregate customer_details quantities per MBC; fall back to mbc_header.bl_quantity
-    # if no customer rows exist yet.
-    cur.execute('''
-        SELECT
-            m.id, m.doc_num, m.mbc_name, m.doc_status,
-            COALESCE(m.cargo_name, '') AS cargo_name,
-            COALESCE(m.quantity_uom, '') AS uom,
-            CASE
-                WHEN COUNT(cd.id) > 0 THEN COALESCE(SUM(cd.quantity), 0)
-                ELSE COALESCE(m.bl_quantity, 0)
-            END AS bl_quantity
-        FROM mbc_header m
-        LEFT JOIN mbc_customer_details cd ON cd.mbc_id = m.id
-        WHERE m.doc_status != 'Closed'
-        GROUP BY m.id, m.doc_num, m.mbc_name, m.doc_status,
-                 m.cargo_name, m.quantity_uom, m.bl_quantity
-        ORDER BY m.id DESC
-    ''')
-    mbc_declarations = cur.fetchall()
-
-    cur.execute('''
-        SELECT source_id, COALESCE(SUM(quantity), 0) AS actual
-        FROM lueu_lines
-        WHERE source_type = 'MBC' AND (is_deleted IS NOT TRUE)
-        GROUP BY source_id
-    ''')
-    mbc_actual_map = {r['source_id']: float(r['actual'] or 0) for r in cur.fetchall()}
-
-    mbc_rows = []
-    for r in mbc_declarations:
-        bl = float(r['bl_quantity'] or 0)
-        actual = mbc_actual_map.get(r['id'], 0)
-        if bl > 0 and actual >= bl:
-            continue
-        pct = round((actual / bl * 100) if bl > 0 else 0, 1)
-        mbc_rows.append({
-            'id': r['id'],
-            'doc_num': r['doc_num'],
-            'mbc_name': r['mbc_name'],
-            'status': r['doc_status'],
-            'cargo_name': r['cargo_name'],
-            'bl_quantity': round(bl, 2),
-            'actual': round(actual, 2),
-            'remaining': round(bl - actual, 2),
-            'pct': pct,
-            'uom': r['uom'],
-            'exceeded': actual > bl and bl > 0,
-        })
-
     # ── Shift breakdown: Today + Yesterday ───────────────────────────────────
     cur.execute('''
         SELECT
@@ -658,7 +483,6 @@ def get_dashboard_data():
         SELECT DISTINCT ON (equipment_name)
             equipment_name,
             source_display,
-            barge_name,
             cargo_name,
             shift,
             from_time,
@@ -676,7 +500,7 @@ def get_dashboard_data():
 
     # ── Last entry across all equipment today ────────────────────────────────
     cur.execute('''
-        SELECT equipment_name, to_time, created_by, source_display, barge_name, id
+        SELECT equipment_name, to_time, created_by, source_display, id
         FROM lueu_lines
         WHERE entry_date = %s AND (is_deleted IS NOT TRUE)
           AND to_time IS NOT NULL AND to_time != ''
@@ -711,7 +535,6 @@ def get_dashboard_data():
             'today_qty':       today_qty,
             'uom':             agg.get('uom') or '',
             'source_display':  lat.get('source_display') or '',
-            'barge_name':      lat.get('barge_name') or '',
             'cargo_name':      lat.get('cargo_name') or '',
             'last_shift':      lat.get('shift') or '',
             'last_to_time':    lat.get('to_time') or '',
@@ -723,7 +546,6 @@ def get_dashboard_data():
     return {
         'kpis':            kpis,
         'vcn':             vcn_rows,
-        'mbc':             mbc_rows,
         'shifts':          shifts,
         'equipment_board': equipment_board,
         'current_shift':   current_shift,

@@ -127,22 +127,6 @@ def get_vcn_options():
         })
     return jsonify(result)
 
-@bp.route('/api/module/LUEU01/mbc-options')
-@login_required
-def get_mbc_options():
-    options = model.get_mbc_options()
-    result = []
-    for opt in options:
-        display = f"{opt['doc_num']} / {opt['mbc_name']}"
-        result.append({
-            'value': display,
-            'label': display,
-            'type': 'MBC',
-            'id': opt['id'],
-            'cargo_name': opt.get('cargo_name') or ''
-        })
-    return jsonify(result)
-
 @bp.route('/api/module/LUEU01/equipment')
 @login_required
 def get_equipment():
@@ -194,18 +178,6 @@ def get_uom():
     names = [r['name'] for r in rows]
     default_uom = next((r['name'] for r in rows if r['is_default']), '')
     return jsonify({'names': names, 'default': default_uom})
-
-@bp.route('/api/module/LUEU01/barges/<int:vcn_id>')
-@login_required
-def get_barges_for_vcn(vcn_id):
-    barges = model.get_vcn_barges(vcn_id)
-    return jsonify(barges)
-
-@bp.route('/api/module/LUEU01/mbc-names')
-@login_required
-def get_mbc_names():
-    names = model.get_mbc_names()
-    return jsonify(names)
 
 @bp.route('/api/module/LUEU01/routes')
 @login_required
@@ -260,7 +232,7 @@ def get_shift_operators():
 @bp.route('/api/module/LUEU01/bl-progress/<source_type>/<int:source_id>')
 @login_required
 def get_bl_progress(source_type, source_id):
-    if source_type not in ('VCN', 'MBC'):
+    if source_type not in ('VCN',):
         return jsonify({'error': 'Invalid source type'}), 400
     return jsonify(model.get_bl_progress(source_type, source_id))
 
@@ -275,9 +247,3 @@ def dashboard():
 def dashboard_data():
     return jsonify(model.get_dashboard_data())
 
-@bp.route('/api/module/LUEU01/barge-cargos/<int:vcn_id>')
-@login_required
-def get_barge_cargos(vcn_id):
-    barge_name = request.args.get('barge', '')
-    cargos = model.get_barge_cargos(vcn_id, barge_name)
-    return jsonify(cargos)
