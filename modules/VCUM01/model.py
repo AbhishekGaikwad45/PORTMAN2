@@ -25,13 +25,13 @@ def save_data(data):
     cur = get_cursor(conn)
     if data.get('id'):
         cur.execute(f'''UPDATE {TABLE} SET
-            name=%s, sap_customer_code=%s, company_code=%s, gl_code=%s,
+            customer_code=%s, name=%s, sap_customer_code=%s, company_code=%s, gl_code=%s,
             gstin=%s, gst_state_code=%s, gst_state_name=%s,
             pan=%s, cin=%s, billing_address=%s, city=%s, pincode=%s,
             contact_person=%s, contact_email=%s, contact_phone=%s, default_currency=%s,
             virtual_account_number=%s
             WHERE id=%s''',
-            [data.get('name', ''), data.get('sap_customer_code'), data.get('company_code'),
+            [data.get('customer_code'), data.get('name', ''), data.get('sap_customer_code'), data.get('company_code'),
              data.get('gl_code'), data.get('gstin'),
              data.get('gst_state_code'), data.get('gst_state_name'), data.get('pan'), data.get('cin'),
              data.get('billing_address'), data.get('city'), data.get('pincode'),
@@ -40,12 +40,12 @@ def save_data(data):
         row_id = data['id']
     else:
         cur.execute(f'''INSERT INTO {TABLE}
-            (name, sap_customer_code, company_code, gl_code, gstin, gst_state_code, gst_state_name,
+            (customer_code, name, sap_customer_code, company_code, gl_code, gstin, gst_state_code, gst_state_name,
              pan, cin, billing_address, city, pincode, contact_person, contact_email, contact_phone,
              default_currency, virtual_account_number)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id''',
-            [data.get('name', ''), data.get('sap_customer_code'), data.get('company_code'),
+            [data.get('customer_code'), data.get('name', ''), data.get('sap_customer_code'), data.get('company_code'),
              data.get('gl_code'), data.get('gstin'),
              data.get('gst_state_code'), data.get('gst_state_name'), data.get('pan'), data.get('cin'),
              data.get('billing_address'), data.get('city'), data.get('pincode'),

@@ -3,8 +3,8 @@ from functools import wraps
 from . import model
 from database import get_user_permissions
 
-bp = Blueprint('VBM01', __name__, template_folder='.')
-MODULE_CODE = 'VBM01'
+bp = Blueprint('TKM01', __name__, template_folder='.')
+MODULE_CODE = 'TKM01'
 
 def login_required(f):
     @wraps(f)
@@ -19,44 +19,40 @@ def get_perms():
         return {'can_read': 1, 'can_add': 1, 'can_edit': 1, 'can_delete': 1}
     return get_user_permissions(session.get('user_id'), MODULE_CODE)
 
-@bp.route('/module/VBM01/')
+@bp.route('/module/TKM01/')
 @login_required
 def view():
     perms = get_perms()
     if not perms.get('can_read'):
         return render_template('no_access.html'), 403
-    return render_template('vbm01.html', permissions=perms)
+    return render_template('tkm01.html', permissions=perms)
 
-@bp.route('/api/module/VBM01/data')
+@bp.route('/api/module/TKM01/data')
 @login_required
 def get_data():
-    rows = model.get_all()
-    return jsonify({'data': rows, 'last_page': 1, 'total': len(rows)})
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 50))
+    data, total = model.get_data(page, size)
+    return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
 
-@bp.route('/api/module/VBM01/all')
-@login_required
-def get_all():
-    rows = model.get_all()
-    return jsonify([r['barge_name'] for r in rows])
-
-@bp.route('/api/module/VBM01/save', methods=['POST'])
+@bp.route('/api/module/TKM01/save', methods=['POST'])
 @login_required
 def save():
     perms = get_perms()
-    data = request.json
+    data = request.json or {}
     is_new = not data.get('id')
     if is_new and not perms.get('can_add'):
         return jsonify({'error': 'No permission to add'}), 403
     if not is_new and not perms.get('can_edit'):
         return jsonify({'error': 'No permission to edit'}), 403
     row_id = model.save(data)
-    return jsonify({'id': row_id})
+    return jsonify({'success': True, 'id': row_id})
 
-@bp.route('/api/module/VBM01/delete', methods=['POST'])
+@bp.route('/api/module/TKM01/delete', methods=['POST'])
 @login_required
 def delete():
     perms = get_perms()
     if not perms.get('can_delete'):
         return jsonify({'error': 'No permission to delete'}), 403
-    model.delete(request.json['id'])
+    model.delete(request.json.get('id'))
     return jsonify({'success': True})

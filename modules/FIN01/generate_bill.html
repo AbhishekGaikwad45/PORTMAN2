@@ -366,8 +366,8 @@ function renderCargoCards(cards) {
             ? (card.doc_status === 'Closed' ? '#27ae60' : '#f39c12')
             : '#e74c3c';
         const statusLabel = card.doc_status || 'Not Closed';
-        const proofModule = card.ldud_id ? 'LDUD01' : (card.source_type === 'MBC' && card.source_id ? 'MBC01' : '');
-        const proofSourceId = card.ldud_id || (proofModule === 'MBC01' ? card.source_id : null);
+        const proofModule = card.ldud_id ? 'LDUD01' : '';
+        const proofSourceId = card.ldud_id || null;
         const proofCell = proofSourceId
             ? `<button onclick="viewProofDocs('${proofModule}', ${proofSourceId})" style="padding:2px 8px;background:#ebf8ff;border:1px solid #90cdf4;border-radius:4px;cursor:pointer;font-size:11px;color:#2b6cb0;font-weight:500;">View Docs</button>`
             : `<span style="font-size:10px;color:#a0aec0;">${card.bl_no || '-'}</span>`;

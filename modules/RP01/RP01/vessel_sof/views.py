@@ -185,31 +185,8 @@ def build_sof_rows(header, anchorages, cargo_list):
 # ---------------------------------------------------------------------------
 
 def _fetch_barge_list():
-    """Return barges with trip counts, keyed by vessel name for the list view."""
-    conn = get_db()
-    cur  = get_cursor(conn)
-    cur.execute("""
-        SELECT
-            COALESCE(vs.vessel_name, vcn.vessel_name) AS vessel_name,
-            lbl.ldud_id,
-            h.doc_num  AS ldud_doc_num,
-            lbl.barge_name,
-            COUNT(lbl.id) AS trip_count,
-            vcn.operation_type
-        FROM ldud_barge_lines lbl
-        JOIN ldud_header h  ON h.id  = lbl.ldud_id
-        JOIN vcn_header vcn ON vcn.id = h.vcn_id
-        LEFT JOIN vessels vs ON vs.doc_num = SPLIT_PART(vcn.vessel_master_doc, '/', 1)
-        WHERE lbl.barge_name IS NOT NULL AND lbl.barge_name != ''
-        GROUP BY COALESCE(vs.vessel_name, vcn.vessel_name),
-                 lbl.ldud_id, h.doc_num, lbl.barge_name, vcn.operation_type
-        ORDER BY vessel_name, lbl.barge_name
-    """)
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    for r in rows:
-        r['barge_name_encoded'] = url_quote(r['barge_name'] or '', safe='')
-    return rows
+    """Barge lines table removed in JNPA Phase 1 — returns empty list."""
+    return []
 
 
 def _fetch_barge_sof_data(ldud_id, barge_name):
@@ -231,20 +208,9 @@ def _fetch_barge_sof_data(ldud_id, barge_name):
     if not header:
         conn.close()
         return None, []
-    cur.execute("""
-        SELECT lbl.*, b.id AS barge_unique_no
-        FROM ldud_barge_lines lbl
-        LEFT JOIN barges b ON b.barge_name = lbl.barge_name
-        WHERE lbl.ldud_id = %s AND lbl.barge_name = %s
-        ORDER BY lbl.trip_number ASC
-    """, (ldud_id, barge_name))
-    trips = [dict(r) for r in cur.fetchall()]
-    barge_unique_no = trips[0].get('barge_unique_no') if trips else None
-    if not barge_unique_no:
-        cur.execute("SELECT id FROM barges WHERE barge_name = %s", (barge_name,))
-        barge_row = cur.fetchone()
-        barge_unique_no = barge_row['id'] if barge_row else ''
-    header['barge_unique_no'] = barge_unique_no or ''
+    # Barge lines table removed in JNPA Phase 1
+    trips = []
+    header['barge_unique_no'] = ''
     conn.close()
     return header, trips
 
@@ -444,13 +410,13 @@ def vessel_sof_list():
     barge_rows = _fetch_barge_list()
 
     # Build barge lookup: vessel_name → {'Import': [...], 'Export': [...]}
-    barges_map = {}
+    vessel_sof_map = {}
     for b in barge_rows:
         vname = b['vessel_name'] or 'Unknown Vessel'
         cat   = 'Export' if (b.get('operation_type') or '').lower() == 'export' else 'Import'
-        if vname not in barges_map:
-            barges_map[vname] = {'Import': [], 'Export': []}
-        barges_map[vname][cat].append(b)
+        if vname not in vessel_sof_map:
+            vessel_sof_map[vname] = {'Import': [], 'Export': []}
+        vessel_sof_map[vname][cat].append(b)
 
     # Group LDUD records by vessel
     grouped = {}
@@ -464,8 +430,8 @@ def vessel_sof_list():
         {
             'vessel_name':   k,
             'records':       v,
-            'import_barges': barges_map.get(k, {}).get('Import', []),
-            'export_barges': barges_map.get(k, {}).get('Export', []),
+            'import_barges': vessel_sof_map.get(k, {}).get('Import', []),
+            'export_barges': vessel_sof_map.get(k, {}).get('Export', []),
         }
         for k, v in grouped.items()
     ]

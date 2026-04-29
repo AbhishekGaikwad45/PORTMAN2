@@ -51,10 +51,6 @@ def login_required(f):
     return decorated
 
 
-_MBC_OWNERS      = ['JSW INFRA', 'JSW SHIPPING', 'OTHERS']
-_MBC_CARGO_TYPES = ['Break Bulk', 'Container', 'Liquid', 'Bulk']
-
-
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 @bp.route('/module/RP01/daily-ops/')
@@ -232,59 +228,7 @@ def _fetch_data(report_date):
         for r in cur.fetchall():
             lueu_24h[r['source_id']] = float(r['qty'])
 
-    # Barge status snapshot
-    barge_stats = {}
-    if ldud_ids:
-        _STATUS_KEYS = (
-            'at_jetty', 'waiting_discharge', 'waiting_empty_jetty',
-            'at_gull_loaded', 'under_loading', 'waiting_loading', 'in_transit_jetty_to_mv',
-        )
-        cur.execute("""
-            SELECT ldud_id, barge_name, discharge_quantity,
-                   along_side_vessel, commenced_loading, completed_loading,
-                   cast_off_mv, anchored_gull_island, aweigh_gull_island,
-                   amf_at_port, along_side_berth, commence_discharge_berth,
-                   completed_discharge_berth, cast_off_berth, cast_off_port
-            FROM ldud_barge_lines
-            WHERE ldud_id = ANY(%s)
-              AND along_side_vessel < %s
-              AND (cast_off_port IS NULL OR cast_off_port > %s)
-        """, (ldud_ids, we_str, ws_str))
-        for r in cur.fetchall():
-            lid = r['ldud_id']
-            bn  = (r['barge_name'] or '').strip()
-            qty = r['discharge_quantity']
-            if lid not in barge_stats:
-                barge_stats[lid] = {'all': set(), **{k: [] for k in _STATUS_KEYS}}
-            if bn:
-                barge_stats[lid]['all'].add(bn)
-            if r['cast_off_port']:
-                status = 'in_transit_jetty_to_mv'
-            elif r['completed_discharge_berth'] and not r['cast_off_berth']:
-                status = 'waiting_empty_jetty'
-            elif r['along_side_berth'] and not r['commence_discharge_berth']:
-                status = 'waiting_discharge'
-            elif r['amf_at_port'] and not r['along_side_berth']:
-                status = 'at_jetty'
-            elif r['anchored_gull_island'] and not r['aweigh_gull_island']:
-                status = 'at_gull_loaded'
-            elif r['commenced_loading'] and not r['completed_loading']:
-                status = 'under_loading'
-            elif r['along_side_vessel'] and not r['commenced_loading']:
-                status = 'waiting_loading'
-            else:
-                status = None
-            if status and bn:
-                if status in ('at_jetty', 'waiting_discharge') and qty:
-                    entry = f'{bn} ({int(round(qty))} MT)'
-                else:
-                    entry = bn
-                barge_stats[lid][status].append(entry)
-
     conn.close()
-
-    def _make_names(bs_dict, key):
-        return ', '.join(bs_dict.get(key, []))
 
     for v in vessels:
         lid        = v['id']
@@ -292,20 +236,11 @@ def _fetch_data(report_date):
         op         = v.get('operation_type', '')
         bl_qty     = (bl_export.get(vid, 0) if op == 'Export' else bl_import.get(vid, 0)) if vid else 0
         unloaded   = lueu_total.get(lid, 0)
-        bs         = barge_stats.get(lid, {})
         v['stevedore_group']        = vcn_meta.get(vid, '') if vid else ''
         v['bl_qty']                 = bl_qty
         v['ops_24h']                = lueu_24h.get(lid, 0)
         v['ops_till']               = unloaded
         v['balance']                = bl_qty - unloaded
-        v['num_barges']             = len(bs.get('all', set())) or ''
-        v['at_jetty']               = _make_names(bs, 'at_jetty')
-        v['waiting_discharge']      = _make_names(bs, 'waiting_discharge')
-        v['waiting_empty_jetty']    = _make_names(bs, 'waiting_empty_jetty')
-        v['at_gull_loaded']         = _make_names(bs, 'at_gull_loaded')
-        v['under_loading']          = _make_names(bs, 'under_loading')
-        v['waiting_loading']        = _make_names(bs, 'waiting_loading')
-        v['in_transit_jetty_to_mv'] = _make_names(bs, 'in_transit_jetty_to_mv')
 
     return vessels
 
@@ -377,75 +312,6 @@ def _fetch_cargo_handled(report_date):
     return day_rows, month_rows
 
 
-def _fetch_mbc_cargo(report_date):
-    """Return (day_data, month_data) as dicts { owner: { cargo_type: qty } }.
-    Month values incorporate cutoff if the cutoff date falls within the report month.
-    """
-    from datetime import date as date_type
-    prev_date = report_date - timedelta(days=1)
-    day_str   = prev_date.strftime('%Y-%m-%d')
-    month_start_date = date_type(prev_date.year, prev_date.month, 1)
-
-    # ── Load cutoff ─────────────────────────────────────────────────────
-    cutoff_date_str, cutoff_vals = _load_cutoff()
-    mbc_cutoff = cutoff_vals.get('mbc_cargo', {})
-
-    cutoff_date_obj = None
-    if cutoff_date_str and mbc_cutoff:
-        try:
-            cutoff_date_obj = datetime.strptime(cutoff_date_str, '%Y-%m-%d').date()
-        except ValueError:
-            pass
-
-    use_cutoff = (cutoff_date_obj is not None
-                  and month_start_date < cutoff_date_obj
-                  and cutoff_date_obj <= prev_date)
-
-    conn = get_db()
-    cur  = get_cursor(conn)
-
-    def _period(date_from, date_to):
-        cur.execute("""
-            SELECT COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
-                   h.cargo_type,
-                   SUM(h.bl_quantity) AS qty
-            FROM mbc_header h
-            LEFT JOIN mbc_master m ON m.mbc_name = h.mbc_name
-            WHERE h.doc_date IS NOT NULL
-              AND h.doc_date >= %s
-              AND h.doc_date <= %s
-            GROUP BY owner, h.cargo_type
-        """, (date_from, date_to))
-        data = {o: {ct: 0.0 for ct in _MBC_CARGO_TYPES} for o in _MBC_OWNERS}
-        for r in cur.fetchall():
-            owner = r['owner'] if r['owner'] in _MBC_OWNERS else 'OTHERS'
-            ct    = r['cargo_type']
-            if ct in _MBC_CARGO_TYPES:
-                data[owner][ct] += float(r['qty'] or 0)
-        return data
-
-    day_data = _period(day_str, day_str)
-
-    if use_cutoff:
-        # Query only from the day after cutoff onwards
-        live_from = (cutoff_date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
-        live_data = _period(live_from, day_str)
-        # Merge cutoff + live
-        month_data = {o: {ct: 0.0 for ct in _MBC_CARGO_TYPES} for o in _MBC_OWNERS}
-        for owner in _MBC_OWNERS:
-            for ct in _MBC_CARGO_TYPES:
-                co_key = f'{owner}|{ct}'
-                co_val = float(mbc_cutoff.get(co_key, 0))
-                live_val = live_data[owner][ct]
-                month_data[owner][ct] = co_val + live_val
-    else:
-        mth_str = month_start_date.strftime('%Y-%m-%d')
-        month_data = _period(mth_str, day_str)
-
-    conn.close()
-    return day_data, month_data
-
-
 def _fetch_tide_data(report_date):
     window_end   = datetime(report_date.year, report_date.month, report_date.day, 7, 0, 0)
     window_start = window_end - timedelta(hours=24)
@@ -477,8 +343,7 @@ def _fmt_tide_dt(dt_str):
 # ── Excel builder ───────────────────────────────────────────────────────────
 
 def _build_excel(vessels, report_date,
-                 day_rows=None, month_rows=None, tide_rows=None,
-                 mbc_day=None, mbc_month=None):
+                 day_rows=None, month_rows=None, tide_rows=None):
     from openpyxl import Workbook
     wb = Workbook()
     ws = wb.active
@@ -486,9 +351,6 @@ def _build_excel(vessels, report_date,
     day_rows   = day_rows   or []
     month_rows = month_rows or []
     tide_rows  = tide_rows  or []
-    _empty_mbc = lambda: {o: {ct: 0.0 for ct in _MBC_CARGO_TYPES} for o in _MBC_OWNERS}
-    mbc_day    = mbc_day   or _empty_mbc()
-    mbc_month  = mbc_month or _empty_mbc()
 
     col_widths = {1: 30, 2: 35, 3: 35, 4: 35, 5: 35, 6: 35, 7: 10, 8: 32, 9: 22}
     for ci, w in col_widths.items():
@@ -571,7 +433,7 @@ def _build_excel(vessels, report_date,
     _q = lambda x: int(round(x)) if x else ''
     _n = lambda x: x if x else ''
     ROWS = [
-        ('Stevedore/ Barge Group',          'stevedore_group',          None,       _left),
+        ('Stevedore Group',                 'stevedore_group',          None,       _left),
         ('BL Qty',                          'bl_qty',                   _q,         _ctr),
         ('24 hrs Discharge',                'ops_24h',                  _q,         _ctr),
         (label_discharge,                   'ops_till',                 _q,         _ctr),
@@ -579,16 +441,6 @@ def _build_excel(vessels, report_date,
         ('Vsl Arrived/NOR',                 'nor_tendered',             _fmt_dt,    _ctr),
         (label_commenced,                   'discharge_commenced',      _fmt_dt,    _ctr),
         (label_completed,                   'discharge_completed',      _fmt_dt,    _ctr),
-        (None, None, None, None),
-        ('No of Barges',                    'num_barges',               _n,         _ctr),
-        ('At Jetty',                        'at_jetty',                 _n,         _left),
-        ('Waiting for Discharge',           'waiting_discharge',        _n,         _left),
-        ('Waiting Empty at Jetty',          'waiting_empty_jetty',      _n,         _left),
-        ('In transit- MV/Gull to Jetty',    None,                       None,       _left),
-        ('At Gull- waiting (Loaded)',        'at_gull_loaded',           _n,         _left),
-        ('Under Loading at MV',             'under_loading',            _n,         _left),
-        ('Waiting for loading',             'waiting_loading',          _n,         _left),
-        ('In transit- from Jetty to MV',    'in_transit_jetty_to_mv',   _n,         _left),
     ]
 
     for idx, (label, field, formatter, align) in enumerate(ROWS):
@@ -667,77 +519,6 @@ def _build_excel(vessels, report_date,
         ws.row_dimensions[r].height = 18
         r += 1
 
-    # ── MBC's Cargo Handling section ─────────────────────────────────────────
-    # Layout: col1=Owner | cols2-6=Day(BB,Container,Liquid,Bulk,Total)
-    #                     | cols7-11=MTD(BB,Container,Liquid,Bulk,Total)
-    MBC_TOTAL_COLS = 11
-
-    for ci in range(1, MBC_TOTAL_COLS + 1):
-        ws.cell(r, ci).value = None
-    ws.row_dimensions[r].height = 18
-    r += 1
-
-    _merge_row(r, 1, MBC_TOTAL_COLS, "MBC's Cargo Handling", bold=False, align=_ctr)
-    ws.row_dimensions[r].height = 18
-    r += 1
-
-    _merge_col(r, r + 1, 1, '', bold=False, align=_ctr)
-    _merge_row(r, 2, 6,              'Day', bold=False, align=_ctr)
-    _merge_row(r, 7, MBC_TOTAL_COLS, 'MTD', bold=False, align=_ctr)
-    ws.row_dimensions[r].height = 18
-    r += 1
-
-    # Sub-header row 2: cargo type labels + Total for both Day and MTD
-    for ci in range(2, 7):
-        label = (_MBC_CARGO_TYPES + ['Total'])[ci - 2]
-        _cell(r, ci, label, align=_ctr)
-    for ci in range(7, 12):
-        label = (_MBC_CARGO_TYPES + ['Total'])[ci - 7]
-        _cell(r, ci, label, align=_ctr)
-    ws.row_dimensions[r].height = 18
-    r += 1
-
-    # Widen col 11 for MTD Total
-    ws.column_dimensions[get_column_letter(11)].width = 12
-
-    totals_day   = {ct: 0.0 for ct in _MBC_CARGO_TYPES}
-    totals_month = {ct: 0.0 for ct in _MBC_CARGO_TYPES}
-    for owner in _MBC_OWNERS:
-        _cell(r, 1, owner, align=_ctr)
-        day_row   = mbc_day.get(owner,   {})
-        month_row = mbc_month.get(owner, {})
-        day_total = 0.0
-        mtd_total = 0.0
-        for idx, ct in enumerate(_MBC_CARGO_TYPES):
-            dv = day_row.get(ct, 0.0)
-            mv = month_row.get(ct, 0.0)
-            _cell(r, 2 + idx, int(round(dv)) if dv else '', align=_ctr)
-            _cell(r, 7 + idx, int(round(mv)) if mv else '', align=_ctr)
-            day_total        += dv
-            mtd_total        += mv
-            totals_day[ct]   += dv
-            totals_month[ct] += mv
-        _cell(r, 6, int(round(day_total)) if day_total else '', align=_ctr)
-        _cell(r, 11, int(round(mtd_total)) if mtd_total else '', align=_ctr)
-        ws.row_dimensions[r].height = 18
-        r += 1
-
-    # Grand total row
-    _cell(r, 1, 'Total', align=_ctr)
-    grand_day = 0.0
-    grand_mtd = 0.0
-    for idx, ct in enumerate(_MBC_CARGO_TYPES):
-        td = totals_day[ct]
-        tm = totals_month[ct]
-        _cell(r, 2 + idx, int(round(td)) if td else '', align=_ctr)
-        _cell(r, 7 + idx, int(round(tm)) if tm else '', align=_ctr)
-        grand_day += td
-        grand_mtd += tm
-    _cell(r, 6, int(round(grand_day)) if grand_day else '', align=_ctr)
-    _cell(r, 11, int(round(grand_mtd)) if grand_mtd else '', align=_ctr)
-    ws.row_dimensions[r].height = 18
-    r += 1
-
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -762,9 +543,8 @@ def daily_ops_download():
 
     day_rows, month_rows = _fetch_cargo_handled(report_date)
     tide_rows            = _fetch_tide_data(report_date)
-    mbc_day, mbc_month   = _fetch_mbc_cargo(report_date)
     buf = _build_excel(vessels, report_date,
-                       day_rows, month_rows, tide_rows, mbc_day, mbc_month)
+                       day_rows, month_rows, tide_rows)
     fname = f'DailyOps_{date_str}.xlsx'
     return Response(
         buf.getvalue(),

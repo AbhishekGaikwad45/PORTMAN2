@@ -99,6 +99,7 @@ from modules.FDCN01 import bp as fdcn01_bp, MODULE_INFO as fdcn01_info
 from modules.TRM01 import bp as trm01_bp, MODULE_INFO as trm01_info
 from modules.PLM01 import bp as plm01_bp, MODULE_INFO as plm01_info
 from modules.PLTM01 import bp as pltm01_bp, MODULE_INFO as pltm01_info
+from modules.TKM01 import bp as tkm01_bp, MODULE_INFO as tkm01_info
 from modules.EV01 import bp as ev01_bp, MODULE_INFO as ev01_info
 
 # Register existing modules
@@ -160,6 +161,7 @@ register_module(fdcn01_info['code'], fdcn01_info['name'], fdcn01_bp)
 register_module(trm01_info['code'], trm01_info['name'], trm01_bp)
 register_module(plm01_info['code'], plm01_info['name'], plm01_bp)
 register_module(pltm01_info['code'], pltm01_info['name'], pltm01_bp)
+register_module(tkm01_info['code'], tkm01_info['name'], tkm01_bp)
 register_module(ev01_info['code'], ev01_info['name'], ev01_bp)
 
 def login_required(f):

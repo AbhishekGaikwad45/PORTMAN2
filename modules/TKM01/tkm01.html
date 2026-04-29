@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Port Payloader Master - PORTMAN{% endblock %}
+{% block title %}Tank Master - PORTMAN{% endblock %}
 
 {% block content %}
 <div class="module-header">
-    <h2>Port Payloader Master</h2>
-    <span class="module-code">PPL01</span>
+    <h2>Tank Master</h2>
+    <span class="module-code">TKM01</span>
 </div>
 
 <div class="toolbar">
@@ -20,23 +20,28 @@
 
 {% block scripts %}
 <script>
-    addToRecent('PPL01', 'Port Payloader Master');
+    addToRecent('TKM01', 'Tank Master');
+    const MODULE = 'TKM01';
     let table;
     const canEdit = {{ permissions.can_edit|default(0) }} || {{ permissions.can_add|default(0) }};
 
     function initTable() {
         table = new Tabulator("#table", {
             height: "calc(100vh - 160px)",
-            layout: "fitColumns",
+            layout: "fitData",
             columns: [
                 {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
-                {title: "Payloader Name", field: "name", editor: canEdit ? "input" : false, widthGrow: 2},
-                {title: "Make", field: "make", editor: canEdit ? "input" : false, widthGrow: 1}
+                {title: "Tank Code", field: "tank_code", editor: canEdit ? "input" : false, width: 150},
+                {title: "Tank Name", field: "tank_name", editor: canEdit ? "input" : false, widthGrow: 1},
+                {title: "Active", field: "is_active", editor: canEdit ? "select" : false,
+                    editorParams: {values: {true: "Yes", false: "No"}},
+                    formatter: function(cell) { return cell.getValue() ? "Yes" : "No"; },
+                    width: 80}
             ],
             pagination: true,
             paginationMode: "remote",
-            paginationSize: 20,
-            ajaxURL: "/api/module/PPL01/data",
+            paginationSize: 50,
+            ajaxURL: `/api/module/${MODULE}/data`,
             ajaxResponse: function(url, params, response) {
                 document.getElementById('rowCount').textContent = response.data.length;
                 document.getElementById('totalCount').textContent = response.total;
@@ -49,7 +54,7 @@
         }
     }
 
-    function addRow() { table.addRow({}, false); }
+    function addRow() { table.addRow({is_active: true}, false); }
 
     function deleteSelected() {
         const selected = table.getSelectedRows();
@@ -57,13 +62,7 @@
         if (!confirm(`Delete ${selected.length} row(s)?`)) return;
         selected.forEach(row => {
             const id = row.getData().id;
-            if (id) {
-                fetch("/api/module/PPL01/delete", {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({id: id})
-                });
-            }
+            if (id) fetch(`/api/module/${MODULE}/delete`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
             row.delete();
         });
     }
@@ -72,15 +71,12 @@
         const rows = table.getRows();
         for (const row of rows) {
             const data = row.getData();
-            const res = await fetch("/api/module/PPL01/save", {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
+            if (!data.tank_code) continue;
+            const res = await fetch(`/api/module/${MODULE}/save`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
             const result = await res.json();
             if (result.id) row.update({id: result.id});
         }
-        table.setData("/api/module/PPL01/data");
+        table.setData(`/api/module/${MODULE}/data`);
     }
 
     document.addEventListener('keydown', function(e) {

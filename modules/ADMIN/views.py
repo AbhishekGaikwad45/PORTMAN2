@@ -662,21 +662,6 @@ def open_vessel():
     return jsonify({'success': True, 'docs_removed': doc_count})
 
 
-@bp.route('/api/mbc/approvals')
-@admin_required
-def get_mbc_approvals():
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('''
-        SELECT id, doc_num, mbc_name, operation_type, cargo_name, doc_status, created_by
-        FROM mbc_header
-        WHERE doc_status = 'Approved'
-        ORDER BY id DESC
-    ''')
-    rows = cur.fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
 
 @bp.route('/api/aud-config')
 @admin_required
@@ -783,24 +768,3 @@ def _calc_log_stats(entries):
     }
 
 
-@bp.route('/api/mbc/reset_approval', methods=['POST'])
-@admin_required
-def reset_mbc_approval():
-    data = request.json
-    mbc_id = data.get('id')
-    if not mbc_id:
-        return jsonify({'error': 'Missing id'}), 400
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    cur.execute("SELECT COUNT(*) AS cnt FROM mbc_proof_documents WHERE mbc_id=%s", (mbc_id,))
-    doc_count = cur.fetchone()['cnt']
-    cur.execute("DELETE FROM mbc_proof_documents WHERE mbc_id=%s", (mbc_id,))
-
-    cur.execute("UPDATE mbc_header SET doc_status='Draft' WHERE id=%s", (mbc_id,))
-    cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
-                   VALUES ('MBC01', %s, 'Reopened by Admin', 'Approval reset via Admin panel; %s proof doc(s) removed', %s)""",
-                (mbc_id, doc_count, session.get('username')))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True, 'docs_removed': doc_count})

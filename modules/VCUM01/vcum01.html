@@ -69,6 +69,7 @@
             layout: "fitData",
             columns: [
                 {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+                {title: "Customer Code", field: "customer_code", editor: canEdit ? "input" : false, width: 130, frozen: true},
                 {title: "Name", field: "name", editor: canEdit ? "input" : false, width: 180, frozen: true},
                 {title: "SAP Customer Code", field: "sap_customer_code", editor: canEdit ? "input" : false, width: 150},
                 {title: "Company Code", field: "company_code", editor: canEdit ? "input" : false, width: 110},

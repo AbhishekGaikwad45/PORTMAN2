@@ -31,17 +31,6 @@ def _mark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qty,
                 END
             WHERE id = %s
         ''', [bill_qty, bill_id, bill_qty, cargo_source_id])
-    elif cargo_source_type == 'MBC':
-        cur.execute('''
-            UPDATE mbc_customer_details
-            SET billed_quantity = COALESCE(billed_quantity, 0) + %s,
-                bill_id = %s,
-                is_billed = CASE
-                    WHEN COALESCE(billed_quantity, 0) + %s >= quantity THEN 1
-                    ELSE 0
-                END
-            WHERE id = %s
-        ''', [bill_qty, bill_id, bill_qty, cargo_source_id])
 
 
 def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qty):
@@ -52,7 +41,6 @@ def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qt
     table_map = {
         'VCN_IMPORT': ('vcn_cargo_declaration', 'bl_quantity'),
         'VCN_EXPORT': ('vcn_export_cargo_declaration', 'bl_quantity'),
-        'MBC':        ('mbc_customer_details', 'quantity'),
     }
     entry = table_map.get(cargo_source_type)
     if not entry:

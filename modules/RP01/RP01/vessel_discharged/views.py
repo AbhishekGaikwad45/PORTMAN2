@@ -146,7 +146,7 @@ def _fetch_vessel_data(ldud_id):
     if not header_row:
         conn.close()
         return {'header': {}, 'vcn': {}, 'cargo_list': [],
-                'delays': [], 'vessel_ops': [], 'barge_lines': [], 'anchorages': []}
+                'delays': [], 'vessel_ops': [], 'anchorages': []}
     header = dict(header_row)
 
     vcn_id = header.get('vcn_id')
@@ -168,9 +168,6 @@ def _fetch_vessel_data(ldud_id):
     cur.execute("SELECT * FROM ldud_vessel_operations WHERE ldud_id = %s ORDER BY start_time", (ldud_id,))
     vessel_ops = [dict(r) for r in cur.fetchall()]
 
-    cur.execute("SELECT * FROM ldud_barge_lines WHERE ldud_id = %s ORDER BY along_side_vessel", (ldud_id,))
-    barge_lines = [dict(r) for r in cur.fetchall()]
-
     cur.execute("SELECT * FROM ldud_anchorage WHERE ldud_id = %s ORDER BY id", (ldud_id,))
     anchorages = [dict(r) for r in cur.fetchall()]
 
@@ -181,7 +178,6 @@ def _fetch_vessel_data(ldud_id):
         'cargo_list': cargo_list,
         'delays': delays,
         'vessel_ops': vessel_ops,
-        'barge_lines': barge_lines,
         'anchorages': anchorages,
     }
 
@@ -195,7 +191,7 @@ def _write_vessel_sheet(ws, data):
     cargo_list  = data['cargo_list']
     delays      = data['delays']
     vessel_ops  = data['vessel_ops']
-    barge_lines = data['barge_lines']
+    barge_lines = []  # barge lines removed in JNPA Phase 1
 
     vessel_name    = header.get('vessel_name', 'Vessel')
     doc_num        = header.get('doc_num', '')

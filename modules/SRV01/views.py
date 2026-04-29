@@ -236,19 +236,5 @@ def get_source_options(source_type):
             result.append({'id': r['id'], 'display': display})
         return jsonify({'data': result})
 
-    elif source_type == 'MBC':
-        cur.execute('''
-            SELECT id, doc_num, mbc_name, doc_date
-            FROM mbc_header ORDER BY id DESC
-        ''')
-        rows = cur.fetchall()
-        conn.close()
-        result = []
-        for r in rows:
-            r = dict(r)
-            display = f"{r['doc_num']} / {r['mbc_name']} / {r.get('doc_date', '')}"
-            result.append({'id': r['id'], 'display': display})
-        return jsonify({'data': result})
-
     conn.close()
     return jsonify({'data': []})

@@ -41,6 +41,40 @@ def delete(row_id):
     conn.commit()
     conn.close()
 
+def get_matrix_data():
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT id, pipeline_name FROM pipeline_master ORDER BY pipeline_name')
+        pipelines = [dict(r) for r in cur.fetchall()]
+        cur.execute('SELECT id, terminal_name FROM terminal_master ORDER BY terminal_name')
+        terminals = [dict(r) for r in cur.fetchall()]
+        cur.execute('SELECT id, pipeline_id, terminal_id, is_active FROM pipeline_terminal_mapping')
+        mappings = [dict(r) for r in cur.fetchall()]
+        return pipelines, terminals, mappings
+    finally:
+        conn.close()
+
+
+def toggle_mapping(pipeline_id, terminal_id):
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT id FROM pipeline_terminal_mapping WHERE pipeline_id=%s AND terminal_id=%s',
+                [pipeline_id, terminal_id])
+    existing = cur.fetchone()
+    if existing:
+        cur.execute('DELETE FROM pipeline_terminal_mapping WHERE id=%s', [existing['id']])
+        conn.commit()
+        conn.close()
+        return 'removed'
+    else:
+        cur.execute('INSERT INTO pipeline_terminal_mapping (pipeline_id, terminal_id, is_active) VALUES (%s, %s, TRUE)',
+                    [pipeline_id, terminal_id])
+        conn.commit()
+        conn.close()
+        return 'added'
+
+
 def get_pipelines():
     conn = get_db()
     cur = get_cursor(conn)

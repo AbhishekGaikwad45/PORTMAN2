@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 from functools import wraps
 from . import model
+from . import pdf_parser
 from database import get_user_permissions
 
 bp = Blueprint('EV01', __name__, template_folder='.')
@@ -57,6 +58,25 @@ def delete():
     model.delete(request.json['id'])
     return jsonify({'success': True})
 
+@bp.route('/api/module/EV01/upload', methods=['POST'])
+@login_required
+def upload_pdf():
+    perms = get_perms()
+    if not perms.get('can_add') and not perms.get('can_edit'):
+        return jsonify({'error': 'No permission'}), 403
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    f = request.files['file']
+    if not f.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Only PDF files accepted'}), 400
+    file_bytes = f.read()
+    rows = pdf_parser.parse_pdf_ev_rows(file_bytes)
+    if not rows:
+        return jsonify({'error': 'No Expected Vessels table found in PDF. Check the file format.'}), 400
+    result = model.upsert_from_pdf(rows, session.get('username'))
+    return jsonify({'success': True, 'total': len(rows), **result})
+
+
 @bp.route('/api/module/EV01/move_to_vcn/<int:ev_id>', methods=['POST'])
 @login_required
 def move_to_vcn(ev_id):
@@ -72,7 +92,7 @@ def move_to_vcn(ev_id):
         'vessel_name':       ev.get('vessel_name'),
         'loa':               ev.get('loa'),
         'draft':             ev.get('draft'),
-        'vessel_agent_name': ev.get('agent_tank_consignee'),
+        'vessel_agent_name': ev.get('agents'),
         'cargo_type':        ev.get('cargo_name'),
         'nor_tendered':      ev.get('nor'),
         'berth_name':        ev.get('berth_name'),

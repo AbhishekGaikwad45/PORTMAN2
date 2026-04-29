@@ -64,47 +64,26 @@ def custom_report_index():
 
 # ── Data sources ─────────────────────────────────────────────────────────────
 
-VALID_SOURCES = {'mbc-ops', 'vessel-ops', 'vessel-barge', 'lueu-equipment', 'mbc-tat'}
+VALID_SOURCES = {'vessel-ops', 'lueu-equipment'}
 
 # Maps date_col key → (sql_expression, is_datetime)
 # is_datetime=True  → filter uses LEFT(expr::TEXT, 10)
 # is_datetime=False → filter uses expr directly
 DATE_COL_FILTERS = {
-    'mbc-ops': {
-        'doc_date':               ("h.doc_date", False),
-        'created_date':           ("h.created_date", False),
-        'lp_loading_commenced':   ("COALESCE(lp.loading_commenced, elp.loading_commenced)", True),
-        'lp_loading_completed':   ("COALESCE(lp.loading_completed, elp.loading_completed)", True),
-        'dp_unloading_commenced': ("dp.unloading_commenced", True),
-        'dp_unloading_completed': ("dp.unloading_completed", True),
-    },
     'vessel-ops': {
         'nor_tendered':       ("h.nor_tendered", True),
         'discharge_date':     ("h.discharge_commenced", True),
         'completion_date':    ("h.discharge_completed", True),
     },
-    'vessel-barge': {
-        'nor_tendered':          ("h.nor_tendered", True),
-        'discharge_commenced':   ("h.discharge_commenced", True),
-        'discharge_completed':   ("h.discharge_completed", True),
-        'commenced_loading':     ("bl.commenced_loading", True),
-        'completed_loading':     ("bl.completed_loading", True),
-    },
     'lueu-equipment': {
         'entry_date': ("l.entry_date", False),
-    },
-    'mbc-tat': {
-        'doc_date': ("h.doc_date", False),
     },
 }
 
 # Default date_col key per source (used when none specified)
 DATE_COL_DEFAULTS = {
-    'mbc-ops':        'doc_date',
     'vessel-ops':     'nor_tendered',
-    'vessel-barge':   'nor_tendered',
     'lueu-equipment': 'entry_date',
-    'mbc-tat':        'doc_date',
 }
 
 
@@ -174,52 +153,7 @@ def pivot_data(source):
     cur  = get_cursor(conn)
 
     try:
-        if source == 'mbc-ops':
-            cur.execute(f"""
-                SELECT
-                    h.doc_num                                           AS "Doc No",
-                    COALESCE(h.doc_series, '')                          AS "Doc Series",
-                    COALESCE(h.mbc_name, '')                            AS "MBC Name",
-                    COALESCE(h.operation_type, '')                      AS "Operation Type",
-                    COALESCE(h.cargo_type, '')                          AS "Cargo Type",
-                    COALESCE(h.cargo_name, '')                          AS "Cargo Name",
-                    COALESCE(vc.cargo_category, '')                     AS "Cargo Category",
-                    COALESCE(vc.cargo_category_2, '')                   AS "Cargo Category 2",
-                    COALESCE(vc.cargo_sub_category, '')                 AS "Cargo Sub Category",
-                    COALESCE(vc.cargo_sub_category_2, '')               AS "Cargo Sub Category 2",
-                    COALESCE(h.bl_quantity, 0)                          AS "BL Qty",
-                    COALESCE(h.quantity_uom, '')                        AS "UOM",
-                    COALESCE(h.doc_status, '')                          AS "Status",
-                    COALESCE(h.created_by, '')                          AS "Created By",
-                    COALESCE(
-                        STRING_AGG(DISTINCT cd.customer_name, ', ')
-                            FILTER (WHERE cd.customer_name IS NOT NULL),
-                    '')                                                 AS "Customer",
-                    COALESCE(elp.unloaded_by, '')                       AS "LP Unloaded By (Export)",
-                    COALESCE(elp.berth_master, '')                      AS "LP Berth Master (Export)",
-                    COALESCE(dp.vessel_unloaded_by, '')                 AS "DP Vessel Unloaded By",
-                    COALESCE(dp.vessel_unloading_berth, '')             AS "DP Unloading Berth",
-                    COALESCE(dp.discharge_stop_shifting, '')            AS "DP Stop Shifting",
-                    COALESCE(dp.discharge_start_shifting, '')           AS "DP Start Shifting",
-                    COALESCE(h.doc_date::TEXT, '')                      AS "Doc Date",
-                    COALESCE(LEFT(h.doc_date::TEXT, 4), '')             AS "Year",
-                    COALESCE(LEFT(h.doc_date::TEXT, 7), '')             AS "Year-Month"
-                FROM mbc_header h
-                LEFT JOIN mbc_load_port_lines        lp  ON lp.mbc_id  = h.id
-                LEFT JOIN mbc_export_load_port_lines elp ON elp.mbc_id = h.id
-                LEFT JOIN mbc_discharge_port_lines   dp  ON dp.mbc_id  = h.id
-                LEFT JOIN mbc_customer_details       cd  ON cd.mbc_id  = h.id
-                LEFT JOIN LATERAL (
-                    SELECT cargo_category, cargo_category_2, cargo_sub_category, cargo_sub_category_2
-                    FROM vessel_cargo WHERE cargo_name = h.cargo_name LIMIT 1
-                ) vc ON TRUE
-                WHERE {where_clause}
-                GROUP BY h.id, h.doc_date, lp.id, elp.id, dp.id, vc.cargo_category, vc.cargo_category_2, vc.cargo_sub_category, vc.cargo_sub_category_2
-                ORDER BY h.id DESC
-                LIMIT 10000
-            """, where_params)
-
-        elif source == 'vessel-ops':
+        if source == 'vessel-ops':
             cur.execute(f"""
                 SELECT
                     h.doc_num                                           AS "Doc No",
@@ -252,46 +186,6 @@ def pivot_data(source):
                          v.operation_type, h.operation_type, v.vessel_agent_name,
                          h.nor_tendered, h.discharge_commenced, h.discharge_completed, h.doc_status
                 ORDER BY h.nor_tendered DESC
-                LIMIT 10000
-            """, where_params)
-
-        elif source == 'vessel-barge':
-            cur.execute(f"""
-                SELECT
-                    h.doc_num                                               AS "Doc No",
-                    COALESCE(h.vcn_doc_num, '')                            AS "VCN No",
-                    COALESCE(h.vessel_name, '')                            AS "Vessel",
-                    COALESCE(v.operation_type, h.operation_type, '')       AS "Operation Type",
-                    COALESCE(v.vessel_agent_name, '')                      AS "Vessel Agent",
-                    COALESCE(h.doc_status, '')                             AS "Status",
-                    COALESCE(h.created_by, '')                             AS "Created By",
-                    COALESCE(h.initial_draft_survey_quantity::TEXT, '')    AS "Initial Draft Survey Qty",
-                    COALESCE(bl.trip_number::TEXT, '')                     AS "Trip No",
-                    COALESCE(bl.hold_name, '')                             AS "Hold",
-                    COALESCE(bl.barge_name, '')                            AS "Barge",
-                    COALESCE(bl.contractor_name, '')                       AS "Contractor",
-                    COALESCE(bl.cargo_name, '')                            AS "Cargo",
-                    COALESCE(bl.bpt_bfl, '')                               AS "BPT/BFL",
-                    COALESCE(bl.discharge_quantity::TEXT, '')              AS "Discharge Qty",
-                    COALESCE(bl.crane_loaded_from, '')                     AS "Crane Loaded From",
-                    COALESCE(bl.port_crane, '')                            AS "Port Crane",
-                    COALESCE(vc.cargo_type, '')                    AS "Cargo Type",
-                    COALESCE(vc.cargo_category, '')                AS "Cargo Category",
-                    COALESCE(vc.cargo_category_2, '')              AS "Cargo Category 2",
-                    COALESCE(vc.cargo_sub_category, '')            AS "Cargo Sub Category",
-                    COALESCE(vc.cargo_sub_category_2, '')          AS "Cargo Sub Category 2",
-                    COALESCE(LEFT(h.nor_tendered::TEXT, 10), '')   AS "NOR Date",
-                    COALESCE(LEFT(h.nor_tendered::TEXT, 4), '')    AS "Year",
-                    COALESCE(LEFT(h.nor_tendered::TEXT, 7), '')    AS "Year-Month"
-                FROM ldud_header h
-                LEFT JOIN vcn_header v ON v.id = h.vcn_id
-                LEFT JOIN ldud_barge_lines bl ON bl.ldud_id = h.id
-                LEFT JOIN LATERAL (
-                    SELECT cargo_type, cargo_category, cargo_category_2, cargo_sub_category, cargo_sub_category_2
-                    FROM vessel_cargo WHERE cargo_name = bl.cargo_name LIMIT 1
-                ) vc ON TRUE
-                WHERE {where_clause}
-                ORDER BY h.nor_tendered DESC, h.id, bl.trip_number
                 LIMIT 10000
             """, where_params)
 
@@ -334,39 +228,6 @@ def pivot_data(source):
                 ) vc ON TRUE
                 WHERE {where_clause}
                 ORDER BY l.id DESC
-                LIMIT 10000
-            """, where_params)
-
-        elif source == 'mbc-tat':
-            cur.execute(f"""
-                SELECT
-                    h.doc_num                                           AS doc_num,
-                    COALESCE(h.mbc_name, '')                           AS mbc_name,
-                    COALESCE(h.operation_type, '')                     AS operation_type,
-                    COALESCE(h.cargo_name, '')                         AS cargo_name,
-                    COALESCE(CAST(h.bl_quantity AS TEXT), '')          AS bl_quantity,
-                    COALESCE(h.doc_status, '')                         AS doc_status,
-                    COALESCE(h.created_by, '')                         AS created_by,
-                    COALESCE(vc.cargo_type, '')               AS cargo_type,
-                    COALESCE(vc.cargo_category, '')           AS cargo_category,
-                    COALESCE(vc.cargo_category_2, '')         AS cargo_category_2,
-                    COALESCE(vc.cargo_sub_category, '')       AS cargo_sub_category,
-                    COALESCE(vc.cargo_sub_category_2, '')     AS cargo_sub_category_2,
-                    COALESCE(h.doc_date::TEXT, '')            AS doc_date,
-                    lp.arrived_load_port,    lp.loading_commenced,   lp.loading_completed,
-                    lp.cast_off_load_port,
-                    dp.arrival_gull_island,  dp.departure_gull_island, dp.vessel_arrival_port,
-                    dp.unloading_commenced,  dp.unloading_completed,
-                    dp.vessel_cast_off,      dp.sailed_out_load_port
-                FROM mbc_header h
-                LEFT JOIN mbc_load_port_lines      lp ON lp.mbc_id = h.id
-                LEFT JOIN mbc_discharge_port_lines dp ON dp.mbc_id = h.id
-                LEFT JOIN LATERAL (
-                    SELECT cargo_type, cargo_category, cargo_category_2, cargo_sub_category, cargo_sub_category_2
-                    FROM vessel_cargo WHERE cargo_name = h.cargo_name LIMIT 1
-                ) vc ON TRUE
-                WHERE {where_clause}
-                ORDER BY h.doc_date ASC, h.id ASC
                 LIMIT 10000
             """, where_params)
 

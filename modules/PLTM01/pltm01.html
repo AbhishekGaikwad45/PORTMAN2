@@ -3,190 +3,347 @@
 {% block title %}Pipeline-Terminal Mapping - PORTMAN{% endblock %}
 
 {% block content %}
+<style>
+    .matrix-wrap {
+        overflow: auto;
+        max-height: calc(100vh - 170px);
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        margin-top: 12px;
+        position: relative;
+    }
+    .matrix-table {
+        border-collapse: collapse;
+        table-layout: fixed;
+    }
+    .corner-cell {
+        background: #2c3e50;
+        color: #ecf0f1;
+        font-size: 11px;
+        font-weight: 600;
+        text-align: left;
+        padding: 12px 16px;
+        min-width: 200px;
+        width: 200px;
+        position: sticky;
+        left: 0;
+        top: 0;
+        z-index: 4;
+        border-right: 2px solid #1a252f;
+        border-bottom: 2px solid #1a252f;
+        white-space: nowrap;
+    }
+    .col-header {
+        background: #34495e;
+        color: #ecf0f1;
+        font-size: 11px;
+        font-weight: 600;
+        text-align: center;
+        padding: 10px 6px;
+        width: 110px;
+        min-width: 110px;
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        border-right: 1px solid #2c3e50;
+        border-bottom: 2px solid #1a252f;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .col-header .count-badge {
+        display: inline-block;
+        margin-top: 4px;
+        background: rgba(255,255,255,0.18);
+        border-radius: 10px;
+        padding: 1px 7px;
+        font-size: 10px;
+        font-weight: 400;
+    }
+    .row-header {
+        background: #f0f4f8;
+        font-weight: 600;
+        font-size: 12px;
+        color: #2c3e50;
+        text-align: left;
+        padding: 0 14px;
+        height: 52px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 200px;
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        border-right: 2px solid #d1dce5;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .row-header .row-count {
+        font-weight: 400;
+        font-size: 10px;
+        color: #7f8c8d;
+        margin-left: 6px;
+    }
+    .matrix-cell {
+        width: 110px;
+        min-width: 110px;
+        height: 52px;
+        text-align: center;
+        vertical-align: middle;
+        border-right: 1px solid #e2e8f0;
+        border-bottom: 1px solid #e2e8f0;
+        transition: background 0.12s;
+        position: relative;
+    }
+    .matrix-cell.can-toggle { cursor: pointer; }
+    .matrix-cell.active {
+        background: #eafaf1;
+    }
+    .matrix-cell.active:hover {
+        background: #d5f5e3;
+    }
+    .matrix-cell:not(.active):hover {
+        background: #f0f7ff;
+    }
+    .cell-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: 2px;
+    }
+    .cell-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        transition: all 0.12s;
+    }
+    .matrix-cell.active .cell-icon {
+        background: #27ae60;
+        color: #fff;
+        box-shadow: 0 1px 4px rgba(39,174,96,0.4);
+    }
+    .matrix-cell:not(.active).can-toggle .cell-icon {
+        background: transparent;
+        color: #d0d7de;
+        border: 2px dashed #d0d7de;
+    }
+    .matrix-cell:not(.active).can-toggle:hover .cell-icon {
+        background: #eaf3ff;
+        color: #3498db;
+        border-color: #3498db;
+    }
+    .matrix-cell.pulsing { animation: pulse 0.25s ease; }
+    @keyframes pulse {
+        0%   { transform: scale(1); }
+        50%  { transform: scale(1.08); }
+        100% { transform: scale(1); }
+    }
+    .stats-bar {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        padding: 8px 0 0;
+        font-size: 12px;
+        color: #7f8c8d;
+    }
+    .stats-bar strong { color: #2c3e50; }
+    .legend {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        font-size: 11px;
+        color: #7f8c8d;
+        padding: 8px 0;
+    }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-dot {
+        width: 14px; height: 14px; border-radius: 50%;
+    }
+    .legend-dot.active   { background: #27ae60; }
+    .legend-dot.inactive { background: transparent; border: 2px dashed #d0d7de; }
+    #emptyState {
+        text-align: center;
+        padding: 60px 20px;
+        color: #aaa;
+        font-size: 14px;
+    }
+</style>
+
 <div class="module-header">
     <h2>Pipeline-Terminal Mapping</h2>
     <span class="module-code">PLTM01</span>
 </div>
 
-<div class="toolbar">
-    {% if permissions.can_add %}<button class="btn btn-add" onclick="openPanel(null)">+ Add</button>{% endif %}
-    <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+<div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;">
+    <div class="stats-bar" id="statsBar">Loading…</div>
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot active"></div> Connected
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot inactive"></div>
+            <span id="legendEmpty">Not connected (click to add)</span>
+        </div>
+    </div>
 </div>
 
-<div id="table"></div>
-
-<!-- Slide-over panel -->
-<div id="overlay" class="overlay" onclick="closePanel()" style="display:none;"></div>
-<div id="slidePanel" class="slide-panel" style="display:none;">
-    <div class="panel-header">
-        <h3 id="panelTitle">Add Mapping</h3>
-        <button class="btn-close" onclick="closePanel()">&times;</button>
-    </div>
-    <div class="panel-body">
-        <form id="mappingForm" onsubmit="submitForm(event)">
-            <input type="hidden" id="recordId" name="id">
-            <div class="form-group">
-                <label for="pipelineId">Pipeline <span class="required">*</span></label>
-                <select id="pipelineId" name="pipeline_id" required>
-                    <option value="">-- Select Pipeline --</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="terminalId">Terminal <span class="required">*</span></label>
-                <select id="terminalId" name="terminal_id" required>
-                    <option value="">-- Select Terminal --</option>
-                </select>
-            </div>
-            <div class="form-group form-check">
-                <input type="checkbox" id="isActive" name="is_active" checked>
-                <label for="isActive">Is Active</label>
-            </div>
-            <div class="form-actions">
-                {% if permissions.can_add or permissions.can_edit %}
-                <button type="submit" class="btn btn-save">Save</button>
-                {% endif %}
-                <button type="button" class="btn" onclick="closePanel()">Cancel</button>
-            </div>
-        </form>
-    </div>
+<div class="matrix-wrap" id="matrixWrap">
+    <div id="emptyState" style="display:none;">No pipelines or terminals found. Add them in PLM01 / TRM01 first.</div>
+    <table class="matrix-table" id="matrixTable" style="display:none;">
+        <thead><tr id="headerRow"></tr></thead>
+        <tbody id="matrixBody"></tbody>
+    </table>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     addToRecent('PLTM01', 'Pipeline-Terminal Mapping');
-    let table;
-    let pipelines = [];
-    let terminals = [];
 
     const permissions = {
-        can_edit: {{ permissions.can_edit|default(0) }},
-        can_add: {{ permissions.can_add|default(0) }},
+        can_edit:   {{ permissions.can_edit|default(0) }},
+        can_add:    {{ permissions.can_add|default(0) }},
         can_delete: {{ permissions.can_delete|default(0) }}
     };
+    const canToggle = permissions.can_add || permissions.can_delete;
 
-    async function loadDropdowns() {
-        const [pRes, tRes] = await Promise.all([
-            fetch('/api/module/PLTM01/pipelines'),
-            fetch('/api/module/PLTM01/terminals')
-        ]);
-        pipelines = await pRes.json();
-        terminals = await tRes.json();
+    let pipelines = [], terminals = [], mappingMap = {};
 
-        const pSel = document.getElementById('pipelineId');
-        pipelines.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = p.pipeline_name;
-            pSel.appendChild(opt);
-        });
+    function buildKey(pid, tid) { return `${pid}_${tid}`; }
 
-        const tSel = document.getElementById('terminalId');
+    function countForPipeline(pid) {
+        return terminals.filter(t => mappingMap[buildKey(pid, t.id)]).length;
+    }
+    function countForTerminal(tid) {
+        return pipelines.filter(p => mappingMap[buildKey(p.id, tid)]).length;
+    }
+
+    function updateStats() {
+        const total = Object.keys(mappingMap).length;
+        document.getElementById('statsBar').innerHTML =
+            `<span><strong>${pipelines.length}</strong> Pipelines</span>` +
+            `<span><strong>${terminals.length}</strong> Terminals</span>` +
+            `<span><strong>${total}</strong> Active Connection${total !== 1 ? 's' : ''}</span>`;
+    }
+
+    function renderMatrix() {
+        const headerRow = document.getElementById('headerRow');
+        const body      = document.getElementById('matrixBody');
+        headerRow.innerHTML = '';
+        body.innerHTML      = '';
+
+        if (!pipelines.length || !terminals.length) {
+            document.getElementById('emptyState').style.display = 'block';
+            document.getElementById('matrixTable').style.display = 'none';
+            return;
+        }
+        document.getElementById('emptyState').style.display = 'none';
+        document.getElementById('matrixTable').style.display = '';
+
+        if (!canToggle) {
+            document.getElementById('legendEmpty').textContent = 'Not connected';
+        }
+
+        // Corner
+        const corner = document.createElement('th');
+        corner.className = 'corner-cell';
+        corner.textContent = 'Pipeline  ╲  Terminal';
+        headerRow.appendChild(corner);
+
+        // Column headers
         terminals.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t.id;
-            opt.textContent = t.terminal_name;
-            tSel.appendChild(opt);
+            const th = document.createElement('th');
+            th.className = 'col-header';
+            const cnt = countForTerminal(t.id);
+            th.innerHTML = `<div title="${t.terminal_name}">${t.terminal_name}</div>
+                            <div class="count-badge" id="tcnt_${t.id}">${cnt}</div>`;
+            headerRow.appendChild(th);
         });
-    }
 
-    function initTable() {
-        const canEdit = permissions.can_edit || permissions.can_add;
-        const cols = [
-            {title: "ID", field: "id", width: 60},
-            {title: "Pipeline Name", field: "pipeline_name", widthGrow: 2},
-            {title: "Terminal Name", field: "terminal_name", widthGrow: 2},
-            {title: "Active", field: "is_active", formatter: "tickCross", hozAlign: "center", width: 80}
-        ];
+        // Rows
+        pipelines.forEach(p => {
+            const tr = document.createElement('tr');
 
-        if (canEdit || permissions.can_delete) {
-            cols.push({
-                title: "Actions",
-                formatter: function(cell) {
-                    let btns = '';
-                    if (canEdit) btns += `<button class="btn btn-sm btn-edit" onclick="openPanel(${JSON.stringify(cell.getRow().getData())})">Edit</button> `;
-                    if (permissions.can_delete) btns += `<button class="btn btn-sm btn-delete" onclick="deleteRow(${cell.getRow().getData().id})">Delete</button>`;
-                    return btns;
-                },
-                headerSort: false,
-                width: 140
+            const th = document.createElement('th');
+            th.className = 'row-header';
+            const cnt = countForPipeline(p.id);
+            th.innerHTML = `${p.pipeline_name}<span class="row-count" id="rcnt_${p.id}">(${cnt})</span>`;
+            tr.appendChild(th);
+
+            terminals.forEach(t => {
+                const td = document.createElement('td');
+                td.className = 'matrix-cell' + (canToggle ? ' can-toggle' : '');
+                td.id = `cell_${p.id}_${t.id}`;
+                const active = !!mappingMap[buildKey(p.id, t.id)];
+                if (active) td.classList.add('active');
+                td.innerHTML = `<div class="cell-inner"><div class="cell-icon">${active ? '✓' : '+'}</div></div>`;
+                if (canToggle) {
+                    td.onclick = () => toggleCell(p.id, t.id, p.pipeline_name, t.terminal_name);
+                }
+                tr.appendChild(td);
             });
-        }
 
-        table = new Tabulator("#table", {
-            height: "calc(100vh - 160px)",
-            layout: "fitColumns",
-            columns: cols,
-            pagination: true,
-            paginationMode: "remote",
-            paginationSize: 20,
-            ajaxURL: "/api/module/PLTM01/data",
-            ajaxResponse: function(url, params, response) {
-                document.getElementById('rowCount').textContent = response.data.length;
-                document.getElementById('totalCount').textContent = response.total;
-                return response;
-            }
+            body.appendChild(tr);
         });
-        if (localStorage.getItem('theme') === 'dark') {
-            document.getElementById('table').classList.add('tabulator-dark');
-        }
+
+        updateStats();
     }
 
-    function openPanel(data) {
-        document.getElementById('panelTitle').textContent = data && data.id ? 'Edit Mapping' : 'Add Mapping';
-        document.getElementById('recordId').value = data ? (data.id || '') : '';
-        document.getElementById('pipelineId').value = data ? (data.pipeline_id || '') : '';
-        document.getElementById('terminalId').value = data ? (data.terminal_id || '') : '';
-        document.getElementById('isActive').checked = data ? !!data.is_active : true;
-        document.getElementById('slidePanel').style.display = 'block';
-        document.getElementById('overlay').style.display = 'block';
-    }
+    async function toggleCell(pid, tid, pName, tName) {
+        const key  = buildKey(pid, tid);
+        const isActive = !!mappingMap[key];
 
-    function closePanel() {
-        document.getElementById('slidePanel').style.display = 'none';
-        document.getElementById('overlay').style.display = 'none';
-        document.getElementById('mappingForm').reset();
-    }
+        if (isActive && !confirm(`Remove connection:\n${pName} ↔ ${tName}?`)) return;
 
-    async function submitForm(e) {
-        e.preventDefault();
-        const id = document.getElementById('recordId').value;
-        const payload = {
-            pipeline_id: parseInt(document.getElementById('pipelineId').value),
-            terminal_id: parseInt(document.getElementById('terminalId').value),
-            is_active: document.getElementById('isActive').checked
-        };
-        if (id) payload.id = parseInt(id);
+        const cell = document.getElementById(`cell_${pid}_${tid}`);
+        cell.classList.add('pulsing');
+        setTimeout(() => cell.classList.remove('pulsing'), 300);
 
-        const res = await fetch('/api/module/PLTM01/save', {
+        const res = await fetch('/api/module/PLTM01/toggle', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
+            body: JSON.stringify({pipeline_id: pid, terminal_id: tid})
         });
         const result = await res.json();
-        if (result.success) {
-            closePanel();
-            table.setData('/api/module/PLTM01/data');
+        if (!result.success) { alert(result.error || 'Error'); return; }
+
+        const nowActive = result.action === 'added';
+        if (nowActive) {
+            mappingMap[key] = true;
+            cell.classList.add('active');
         } else {
-            alert(result.error || 'Save failed');
+            delete mappingMap[key];
+            cell.classList.remove('active');
         }
+        cell.querySelector('.cell-icon').textContent = nowActive ? '✓' : '+';
+
+        // Update row/column counts
+        const rowCnt = countForPipeline(pid);
+        const colCnt = countForTerminal(tid);
+        const rcnt = document.getElementById(`rcnt_${pid}`);
+        const tcnt = document.getElementById(`tcnt_${tid}`);
+        if (rcnt) rcnt.textContent = `(${rowCnt})`;
+        if (tcnt) tcnt.textContent = colCnt;
+
+        updateStats();
     }
 
-    async function deleteRow(id) {
-        if (!confirm('Delete this mapping?')) return;
-        const res = await fetch('/api/module/PLTM01/delete', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id: id})
-        });
-        const result = await res.json();
-        if (result.success) {
-            table.setData('/api/module/PLTM01/data');
-        } else {
-            alert(result.error || 'Delete failed');
-        }
+    async function loadMatrix() {
+        const res = await fetch('/api/module/PLTM01/matrix');
+        const data = await res.json();
+        pipelines = data.pipelines;
+        terminals = data.terminals;
+        mappingMap = {};
+        data.mappings.forEach(m => { mappingMap[buildKey(m.pipeline_id, m.terminal_id)] = true; });
+        renderMatrix();
     }
 
-    loadDropdowns().then(() => initTable());
+    loadMatrix();
 </script>
 {% endblock %}

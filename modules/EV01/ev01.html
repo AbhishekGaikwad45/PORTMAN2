@@ -11,12 +11,16 @@
 <div class="toolbar">
     {% if permissions.can_add %}<button class="btn btn-add" onclick="openAddModal()">+ Add Row</button>{% endif %}
     {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}
+    <button class="btn" style="background:#8e44ad;color:#fff;" onclick="document.getElementById('pdfInput').click()">⬆ Upload PDF</button>
+    <input type="file" id="pdfInput" accept=".pdf" style="display:none;" onchange="uploadPdf(this)">
+    {% endif %}
     <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
 </div>
 
 <!-- Add/Edit Modal -->
 <div id="evModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;overflow-y:auto;">
-    <div style="background:#fff;margin:40px auto;padding:28px 32px;border-radius:10px;max-width:820px;position:relative;">
+    <div style="background:#fff;margin:40px auto;padding:28px 32px;border-radius:10px;max-width:860px;position:relative;">
         <button onclick="closeModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
         <h3 id="modalTitle" style="margin:0 0 20px;">Add Expected Vessel</h3>
         <form id="evForm" onsubmit="submitForm(event)">
@@ -43,20 +47,28 @@
                     <input type="number" step="0.01" id="fDraft" name="draft" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
                 </div>
                 <div>
-                    <label>AGT / TNK / CONS</label>
-                    <input type="text" id="fAgent" name="agent_tank_consignee" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
-                </div>
-                <div>
-                    <label>Cargo</label>
-                    <input type="text" id="fCargo" name="cargo_name" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
-                </div>
-                <div>
                     <label>MLA</label>
                     <input type="text" id="fMla" name="mla" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
                 </div>
+                <div style="grid-column:1/-1;">
+                    <label>Agents <small style="color:#888;">(comma-separated codes, e.g. ATL,SSP)</small></label>
+                    <input type="text" id="fAgents" name="agents" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label>Tanks <small style="color:#888;">(comma-separated codes, e.g. GBL,SLC)</small></label>
+                    <input type="text" id="fTanks" name="tanks" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label>Consignees <small style="color:#888;">(comma-separated codes, e.g. IOCL,BPCL)</small></label>
+                    <input type="text" id="fConsignees" name="consignees" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+                </div>
                 <div>
-                    <label>Quantity</label>
-                    <input type="number" step="0.001" id="fQty" name="quantity" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+                    <label>Cargo <small style="color:#888;">(comma-separated, e.g. TOLUENE,LPG)</small></label>
+                    <input type="text" id="fCargo" name="cargo_name" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+                </div>
+                <div>
+                    <label>Quantity <small style="color:#888;">(per cargo, comma-separated, e.g. 1890,1000)</small></label>
+                    <input type="text" id="fQty" name="quantity" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
                 </div>
                 <div>
                     <label>DDP</label>
@@ -129,6 +141,49 @@
         return d.toLocaleDateString('en-IN', {day:'2-digit', month:'2-digit', year:'numeric'});
     }
 
+    // Fixed palette — index maps cargo[i] ↔ qty[i] to the same colour
+    const PILL_COLORS = [
+        ['#1a6fa8','#dbeeff'], // blue
+        ['#1e8449','#d4efdf'], // green
+        ['#b7770d','#fef3cd'], // amber
+        ['#7d3c98','#f0e6ff'], // purple
+        ['#b03a2e','#fde8e8'], // red
+        ['#117a65','#d1f2eb'], // teal
+        ['#1f618d','#d6eaf8'], // navy
+        ['#784212','#fdebd0'], // brown
+    ];
+
+    function pillFormatter(cell) {
+        const v = cell.getValue();
+        if (!v) return '';
+        return v.split(',').map(s => s.trim()).filter(Boolean).map(s =>
+            `<span style="display:inline-block;background:#eaf4fe;border:1px solid #3498db;color:#1a6fa8;padding:1px 7px;border-radius:10px;font-size:10px;margin:1px 2px;white-space:nowrap;">${s}</span>`
+        ).join('');
+    }
+
+    function cargoPillFormatter(cell) {
+        const v = cell.getValue();
+        if (!v) return '';
+        return v.split(',').map((s, i) => {
+            const [fg, bg] = PILL_COLORS[i % PILL_COLORS.length];
+            return `<span style="display:inline-block;background:${bg};border:1px solid ${fg};color:${fg};padding:1px 7px;border-radius:10px;font-size:10px;margin:1px 2px;white-space:nowrap;">${s.trim()}</span>`;
+        }).join('');
+    }
+
+    function qtyPillFormatter(cell) {
+        const qty = cell.getValue();
+        const cargo = cell.getRow().getData().cargo_name || '';
+        if (!qty) return '';
+        const qtys   = qty.split(',');
+        const cargos = cargo.split(',');
+        return qtys.map((q, i) => {
+            // colour index based on cargo position — falls back to qty index
+            const ci = i < cargos.length ? i : i;
+            const [fg, bg] = PILL_COLORS[ci % PILL_COLORS.length];
+            return `<span style="display:inline-block;background:${bg};border:1px solid ${fg};color:${fg};padding:1px 7px;border-radius:10px;font-size:10px;margin:1px 2px;white-space:nowrap;">${q.trim()}</span>`;
+        }).join('');
+    }
+
     function actionFormatter(cell) {
         const row = cell.getRow().getData();
         if (row.doc_status === 'Moved to VCN') {
@@ -147,29 +202,32 @@
     function initTable() {
         table = new Tabulator("#table", {
             height: "calc(100vh - 160px)",
-            layout: "fitColumns",
+            layout: "fitData",
+            rowHeight: 36,
             columns: [
                 {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
-                {title: "No",            field: "id",                   width: 55, headerSort: true},
-                {title: "Terminal",      field: "terminal_name",        widthGrow: 1, headerFilter: "input"},
-                {title: "Vessel Name",   field: "vessel_name",          widthGrow: 2, headerFilter: "input"},
-                {title: "VIA No.",       field: "via_number",           width: 90},
-                {title: "LOA",           field: "loa",                  width: 70},
-                {title: "DFT",           field: "draft",                width: 65},
-                {title: "AGT/TNK/CONS",  field: "agent_tank_consignee", widthGrow: 1.5, headerFilter: "input"},
-                {title: "Cargo",         field: "cargo_name",           widthGrow: 1, headerFilter: "input"},
-                {title: "MLA",           field: "mla",                  width: 80},
-                {title: "Qty",           field: "quantity",             width: 80},
-                {title: "DDP",           field: "ddp",                  width: 100, formatter: fmtDate},
-                {title: "DOP",           field: "dop",                  width: 100, formatter: fmtDate},
-                {title: "ETA",           field: "eta",                  width: 130, formatter: fmtDatetime},
-                {title: "ATA",           field: "ata",                  width: 130, formatter: fmtDatetime},
-                {title: "LPC",           field: "lpc",                  width: 130, formatter: fmtDatetime},
-                {title: "DOC",           field: "doc",                  width: 130, formatter: fmtDatetime},
-                {title: "NOR",           field: "nor",                  width: 130, formatter: fmtDatetime},
-                {title: "Berth",         field: "berth_name",           widthGrow: 1},
-                {title: "Status",        field: "doc_status",           width: 110, headerFilter: "input"},
-                {title: "Action",        formatter: actionFormatter,    width: 170, headerSort: false}
+                {title: "No",          field: "id",           width: 55,  headerSort: true},
+                {title: "Terminal",    field: "terminal_name",width: 120},
+                {title: "Vessel Name", field: "vessel_name",  width: 160},
+                {title: "VIA No.",     field: "via_number",   width: 90},
+                {title: "LOA",         field: "loa",          width: 70},
+                {title: "DFT",         field: "draft",        width: 65},
+                {title: "Agents",      field: "agents",       width: 120, formatter: pillFormatter},
+                {title: "Tanks",       field: "tanks",        width: 120, formatter: pillFormatter},
+                {title: "Consignees",  field: "consignees",   width: 200, formatter: pillFormatter},
+                {title: "Cargo",       field: "cargo_name",   width: 160, formatter: cargoPillFormatter},
+                {title: "MLA",         field: "mla",          width: 60},
+                {title: "Qty",         field: "quantity",     width: 140, formatter: qtyPillFormatter},
+                {title: "DDP",         field: "ddp",          width: 100, formatter: fmtDate},
+                {title: "DOP",         field: "dop",          width: 100, formatter: fmtDate},
+                {title: "ETA",         field: "eta",          width: 140, formatter: fmtDatetime},
+                {title: "ATA",         field: "ata",          width: 140, formatter: fmtDatetime},
+                {title: "LPC",         field: "lpc",          width: 140, formatter: fmtDatetime},
+                {title: "DOC",         field: "doc",          width: 140, formatter: fmtDatetime},
+                {title: "NOR",         field: "nor",          width: 140, formatter: fmtDatetime},
+                {title: "Berth",       field: "berth_name",   width: 120},
+                {title: "Status",      field: "doc_status",   width: 110},
+                {title: "Action",      formatter: actionFormatter, width: 170, headerSort: false}
             ],
             pagination: true,
             paginationMode: "remote",
@@ -198,30 +256,37 @@
         document.getElementById('evModal').style.display = 'none';
     }
 
+    function _toDatetimeLocal(v) {
+        if (!v) return '';
+        return v.substring(0, 16).replace(' ', 'T');
+    }
+
     async function editRow(id) {
         const res = await fetch(`/api/module/EV01/data?page=1&size=9999`);
         const json = await res.json();
         const row = json.data.find(r => r.id === id);
         if (!row) return;
         document.getElementById('modalTitle').textContent = 'Edit Expected Vessel';
-        document.getElementById('fId').value = row.id || '';
-        document.getElementById('fTerminal').value  = row.terminal_name || '';
+        document.getElementById('fId').value         = row.id || '';
+        document.getElementById('fTerminal').value   = row.terminal_name || '';
         document.getElementById('fVesselName').value = row.vessel_name || '';
-        document.getElementById('fViaNumber').value = row.via_number || '';
-        document.getElementById('fLoa').value       = row.loa || '';
-        document.getElementById('fDraft').value     = row.draft || '';
-        document.getElementById('fAgent').value     = row.agent_tank_consignee || '';
-        document.getElementById('fCargo').value     = row.cargo_name || '';
-        document.getElementById('fMla').value       = row.mla || '';
-        document.getElementById('fQty').value       = row.quantity || '';
-        document.getElementById('fDdp').value       = row.ddp ? row.ddp.substring(0,10) : '';
-        document.getElementById('fDop').value       = row.dop ? row.dop.substring(0,10) : '';
-        document.getElementById('fEta').value       = row.eta ? row.eta.substring(0,16) : '';
-        document.getElementById('fAta').value       = row.ata ? row.ata.substring(0,16) : '';
-        document.getElementById('fLpc').value       = row.lpc ? row.lpc.substring(0,16) : '';
-        document.getElementById('fDoc').value       = row.doc ? row.doc.substring(0,16) : '';
-        document.getElementById('fNor').value       = row.nor ? row.nor.substring(0,16) : '';
-        document.getElementById('fBerth').value     = row.berth_name || '';
+        document.getElementById('fViaNumber').value  = row.via_number || '';
+        document.getElementById('fLoa').value        = row.loa || '';
+        document.getElementById('fDraft').value      = row.draft || '';
+        document.getElementById('fAgents').value     = row.agents || '';
+        document.getElementById('fTanks').value      = row.tanks || '';
+        document.getElementById('fConsignees').value = row.consignees || '';
+        document.getElementById('fCargo').value      = row.cargo_name || '';
+        document.getElementById('fMla').value        = row.mla || '';
+        document.getElementById('fQty').value        = row.quantity || '';
+        document.getElementById('fDdp').value        = row.ddp ? row.ddp.substring(0, 10) : '';
+        document.getElementById('fDop').value        = row.dop ? row.dop.substring(0, 10) : '';
+        document.getElementById('fEta').value        = _toDatetimeLocal(row.eta);
+        document.getElementById('fAta').value        = _toDatetimeLocal(row.ata);
+        document.getElementById('fLpc').value        = _toDatetimeLocal(row.lpc);
+        document.getElementById('fDoc').value        = _toDatetimeLocal(row.doc);
+        document.getElementById('fNor').value        = _toDatetimeLocal(row.nor);
+        document.getElementById('fBerth').value      = row.berth_name || '';
         document.getElementById('evModal').style.display = 'block';
     }
 
@@ -267,6 +332,30 @@
         if (result.error) { alert('Error: ' + result.error); return; }
         alert(`Moved to VCN successfully!\nVCN Document No: ${result.vcn_doc_num}`);
         table.setData('/api/module/EV01/data');
+    }
+
+    async function uploadPdf(input) {
+        const file = input.files[0];
+        if (!file) return;
+        input.value = '';
+        const fd = new FormData();
+        fd.append('file', file);
+        const btn = document.querySelector('button[onclick*="pdfInput"]');
+        if (btn) btn.textContent = '⏳ Uploading...';
+        try {
+            const res = await fetch('/api/module/EV01/upload', {method: 'POST', body: fd});
+            const result = await res.json();
+            if (result.error) {
+                alert('Upload failed: ' + result.error);
+            } else {
+                alert(`PDF imported successfully!\nTotal rows: ${result.total}  |  Inserted: ${result.inserted}  |  Updated: ${result.updated}`);
+                table.setData('/api/module/EV01/data');
+            }
+        } catch(e) {
+            alert('Upload error: ' + e.message);
+        } finally {
+            if (btn) btn.textContent = '⬆ Upload PDF';
+        }
     }
 
     document.addEventListener('keydown', function(e) {

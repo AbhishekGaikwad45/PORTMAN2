@@ -394,7 +394,7 @@ def get_invoice_lines_for_fdcn(invoice_ids):
                bl.service_type_id,
                CASE
                    WHEN bl.cargo_source_type IS NOT NULL THEN
-                       COALESCE(imp.cargo_name, exp.cargo_name, mbc.cargo_name, bl.service_description)
+                       COALESCE(imp.cargo_name, exp.cargo_name, bl.service_description)
                    ELSE NULL
                END AS cargo_name,
                CASE WHEN fl.id IS NOT NULL THEN fh.doc_number ELSE NULL END AS existing_fdcn_doc
@@ -409,8 +409,6 @@ def get_invoice_lines_for_fdcn(invoice_ids):
             ON bl.cargo_source_type = 'VCN_IMPORT' AND bl.cargo_source_id = imp.id
         LEFT JOIN vcn_export_cargo_declaration exp
             ON bl.cargo_source_type = 'VCN_EXPORT' AND bl.cargo_source_id = exp.id
-        LEFT JOIN mbc_customer_details mbc
-            ON bl.cargo_source_type = 'MBC' AND bl.cargo_source_id = mbc.id
         LEFT JOIN fdcn_lines fl ON fl.invoice_line_id = il.id
         LEFT JOIN fdcn_header fh ON fl.fdcn_id = fh.id
             AND fh.doc_status NOT IN ('Rejected', 'Cancelled')

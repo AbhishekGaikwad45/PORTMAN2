@@ -448,7 +448,6 @@ def _get_cargo_handling_details(invoice_id):
     Source: bill_lines.cargo_source_type / cargo_source_id
       VCN_IMPORT  -> vcn_cargo_declaration  -> ldud_anchorage for timing
       VCN_EXPORT  -> vcn_export_cargo_declaration -> ldud_anchorage for timing
-      MBC         -> mbc_customer_details   -> mbc_header dates
     """
     conn = get_db()
     cur = get_cursor(conn)
@@ -526,63 +525,6 @@ def _get_cargo_handling_details(invoice_id):
                     'end':               _ts(timing['end_dt']   if timing else None),
                 })
 
-            elif cstype == 'MBC':
-                cur.execute('''
-                    SELECT cd.mbc_id, cd.cargo_name, cd.bill_of_coastal_goods_no,
-                           cd.quantity, cd.customer_name,
-                           mh.doc_num, mh.mbc_name, mh.doc_date,
-                           mh.operation_type
-                    FROM mbc_customer_details cd
-                    JOIN mbc_header mh ON cd.mbc_id = mh.id
-                    WHERE cd.id = %s
-                ''', [csid])
-                decl = cur.fetchone()
-                if not decl:
-                    continue
-
-                mbc_id = decl['mbc_id']
-                op_type = (decl.get('operation_type') or '').lower()
-
-                def _ts(val):
-                    if not val:
-                        return ''
-                    s = str(val).strip()
-                    return (s[:10] + ' ' + s[11:16]).strip() if len(s) >= 16 else s[:10]
-
-                if 'export' in op_type:
-                    # Load port: loading_commenced → start, loading_completed → end
-                    cur.execute('''
-                        SELECT MIN(loading_commenced) AS start_dt,
-                               MAX(loading_completed)  AS end_dt
-                        FROM mbc_load_port_lines
-                        WHERE mbc_id = %s
-                    ''', [mbc_id])
-                else:
-                    # Discharge port: unloading_commenced → start, unloading_completed → end
-                    cur.execute('''
-                        SELECT MIN(unloading_commenced) AS start_dt,
-                               MAX(unloading_completed)  AS end_dt
-                        FROM mbc_discharge_port_lines
-                        WHERE mbc_id = %s
-                    ''', [mbc_id])
-
-                mbc_timing = cur.fetchone()
-
-                rows.append({
-                    'source_type':       'MBC',
-                    'source_id':         mbc_id,
-                    'vessel_name':       decl['mbc_name'] or '',
-                    'vcn_doc_num':       decl['doc_num'] or '',
-                    'consignee':         decl['customer_name'] or '',
-                    'cargo':             decl['cargo_name'] or '',
-                    'bl_no':             decl['bill_of_coastal_goods_no'] or '',
-                    'bl_date':           str(decl['doc_date'] or '')[:10],
-                    'quantity':          billed_qty,
-                    'uom':               'MT',
-                    'source_type_label': 'MBC',
-                    'start':             _ts(mbc_timing['start_dt'] if mbc_timing else None),
-                    'end':               _ts(mbc_timing['end_dt']   if mbc_timing else None),
-                })
 
         return rows
     except Exception as e:
@@ -1247,19 +1189,6 @@ def get_bill_vessel_details(bill_id):
                             if vrow and vrow['gt'] and str(vrow['gt']) not in grts:
                                 grts.append(str(vrow['gt']))
 
-                elif cstype == 'MBC':
-                    cur.execute('''
-                        SELECT cd.cargo_name, mh.mbc_name
-                        FROM mbc_customer_details cd
-                        JOIN mbc_header mh ON mh.id = cd.mbc_id
-                        WHERE cd.id = %s
-                    ''', [csid])
-                    row = cur.fetchone()
-                    if row:
-                        if row['mbc_name'] and row['mbc_name'] not in vessel_names:
-                            vessel_names.append(row['mbc_name'])
-                        if row['cargo_name'] and row['cargo_name'] not in commodities:
-                            commodities.append(row['cargo_name'])
 
             result['vessel_name']      = ', '.join(vessel_names)
             result['vessel_call_no']   = ', '.join(vcn_docs)
@@ -1309,16 +1238,6 @@ def get_bill_vessel_details(bill_id):
                     result['commodity']      = cargo['cargo_name'] or ''
                     result['cargo_quantity'] = cargo['bl_quantity']
 
-            elif src_type == 'MBC' and src_id:
-                cur.execute('''
-                    SELECT mbc_name, cargo_name, bl_quantity
-                    FROM mbc_header WHERE id = %s
-                ''', [src_id])
-                row = cur.fetchone()
-                if row:
-                    result['vessel_name']    = row['mbc_name'] or ''
-                    result['commodity']      = row['cargo_name'] or ''
-                    result['cargo_quantity'] = row['bl_quantity']
 
     except Exception:
         pass

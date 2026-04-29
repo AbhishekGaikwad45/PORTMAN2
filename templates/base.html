@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}PORTBIRD DPPL{% endblock %}</title>
+    <title>{% block title %}PORTBIRD JNPA{% endblock %}</title>
     <link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
@@ -215,6 +215,10 @@
                         <span class="code">VC01</span>
                         <span class="name">Vessel Creation</span>
                     </div>
+                    <div class="module-item" onclick="goToModule('EV01', 'Expected Vessels')">
+                        <span class="code">EV01</span>
+                        <span class="name">Expected Vessels</span>
+                    </div>
                     <div class="module-item" onclick="goToModule('VCN01', 'Vessel Call Number')">
                         <span class="code">VCN01</span>
                         <span class="name">Vessel Call Number</span>
@@ -233,10 +237,6 @@
                     <div class="module-item" onclick="goToModule('LDUD01', 'Loading Unloading')">
                         <span class="code">LDUD01</span>
                         <span class="name">Loading Unloading</span>
-                    </div>
-                    <div class="module-item" onclick="goToModule('MBC01', 'MBC Operation')">
-                        <span class="code">MBC01</span>
-                        <span class="name">MBC Operation</span>
                     </div>
                     <div class="module-item" onclick="goToModule('LUEU01', 'Load Unload Equipment Utilization')">
                         <span class="code">LUEU01</span>
@@ -271,10 +271,6 @@
                     <div class="module-item" onclick="goToModule('VCDS01', 'VCN Doc Series')">
                         <span class="code">VCDS01</span>
                         <span class="name">VCN Doc Series</span>
-                    </div>
-                    <div class="module-item" onclick="goToModule('MBCDS01', 'MBC Doc Series')">
-                        <span class="code">MBCDS01</span>
-                        <span class="name">MBC Doc Series</span>
                     </div>
                     <div class="module-item" onclick="goToModule('INVDS01', 'Invoice Doc Series')">
                         <span class="code">INVDS01</span>
@@ -340,21 +336,6 @@
                 </div>
             </div>
 
-            <!-- Reports Accordion -->
-            <div class="accordion-section reports">
-                <div class="accordion-header" onclick="toggleAccordion(this)">
-                    <img src="{{ url_for('static', filename='img/reports.png') }}" alt="Reports" class="icon">
-                    <span>Reports</span>
-                    <span class="arrow">&#9654;</span>
-                </div>
-                <div class="accordion-content">
-                    <div class="module-item" onclick="goToModule('RP01', 'Reports')">
-                        <span class="code">RP01</span>
-                        <span class="name">Reports</span>
-                    </div>
-                </div>
-            </div>
-
             <!-- Masters Accordion -->
             <div class="accordion-section masters">
                 <div class="accordion-header" onclick="toggleAccordion(this)">
@@ -407,25 +388,29 @@
                         <span class="code">VEM01</span>
                         <span class="name">Equipment Master</span>
                     </div>
-                    <div class="module-item" onclick="goToModule('VBM01', 'Barge Master')">
-                        <span class="code">VBM01</span>
-                        <span class="name">Barge Master</span>
-                    </div>
                     <div class="module-item" onclick="goToModule('VSDM01', 'Vessel Stevedore Master')">
                         <span class="code">VSDM01</span>
                         <span class="name">Vessel Stevedore Master</span>
-                    </div>
-                    <div class="module-item" onclick="goToModule('MBCM01', 'MBC Master')">
-                        <span class="code">MBCM01</span>
-                        <span class="name">MBC Master</span>
                     </div>
                     <div class="module-item" onclick="goToModule('PBM01', 'Port Berth Master')">
                         <span class="code">PBM01</span>
                         <span class="name">Port Berth Master</span>
                     </div>
-                    <div class="module-item" onclick="goToModule('PPL01', 'Port Payloader Master')">
-                        <span class="code">PPL01</span>
-                        <span class="name">Port Payloader Master</span>
+                    <div class="module-item" onclick="goToModule('TRM01', 'Terminal Master')">
+                        <span class="code">TRM01</span>
+                        <span class="name">Terminal Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('TKM01', 'Tank Master')">
+                        <span class="code">TKM01</span>
+                        <span class="name">Tank Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('PLM01', 'Pipeline Master')">
+                        <span class="code">PLM01</span>
+                        <span class="name">Pipeline Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('PLTM01', 'Pipeline-Terminal Mapping')">
+                        <span class="code">PLTM01</span>
+                        <span class="name">Pipeline-Terminal Mapping</span>
                     </div>
                     <div class="module-item" onclick="goToModule('CRM01', 'Conveyor Route Master')">
                         <span class="code">CRM01</span>

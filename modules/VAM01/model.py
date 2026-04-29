@@ -3,7 +3,7 @@ from database import get_db, get_cursor
 TABLE = 'vessel_agents'
 
 FIELDS = [
-    'name', 'sap_customer_code', 'company_code', 'gl_code',
+    'agent_code', 'name', 'sap_customer_code', 'company_code', 'gl_code',
     'gstin', 'gst_state_code', 'gst_state_name', 'pan', 'cin',
     'billing_address', 'city', 'pincode',
     'contact_person', 'contact_email', 'contact_phone',

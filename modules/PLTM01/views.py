@@ -66,3 +66,19 @@ def get_pipelines():
 @login_required
 def get_terminals():
     return jsonify(model.get_terminals())
+
+@bp.route('/api/module/PLTM01/matrix')
+@login_required
+def get_matrix():
+    pipelines, terminals, mappings = model.get_matrix_data()
+    return jsonify({'pipelines': pipelines, 'terminals': terminals, 'mappings': mappings})
+
+@bp.route('/api/module/PLTM01/toggle', methods=['POST'])
+@login_required
+def toggle():
+    perms = get_perms()
+    if not perms.get('can_add') and not perms.get('can_delete'):
+        return jsonify({'error': 'No permission'}), 403
+    data = request.json or {}
+    action = model.toggle_mapping(data['pipeline_id'], data['terminal_id'])
+    return jsonify({'success': True, 'action': action})
