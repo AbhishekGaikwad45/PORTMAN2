@@ -370,15 +370,15 @@ def save_vessel_operation(data):
     cur = get_cursor(conn)
     if data.get('id'):
         cur.execute('''UPDATE ldud_vessel_operations SET hold_name=%s, start_time=%s, end_time=%s,
-                      cargo_name=%s, quantity=%s WHERE id=%s''',
+                      cargo_name=%s, quantity=%s, parcel_id=%s WHERE id=%s''',
                    [data.get('hold_name'), data.get('start_time'), data.get('end_time'),
-                    data.get('cargo_name'), data.get('quantity'), data['id']])
+                    data.get('cargo_name'), data.get('quantity'), data.get('parcel_id'), data['id']])
         row_id = data['id']
     else:
-        cur.execute('''INSERT INTO ldud_vessel_operations (ldud_id, hold_name, start_time, end_time, cargo_name, quantity)
-                      VALUES (%s, %s, %s, %s, %s, %s) RETURNING id''',
+        cur.execute('''INSERT INTO ldud_vessel_operations (ldud_id, hold_name, start_time, end_time, cargo_name, quantity, parcel_id)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id''',
                    [data['ldud_id'], data.get('hold_name'), data.get('start_time'), data.get('end_time'),
-                    data.get('cargo_name'), data.get('quantity')])
+                    data.get('cargo_name'), data.get('quantity'), data.get('parcel_id')])
         row_id = cur.fetchone()['id']
     conn.commit()
     conn.close()

@@ -662,7 +662,7 @@
             const opDate = normalizeDate(r.start_time || r.end_time);
             const key = opDate || '__NO_DATE__';
             if (!grouped[key]) {
-                const row = {op_date: opDate, __cellIds: {}};
+                const row = {op_date: opDate, parcel_id: null, __cellIds: {}};
                 holdDefs.forEach(d => {
                     row[d.field] = '';
                     row.__cellIds[d.field] = [];
@@ -675,6 +675,8 @@
             const current = parseFloat(row[def.field] || 0);
             row[def.field] = (current + (Number.isFinite(qty) ? qty : 0));
             row.__cellIds[def.field].push(r.id);
+            // Carry parcel_id from any cell that has one (last-wins; all cells on a date should share same parcel)
+            if (r.parcel_id != null) row.parcel_id = r.parcel_id;
         });
 
         return Object.values(grouped).sort((a, b) => (a.op_date || '').localeCompare(b.op_date || ''));
@@ -812,7 +814,8 @@
                             start_time: opDate,
                             end_time: null,
                             cargo_name: def.cargo_name || null,
-                            quantity: parsedQty
+                            quantity: parsedQty,
+                            parcel_id: data.parcel_id != null ? data.parcel_id : null
                         };
 
                         if (ids.length > 0) {
@@ -1412,6 +1415,18 @@
             });
         }
 
+        // Fetch parcels for this VCN so we can show a Parcel picker in the vessel-ops sub-table
+        const parcelOptions = {};
+        if (vcnId) {
+            try {
+                const parcelRes = await fetch(`/api/module/VCN01/parcels/${vcnId}`);
+                const parcelList = await parcelRes.json();
+                parcelList.forEach(p => {
+                    parcelOptions[p.id] = `${p.parcel_no || ('#'+p.id)} — ${p.cargo_name || ''}${p.consigner_name ? ' / ' + p.consigner_name : ''}`;
+                });
+            } catch (e) { /* parcels unavailable — leave empty, picker shows nothing */ }
+        }
+
         const delayOptions = {};
         delayTypes.forEach(d => { delayOptions[d] = d; });
 
@@ -1775,6 +1790,14 @@
                 cellEdited: () => markDirty('vessel_ops'),
                 columns: [
                     dateCol,
+                    {title: "Parcel", field: "parcel_id", widthGrow: 1.4,
+                        editor: canEdit ? "list" : false,
+                        editorParams: {values: parcelOptions, autocomplete: true, allowEmpty: true},
+                        formatter: function(cell) {
+                            const v = cell.getValue();
+                            return v != null && parcelOptions[v] ? parcelOptions[v] : '';
+                        }
+                    },
                     ...vesselOpsHoldColumnGroups,
                     totalDayQtyCol,
                     canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, hozAlign: "center", headerSort: false,
