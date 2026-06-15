@@ -970,11 +970,11 @@
         subContainer.innerHTML = `
             <div class="sub-section">
                 <div class="sub-section-header" data-section="consigners">
-                    <span>Consigner (Customer Details) — IGM Lines</span>
+                    <span>Parcels</span>
                     <div class="sub-section-actions">
                         ${canAct ? `<button class="btn-sub-add" style="background:#8e44ad;" onclick="document.getElementById('igmFileInput').click()">⬆ IGM PDF</button>` : ''}
                         <button id="igmViewBtn-${vcnId}" class="btn-sub-save" style="background:#2b6cb0;${data.has_igm_doc ? '' : 'display:none;'}" onclick="window.open('/api/module/VCN01/igm_doc/${vcnId}', '_blank')">📄 View IGM</button>
-                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('consigners', ${vcnId})">+ Add Line</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('consigners', ${vcnId})">+ Add Parcel</button>` : ''}
                         ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('consigners', ${vcnId})">Save</button>` : ''}
                     </div>
                 </div>
@@ -1073,6 +1073,7 @@
             columnDefaults: { headerSort: false },
             cellEdited: () => markDirty('consigners'),
             columns: [
+                {title: "Parcel No", field: "parcel_no", width: 130, headerSort: false},
                 {title: "Ln", field: "igm_line_no", width: 70, widthGrow: 0, hozAlign: "center",
                     editor: canEdit ? "input" : false
                 },
