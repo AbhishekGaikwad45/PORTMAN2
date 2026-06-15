@@ -162,7 +162,10 @@ def save_consigner():
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
     row_id = model.save_consigner(request.json)
-    return jsonify({'success': True, 'id': row_id})
+    parcel = model.get_parcel(row_id) or {}
+    return jsonify({'success': True, 'id': row_id,
+                    'parcel_no': parcel.get('parcel_no'),
+                    'parcel_seq': parcel.get('parcel_seq')})
 
 @bp.route('/api/module/VCN01/consigners/delete', methods=['POST'])
 @login_required

@@ -134,6 +134,16 @@ def get_parcels(vcn_id):
     conn.close()
     return [dict(r) for r in rows]
 
+
+def get_parcel(row_id):
+    """Single parcel row — used to return the generated parcel_no after a save."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT id, parcel_no, parcel_seq FROM vcn_consigners WHERE id=%s', [row_id])
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
 # back-compat alias — existing callers/endpoints use get_consigners
 get_consigners = get_parcels
 

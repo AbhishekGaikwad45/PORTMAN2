@@ -1256,6 +1256,8 @@
             if (type === 'export_cargo' && defaultUom) {
                 newRow.quantity_uom = defaultUom;
             }
+            if (data.parcel_no) newRow.parcel_no = data.parcel_no;
+            if (data.parcel_seq != null) newRow.parcel_seq = data.parcel_seq;
             subTables[vcnId][type].addRow(newRow, false);
         }
     }
@@ -1277,6 +1279,10 @@
                 const result = await res.json();
                 if (!result.success && result.error) {
                     return {success: false, error: result.error};
+                }
+                // reflect the server-generated parcel number back onto the row
+                if (type === 'consigners' && result.parcel_no) {
+                    row.update({parcel_no: result.parcel_no, parcel_seq: result.parcel_seq});
                 }
                 return {success: true};
             } catch (err) {
