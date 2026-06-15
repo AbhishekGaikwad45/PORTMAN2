@@ -26,7 +26,6 @@
     addToRecent('VC01', 'Vessel Creation');
 
     let table;
-    let vesselTypes = [];
     let vesselCategories = [];
     let vesselFlags = [];
     let dirtyRowIds = new Set();  // Track by row ID instead of position
@@ -46,13 +45,11 @@
     }
 
     async function loadMasterData() {
-        const [typesRes, categoriesRes, flagsRes, configRes] = await Promise.all([
-            fetch('/api/module/VTM01/all'),
+        const [categoriesRes, flagsRes, configRes] = await Promise.all([
             fetch('/api/module/VCM01/all'),
             fetch('/api/module/VFM01/all'),
             fetch('/admin/api/config/VC01')
         ]);
-        vesselTypes = await typesRes.json();
         vesselCategories = await categoriesRes.json();
         vesselFlags = await flagsRes.json();
         moduleConfig = await configRes.json();
@@ -142,16 +139,15 @@
             {title: "IMO No", field: "imo_num", editor: canEdit ? "input" : false, width: 100},
             {title: "Call Sign", field: "call_sign", editor: canEdit ? "input" : false, width: 100},
             {title: "MMSI No", field: "mmsi_num", editor: canEdit ? "input" : false, width: 100},
-            {title: "Vessel Type", field: "vessel_type_name", editor: canEdit ? "list" : false, editorParams: {values: vesselTypes, autocomplete: true, allowEmpty: true}, width: 130},
             {title: "Vessel Category", field: "vessel_category_name", editor: canEdit ? "list" : false, editorParams: {values: vesselCategories, autocomplete: true, allowEmpty: true}, width: 160},
             {title: "Flag", field: "nationality", editor: canEdit ? "list" : false, editorParams: {values: vesselFlags, autocomplete: true, allowEmpty: true}, width: 110},
             {title: "GT", field: "gt", editor: canEdit ? "number" : false, width: 90, hozAlign: "right"},
-            {title: "DWT", field: "dwt", editor: canEdit ? "number" : false, width: 90, hozAlign: "right"},
+            {title: "Displacement", field: "displacement", editor: canEdit ? "number" : false, width: 110, hozAlign: "right"},
             {title: "LOA", field: "loa", editor: canEdit ? "number" : false, width: 80, hozAlign: "right"},
             {title: "Beam", field: "beam", editor: canEdit ? "number" : false, width: 70, hozAlign: "right"},
-            {title: "Nos of Hold", field: "no_of_holds", editor: canEdit ? "number" : false, width: 100, hozAlign: "right"},
-            {title: "No. of Cranes", field: "num_cranes", editor: canEdit ? "number" : false, width: 110, hozAlign: "right", editorParams: {min: 0, step: 1}},
+            {title: "PBL", field: "pbl", editor: canEdit ? "number" : false, width: 80, hozAlign: "right", editorParams: {step: 0.01}, headerTooltip: "Parallel Body Length"},
             {title: "Year of Built", field: "year_of_built", editor: canEdit ? "number" : false, width: 100, hozAlign: "center"},
+            {title: "Remarks", field: "remarks", editor: canEdit ? "input" : false, editorParams: {maxlength: 200}, width: 200},
             {title: "Created Date", field: "created_date", width: 110},
             {title: "Doc Status", field: "doc_status",
                 editor: (canEdit && canEditStatus) ? "select" : false,

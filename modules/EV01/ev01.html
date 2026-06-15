@@ -27,8 +27,10 @@
             <input type="hidden" id="fId" name="id">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
                 <div>
-                    <label>Terminal</label>
-                    <input type="text" id="fTerminal" name="terminal_name" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+                    <label>Terminal <small style="color:#888;">(shift vessel to another terminal)</small></label>
+                    <select id="fTerminal" name="terminal_name" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+                        <option value="">-- Select Terminal --</option>
+                    </select>
                 </div>
                 <div>
                     <label>Vessel Name</label>
@@ -102,12 +104,33 @@
                     <label>Berth</label>
                     <input type="text" id="fBerth" name="berth_name" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
                 </div>
+                <div style="grid-column:1/-1;">
+                    <label>Remarks <small style="color:#888;">(max 200 characters)</small></label>
+                    <textarea id="fRemarks" name="remarks" maxlength="200" rows="2" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;resize:vertical;"></textarea>
+                </div>
             </div>
             <div style="margin-top:20px;text-align:right;">
                 <button type="button" onclick="closeModal()" style="padding:8px 20px;margin-right:10px;border:1px solid #ccc;border-radius:4px;cursor:pointer;background:#f5f5f5;">Cancel</button>
                 <button type="submit" class="btn btn-save" style="padding:8px 20px;">Save</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Move to Other Terminal modal -->
+<div id="terminalModal" onclick="if(event.target===this) closeTerminalModal()" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.45);z-index:1002;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;padding:24px 28px;max-width:440px;width:92%;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 6px;font-size:16px;">Move to Other Terminal</h3>
+        <p style="margin:0 0 16px;font-size:12px;color:#718096;">The vessel will be closed here and will not come to VCN.</p>
+        <input type="hidden" id="tmEvId">
+        <label style="font-size:13px;">Terminal</label>
+        <select id="tmTerminal" style="width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:4px;margin-top:4px;">
+            <option value="">-- Select Terminal --</option>
+        </select>
+        <div style="margin-top:20px;text-align:right;">
+            <button type="button" onclick="closeTerminalModal()" style="padding:7px 18px;margin-right:8px;border:1px solid #cbd5e0;border-radius:4px;cursor:pointer;background:#f7fafc;">Cancel</button>
+            <button type="button" onclick="confirmMoveToTerminal()" class="btn btn-save" style="padding:7px 18px;">Close Vessel</button>
+        </div>
     </div>
 </div>
 
@@ -151,6 +174,48 @@
 <script>
     addToRecent('EV01', 'Expected Vessels');
     let table;
+    let terminalNames = [];
+
+    async function loadTerminals() {
+        try {
+            const res = await fetch('/api/module/TRM01/all');
+            terminalNames = await res.json();
+        } catch (e) { terminalNames = []; }
+        const opts = terminalNames.map(t => `<option value="${t}">${t}</option>`).join('');
+        ['fTerminal', 'tmTerminal'].forEach(idAttr => {
+            const sel = document.getElementById(idAttr);
+            if (sel) sel.innerHTML = sel.querySelector('option').outerHTML + opts;
+        });
+    }
+
+    function openTerminalModal(id) {
+        const row = table.getRows().find(r => r.getData().id === id);
+        document.getElementById('tmEvId').value = id;
+        const sel = document.getElementById('tmTerminal');
+        // preselect the vessel's current terminal if it's in the list
+        sel.value = (row && terminalNames.includes(row.getData().terminal_name)) ? row.getData().terminal_name : '';
+        document.getElementById('terminalModal').style.display = 'flex';
+    }
+
+    function closeTerminalModal() {
+        document.getElementById('terminalModal').style.display = 'none';
+    }
+
+    async function confirmMoveToTerminal() {
+        const id = document.getElementById('tmEvId').value;
+        const terminal = document.getElementById('tmTerminal').value;
+        if (!terminal) { alert('Please select a terminal.'); return; }
+        const res = await fetch(`/api/module/EV01/move_to_terminal/${id}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({terminal_name: terminal})
+        });
+        const result = await res.json();
+        if (result.error) { alert('Error: ' + result.error); return; }
+        closeTerminalModal();
+        alert(`Vessel closed — moved to ${terminal}.`);
+        table.setData('/api/module/EV01/data');
+    }
 
     const permissions = {
         can_edit:   {{ permissions.can_edit|default(0) }},
@@ -222,12 +287,16 @@
         if (row.doc_status === 'Moved to VCN') {
             return `<span style="color:#888;font-size:12px;">Moved to VCN (${row.vcn_id || ''})</span>`;
         }
+        if (row.doc_status === 'Closed - Other Terminal') {
+            return `<span style="color:#888;font-size:12px;">Closed — ${row.terminal_name || 'Other Terminal'}</span>`;
+        }
         let html = '';
         if (permissions.can_edit) {
             html += `<button onclick="editRow(${row.id})" style="margin-right:4px;padding:2px 8px;font-size:12px;cursor:pointer;border:1px solid #4a90e2;color:#4a90e2;background:#fff;border-radius:3px;">Edit</button>`;
         }
         if (row.doc_status === 'Pending') {
-            html += `<button onclick="moveToVcn(${row.id})" style="padding:2px 8px;font-size:12px;cursor:pointer;border:1px solid #27ae60;color:#27ae60;background:#fff;border-radius:3px;">Move to VCN</button>`;
+            html += `<button onclick="moveToVcn(${row.id})" style="margin-right:4px;padding:2px 8px;font-size:12px;cursor:pointer;border:1px solid #27ae60;color:#27ae60;background:#fff;border-radius:3px;">Move to VCN</button>`;
+            html += `<button onclick="openTerminalModal(${row.id})" style="padding:2px 8px;font-size:12px;cursor:pointer;border:1px solid #d69e2e;color:#b7770d;background:#fff;border-radius:3px;">Other Terminal</button>`;
         }
         return html;
     }
@@ -238,17 +307,16 @@
             layout: "fitData",
             rowHeight: 36,
             columns: [
-                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
-                {title: "No",          field: "id",           width: 55,  headerSort: true},
-                {title: "Terminal",    field: "terminal_name",width: 120},
-                {title: "Vessel Name", field: "vessel_name",  width: 160},
-                {title: "VIA No.",     field: "via_number",   width: 90},
-                {title: "LOA",         field: "loa",          width: 70},
-                {title: "DFT",         field: "draft",        width: 65},
-                {title: "Agents",      field: "agents",       width: 120, formatter: pillFormatter},
-                {title: "Tanks",       field: "tanks",        width: 120, formatter: pillFormatter},
-                {title: "Consignees",  field: "consignees",   width: 200, formatter: pillFormatter},
-                {title: "Cargo",       field: "cargo_name",   width: 160, formatter: cargoPillFormatter},
+                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40, frozen: true},
+                {title: "VIA No.",     field: "via_number",   width: 90,  frozen: true},
+                {title: "Terminal",    field: "terminal_name",width: 120, frozen: true},
+                {title: "Vessel Name", field: "vessel_name",  width: 160, frozen: true},
+                {title: "LOA",         field: "loa",          width: 70,  frozen: true},
+                {title: "DFT",         field: "draft",        width: 65,  frozen: true},
+                {title: "Agents",      field: "agents",       width: 120, formatter: pillFormatter, frozen: true},
+                {title: "Tanks",       field: "tanks",        width: 120, formatter: pillFormatter, frozen: true},
+                {title: "Consignees",  field: "consignees",   width: 200, formatter: pillFormatter, frozen: true},
+                {title: "Cargo",       field: "cargo_name",   width: 160, formatter: cargoPillFormatter, frozen: true},
                 {title: "MLA",         field: "mla",          width: 60},
                 {title: "Qty",         field: "quantity",     width: 140, formatter: qtyPillFormatter},
                 {title: "DDP",         field: "ddp",          width: 100, formatter: fmtDate},
@@ -259,6 +327,7 @@
                 {title: "DOC",         field: "doc",          width: 140, formatter: fmtDatetime},
                 {title: "NOR",         field: "nor",          width: 140, formatter: fmtDatetime},
                 {title: "Berth",       field: "berth_name",   width: 120},
+                {title: "Remarks",     field: "remarks",      width: 200},
                 {title: "Status",      field: "doc_status",   width: 110},
                 {title: "Action",      formatter: actionFormatter, width: 170, headerSort: false}
             ],
@@ -301,7 +370,12 @@
         if (!row) return;
         document.getElementById('modalTitle').textContent = 'Edit Expected Vessel';
         document.getElementById('fId').value         = row.id || '';
-        document.getElementById('fTerminal').value   = row.terminal_name || '';
+        const termSel = document.getElementById('fTerminal');
+        // keep a terminal that isn't in the master list (e.g. parsed from PDF) selectable
+        if (row.terminal_name && !terminalNames.includes(row.terminal_name)) {
+            termSel.insertAdjacentHTML('beforeend', `<option value="${row.terminal_name}">${row.terminal_name}</option>`);
+        }
+        termSel.value = row.terminal_name || '';
         document.getElementById('fVesselName').value = row.vessel_name || '';
         document.getElementById('fViaNumber').value  = row.via_number || '';
         document.getElementById('fLoa').value        = row.loa || '';
@@ -320,6 +394,7 @@
         document.getElementById('fDoc').value        = _toDatetimeLocal(row.doc);
         document.getElementById('fNor').value        = _toDatetimeLocal(row.nor);
         document.getElementById('fBerth').value      = row.berth_name || '';
+        document.getElementById('fRemarks').value    = row.remarks || '';
         document.getElementById('evModal').style.display = 'block';
     }
 
@@ -502,9 +577,10 @@
     }
 
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') { closeModal(); closeRecoModal(); }
+        if (e.key === 'Escape') { closeModal(); closeRecoModal(); closeTerminalModal(); }
     });
 
     initTable();
+    loadTerminals();
 </script>
 {% endblock %}

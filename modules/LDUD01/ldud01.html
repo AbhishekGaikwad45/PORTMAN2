@@ -604,12 +604,11 @@
     }
 
     async function loadMasterData() {
-        const [vcnRes, delayRes, cargoRes, ancRes, holdsRes, equipRes, configRes] = await Promise.all([
+        const [vcnRes, delayRes, cargoRes, ancRes, equipRes, configRes] = await Promise.all([
             fetch('/api/module/LDUD01/vcn_list'),
             fetch('/api/module/VDM01/all'),
             fetch('/api/module/VCG01/names'),
             fetch('/api/module/VANM01/all'),
-            fetch('/api/module/VHO01/all'),
             fetch('/api/module/VEM01/all'),
             fetch('/admin/api/config/LDUD01')
         ]);
@@ -617,7 +616,7 @@
         delayTypes = await delayRes.json();
         cargoNames = await cargoRes.json();
         anchorageNames = await ancRes.json();
-        holdMasterList = await holdsRes.json();
+        holdMasterList = [];   // VHO01 (Vessel Hold Master) removed — no holds for liquid berths
         equipmentList = await equipRes.json();
         moduleConfig = await configRes.json();
         initFilterConfig();

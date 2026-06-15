@@ -110,8 +110,9 @@ def delete_header(row_id):
     conn.close()
 
 # Consigner (customer details) sub-table — one row per IGM (FORM III) line
+# vessel agent is captured on the header (vessel_agent_name), not per line
 _CONSIGNER_COLS = ['igm_line_no', 'bl_no', 'bl_date', 'cargo_name', 'quantity',
-                   'consigner_name', 'importer_name', 'agent_name',
+                   'consigner_name', 'importer_name',
                    'pipeline_name', 'unload_terminal']
 
 def get_consigners(vcn_id):

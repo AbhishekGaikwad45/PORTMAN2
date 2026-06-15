@@ -21,7 +21,8 @@ def get_next_doc_num():
     next_num = (result or 0) + 1
     return f"VM{next_num}"
 
-INTEGER_FIELDS = {'gt', 'dwt', 'loa', 'beam', 'no_of_holds', 'num_cranes', 'year_of_built'}
+# Numeric fields whose empty-string input should be stored as NULL
+INTEGER_FIELDS = {'gt', 'displacement', 'loa', 'beam', 'pbl', 'year_of_built'}
 
 def save_data(data):
     conn = get_db()

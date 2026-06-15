@@ -95,6 +95,26 @@ def upload_commit():
     return jsonify({'success': True, **result})
 
 
+@bp.route('/api/module/EV01/move_to_terminal/<int:ev_id>', methods=['POST'])
+@login_required
+def move_to_terminal(ev_id):
+    """Close an expected vessel that will be handled at another terminal —
+    no VCN is created; the row is marked Closed."""
+    perms = get_perms()
+    if not perms.get('can_edit'):
+        return jsonify({'error': 'No permission to edit'}), 403
+    ev = model.get_by_id(ev_id)
+    if not ev:
+        return jsonify({'error': 'Record not found'}), 404
+    if ev.get('doc_status') != 'Pending':
+        return jsonify({'error': 'Only pending vessels can be moved'}), 400
+    terminal = (request.json or {}).get('terminal_name')
+    if not terminal:
+        return jsonify({'error': 'Terminal is required'}), 400
+    model.close_to_other_terminal(ev_id, terminal)
+    return jsonify({'success': True, 'terminal_name': terminal})
+
+
 @bp.route('/api/module/EV01/move_to_vcn/<int:ev_id>', methods=['POST'])
 @login_required
 def move_to_vcn(ev_id):
@@ -109,6 +129,7 @@ def move_to_vcn(ev_id):
         'doc_status':        'Draft',
         'vessel_master_doc': model.get_vessel_master_doc(ev.get('vessel_name')),
         'vessel_name':       ev.get('vessel_name'),
+        'via_number':        ev.get('via_number'),
         'loa':               ev.get('loa'),
         'draft':             ev.get('draft'),
         'vessel_agent_name': ev.get('agents'),

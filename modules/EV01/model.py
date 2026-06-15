@@ -84,22 +84,31 @@ def _vessel_display_name(name):
     return ' '.join(re.sub(r'\[.*?\]', ' ', name or '').split())
 
 
+def _norm_no_mt(name):
+    """Normalized vessel name with a leading 'MT' prefix stripped, so
+    'MT SC GARNET' and 'SC GARNET' match (auto-created masters carry 'MT')."""
+    norm = normalize_vessel_name(name)
+    return norm[3:] if norm.startswith('MT ') else norm
+
+
 def _ensure_vessel(vessel_name, loa, cur, username):
     """Make sure the vessel exists in the VC01 Vessel Master (vessels table).
 
-    Inserts a Pending master record if missing; backfills LOA when the
-    master has none. Never overwrites existing master data.
+    Auto-created masters are prefixed with 'MT' (motor tanker). Inserts a
+    Pending master record if missing; backfills LOA when the master has none.
+    Never overwrites existing master data.
     """
     display = _vessel_display_name(vessel_name)
-    norm = normalize_vessel_name(display)
-    if not norm:
+    key = _norm_no_mt(display)
+    if not key:
         return
     cur.execute('SELECT id, vessel_name, loa FROM vessels')
     for r in cur.fetchall():
-        if normalize_vessel_name(r['vessel_name']) == norm:
+        if _norm_no_mt(r['vessel_name']) == key:
             if loa and not r['loa']:
                 cur.execute('UPDATE vessels SET loa=%s WHERE id=%s', [loa, r['id']])
             return
+    mt_name = display if display.upper().startswith('MT ') else f'MT {display}'
     cur.execute(
         "SELECT MAX(CAST(SUBSTR(doc_num, 3) AS INTEGER)) AS max FROM vessels WHERE doc_num LIKE %s",
         ['VM%']
@@ -108,7 +117,7 @@ def _ensure_vessel(vessel_name, loa, cur, username):
     cur.execute(
         "INSERT INTO vessels (doc_num, doc_status, vessel_name, loa, created_by, created_date) "
         "VALUES (%s, 'Pending', %s, %s, %s, %s)",
-        [f'VM{nxt}', display, loa, username,
+        [f'VM{nxt}', mt_name, loa, username,
          datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
     )
 
@@ -356,15 +365,15 @@ def get_vessel_master_doc(vessel_name):
 
     Same format the VCN01 vessel dropdown uses (see VCN01 model.get_vessels).
     """
-    norm = normalize_vessel_name(vessel_name)
-    if not norm:
+    key = _norm_no_mt(vessel_name)
+    if not key:
         return None
     conn = get_db()
     cur = get_cursor(conn)
     try:
         cur.execute('SELECT doc_num, vessel_name FROM vessels')
         for r in cur.fetchall():
-            if normalize_vessel_name(r['vessel_name']) == norm:
+            if _norm_no_mt(r['vessel_name']) == key:
                 return f"{r['doc_num']}/{r['vessel_name']}"
     finally:
         conn.close()
@@ -384,7 +393,6 @@ def build_consigner_rows(ev):
         return [s.strip() for s in (ev.get(key) or '').split(',')
                 if s.strip() and not re.fullmatch(r'-+', s.strip())]
 
-    agents = _split('agents')
     tanks = _split('tanks')
     consignees = _split('consignees')
     cargos = _split('cargo_name')
@@ -399,7 +407,13 @@ def build_consigner_rows(ev):
         return lst[0]
 
     def _qty_for(j):
-        return qtys[j] if j < len(qtys) else None
+        if j >= len(qtys):
+            return None
+        raw = qtys[j]
+        try:                       # cap at 3 decimal places, drop trailing zeros
+            return f'{round(float(raw), 3):.3f}'.rstrip('0').rstrip('.')
+        except (TypeError, ValueError):
+            return raw
 
     def _cargo_items(i):
         """[(cargo, qty), ...] for consignee i, index pairing preserved."""
@@ -422,19 +436,30 @@ def build_consigner_rows(ev):
                 'quantity':        qty,
                 'consigner_name':  consignee,
                 'importer_name':   consignee,
-                'agent_name':      _pick(agents, i),
                 'pipeline_name':   _pick(tanks, i),
                 'unload_terminal': terminal,
             })
     return rows
 
 
-def mark_moved_to_vcn(ev_id, vcn_id):
+def close_to_other_terminal(ev_id, terminal_name):
+    """Vessel is handled at another terminal — close it in EV01 without
+    creating a VCN. Records the terminal and marks the row Closed."""
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute(
-        "UPDATE expected_vessels SET vcn_id=%s, doc_status='Moved to VCN' WHERE id=%s",
-        [vcn_id, ev_id]
+        "UPDATE expected_vessels SET terminal_name=%s, doc_status='Closed - Other Terminal' WHERE id=%s",
+        [terminal_name, ev_id]
     )
+    conn.commit()
+    conn.close()
+
+
+def mark_moved_to_vcn(ev_id, vcn_id):
+    """Once moved to a VCN the expected-vessel row is removed from EV01 —
+    the vessel now lives in Vessel Call Number, not the expected list."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("DELETE FROM expected_vessels WHERE id=%s", [ev_id])
     conn.commit()
     conn.close()

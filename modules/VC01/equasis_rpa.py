@@ -196,7 +196,6 @@ def _search_and_get_basic(driver, imo_number):
             if len(cells) >= 6:
                 basic["vessel_name"]     = cells[1].text.strip()
                 basic["gt"]              = _clean_num(cells[2].text.strip())
-                basic["vessel_type_name"]= cells[3].text.strip()
                 basic["year_of_built"]   = _clean_num(cells[4].text.strip())
                 # Flag cell: "India\n(IND)" → take first line
                 flag_text = cells[5].text.strip().split("\n")[0].strip()
@@ -306,7 +305,7 @@ def _build_vc01_result(basic, detail_raw):
         "call_sign":     ["call sign", "callsign", "radio call sign", "call letters"],
         "mmsi_num":      ["mmsi", "mmsi number", "mmsi no."],
         "gt":            ["gross tonnage", "gt", "gross registered tonnage", "grt"],
-        "dwt":           ["deadweight", "dwt", "dead weight", "summer deadweight", "deadweight tonnage"],
+        "displacement":  ["displacement", "deadweight", "dwt", "dead weight", "summer deadweight", "deadweight tonnage"],
         "loa":           ["length", "loa", "length overall", "length o.a.", "length (m)"],
         "beam":          ["breadth", "beam", "breadth moulded", "width"],
         "year_of_built": ["year of build", "year built", "build year", "year of construction",
@@ -317,7 +316,7 @@ def _build_vc01_result(basic, detail_raw):
     for vc01_field, labels in mappings.items():
         val = _get(detail_raw, *labels)
         if val and vc01_field not in result:
-            if vc01_field in ("gt", "dwt", "loa", "beam", "year_of_built"):
+            if vc01_field in ("gt", "displacement", "loa", "beam", "year_of_built"):
                 result[vc01_field] = _clean_num(val)
             else:
                 # Take only first line for multi-line values (e.g. flag "India\n(IND)")

@@ -451,6 +451,7 @@
     let customers = [];
     let pipelineNames = [];
     let terminalNames = [];
+    let pipelineTerminalMap = {};   // pipeline_name -> [terminal_name,...] (PLTM01)
     let cargoTypes = [];
     let docSeries = [];
     let defaultDocSeries = '';
@@ -459,7 +460,6 @@
     let cargoNames = [];
     let quantityUoms = [];
     let defaultUom = '';
-    let holds = [];
     let portNames = [];
     let moduleConfig = {};
 
@@ -499,6 +499,83 @@
             const [fg, bg] = PILL_COLORS[i % PILL_COLORS.length];
             return `<span style="display:inline-block;background:${bg};border:1px solid ${fg};color:${fg};padding:1px 7px;border-radius:10px;font-size:10px;margin:1px 2px;white-space:nowrap;">${s.trim()}</span>`;
         }).join('');
+    }
+
+    // Split a comma/semicolon-separated multi-value cell into trimmed items
+    function _splitMulti(v) {
+        return v ? String(v).split(/[,;]/).map(s => s.trim()).filter(Boolean) : [];
+    }
+
+    // Terminals allowed for the pipelines selected on a consigner row (PLTM01).
+    // Falls back to all terminals when no pipeline / no mapping is defined.
+    function terminalsForRow(rowData) {
+        const pipes = _splitMulti(rowData && rowData.pipeline_name);
+        if (!pipes.length) return terminalNames.slice();
+        const set = [];
+        pipes.forEach(p => (pipelineTerminalMap[p] || []).forEach(t => {
+            if (!set.includes(t)) set.push(t);
+        }));
+        return set.length ? set : terminalNames.slice();
+    }
+
+    // Multi-select checkbox dropdown editor; optionsList may be an array or a
+    // function(cell) -> array (used for pipeline-dependent terminal options).
+    function makeMultiSelectEditor(optionsList) {
+        return function(cell, onRendered, success, cancel) {
+            const opts = (typeof optionsList === 'function') ? (optionsList(cell) || []) : optionsList;
+            const selected = _splitMulti(cell.getValue());
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'width:100%;height:100%;padding:4px;box-sizing:border-box;font-size:11px;cursor:pointer;';
+            wrapper.textContent = cell.getValue() || 'Select...';
+            const dd = document.createElement('div');
+            dd.style.cssText = 'position:fixed;z-index:99999;background:white;border:1px solid #cbd5e0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:8px;min-width:160px;max-height:240px;overflow-y:auto;display:none;';
+            if (!opts.length) {
+                const m = document.createElement('div');
+                m.style.cssText = 'font-size:11px;color:#a0aec0;padding:4px 6px;';
+                m.textContent = 'Select a pipeline first';
+                dd.appendChild(m);
+            }
+            opts.forEach(item => {
+                const label = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
+                label.addEventListener('mouseenter', () => label.style.background = '#f1f5f9');
+                label.addEventListener('mouseleave', () => label.style.background = 'none');
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.value = item; cb.checked = selected.includes(item);
+                cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;';
+                label.appendChild(cb);
+                label.appendChild(document.createTextNode(item));
+                dd.appendChild(label);
+            });
+            const btnRow = document.createElement('div');
+            btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+            const ok = document.createElement('button');
+            ok.textContent = 'Apply';
+            ok.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#3182ce;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+            ok.addEventListener('click', e => {
+                e.stopPropagation();
+                const vals = Array.from(dd.querySelectorAll('input[type=checkbox]:checked')).map(c => c.value);
+                cleanup(); success(vals.join(', '));
+            });
+            const no = document.createElement('button');
+            no.textContent = 'Cancel';
+            no.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+            no.addEventListener('click', e => { e.stopPropagation(); cleanup(); cancel(); });
+            btnRow.appendChild(ok); btnRow.appendChild(no);
+            dd.appendChild(btnRow);
+            document.body.appendChild(dd);
+            function cleanup() { if (dd.parentNode) dd.parentNode.removeChild(dd); document.removeEventListener('mousedown', outside); }
+            function outside(e) { if (!dd.contains(e.target) && !wrapper.contains(e.target)) { cleanup(); cancel(); } }
+            onRendered(() => {
+                const rect = cell.getElement().getBoundingClientRect();
+                dd.style.left = rect.left + 'px';
+                dd.style.top = (rect.bottom + 2) + 'px';
+                dd.style.display = 'block';
+                setTimeout(() => document.addEventListener('mousedown', outside), 10);
+            });
+            wrapper.addEventListener('keydown', e => { if (e.key === 'Escape') { cleanup(); cancel(); } });
+            return wrapper;
+        };
     }
 
     // ── IGM (FORM III) PDF upload — stored as BYTEA on the header ────────────
@@ -603,7 +680,7 @@
     }
 
     async function loadMasterData() {
-        const [vesselsRes, agentsRes, custRes, cargoRes, dsRes, dmRes, cnRes, uomRes, holdRes, portRes, plRes, trRes, configRes] = await Promise.all([
+        const [vesselsRes, agentsRes, custRes, cargoRes, dsRes, dmRes, cnRes, uomRes, portRes, plRes, trRes, configRes] = await Promise.all([
             fetch('/api/module/VCN01/vessels'),
             fetch('/api/module/VAM01/all'),
             fetch('/api/module/VCUM01/all'),
@@ -612,7 +689,6 @@
             fetch('/api/module/VDM01/all'),
             fetch('/api/module/VCG01/names'),
             fetch('/api/module/VQM01/all'),
-            fetch('/api/module/VHO01/all'),
             fetch('/api/module/VPM01/all'),
             fetch('/api/module/PLM01/all'),
             fetch('/api/module/TRM01/all'),
@@ -623,6 +699,21 @@
         customers = await custRes.json();
         pipelineNames = await plRes.json();
         terminalNames = await trRes.json();
+        // Pipeline → Terminal mapping (PLTM01) for dependent terminal filtering
+        try {
+            const matrix = await (await fetch('/api/module/PLTM01/matrix')).json();
+            const tById = {};
+            (matrix.terminals || []).forEach(t => { tById[t.id] = t.terminal_name; });
+            const pById = {};
+            (matrix.pipelines || []).forEach(p => { pById[p.id] = p.pipeline_name; });
+            pipelineTerminalMap = {};
+            (matrix.mappings || []).forEach(m => {
+                if (m.is_active === false) return;
+                const pn = pById[m.pipeline_id], tn = tById[m.terminal_id];
+                if (!pn || !tn) return;
+                (pipelineTerminalMap[pn] = pipelineTerminalMap[pn] || []).push(tn);
+            });
+        } catch (e) { pipelineTerminalMap = {}; }
         cargoTypes = await cargoRes.json();
         const dsData = await dsRes.json();
         docSeries = dsData.map(d => d.name);
@@ -634,7 +725,6 @@
         const uomDefaultRes = await fetch('/api/module/VQM01/default');
         const uomDefaultData = await uomDefaultRes.json();
         defaultUom = uomDefaultData.default || '';
-        holds = await holdRes.json();
         portNames = await portRes.json();
         moduleConfig = await configRes.json();
         initFilterConfig();
@@ -682,6 +772,7 @@
             {title: "Operation Type", field: "operation_type", editor: canEdit ? "list" : false,
                 editorParams: {values: {"Import": "Import", "Export": "Export"}, autocomplete: false, allowEmpty: true}, width: 110},
             {title: "VCN Doc", field: "vcn_doc_num", width: 80},
+            {title: "VIA No.", field: "via_number", editor: canEdit ? "input" : false, width: 90},
             {title: "Vessel Master Doc", field: "vessel_master_doc", editor: canEdit ? "list" : false,
                 editorParams: {values: vesselOptions, autocomplete: true, allowEmpty: true}, width: 160,
                 cellEdited: function(cell) {
@@ -715,6 +806,8 @@
                 editorParams: {values: portOptions, autocomplete: true, allowEmpty: true}, width: 110},
             {title: "Doc Date", field: "doc_date", width: 120, formatter: dateCellFormatter,
                 editor: canEdit ? dateEditor : false},
+            {title: "Remarks", field: "remarks", editor: canEdit ? "input" : false,
+                editorParams: {maxlength: 200}, width: 200},
             {title: "Created By", field: "created_by", width: 90},
             {title: "Status", field: "doc_status", width: 105, headerSort: false,
                 formatter: function(cell) {
@@ -969,14 +1062,8 @@
         cargoNames.forEach(c => { cargoOptions[c] = c; });
 
         // Consigner (customer details) table
-        const agentOptions = {};
-        vesselAgents.forEach(a => { agentOptions[a] = a; });
-        const pipelineOptions = {};
-        pipelineNames.forEach(p => { pipelineOptions[p] = p; });
         const consignerOptions = {};
         customers.forEach(c => { consignerOptions[c] = c; });
-        const terminalOptions = {};
-        terminalNames.forEach(t => { terminalOptions[t] = t; });
 
         // One row per IGM (FORM III) line
         subTables[vcnId].consigners = new Tabulator(`#consigners-table-${vcnId}`, {
@@ -997,22 +1084,34 @@
                     editorParams: {values: cargoOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                 },
                 {title: "Qty (MT)", field: "quantity", widthGrow: 0.8, hozAlign: "right",
-                    editor: canEdit ? "number" : false, editorParams: {min: 0, step: 0.001}
+                    editor: canEdit ? "number" : false, editorParams: {min: 0, step: 0.001},
+                    cellEdited: function(cell) {
+                        // cap at 3 decimal places
+                        const v = cell.getValue();
+                        if (v !== '' && v !== null && !isNaN(v)) {
+                            const r = Math.round(parseFloat(v) * 1000) / 1000;
+                            if (r !== parseFloat(v)) cell.setValue(r);
+                        }
+                    }
                 },
                 {title: "Consignee", field: "consigner_name", widthGrow: 1.3, editor: canEdit ? "list" : false,
                     editorParams: {values: consignerOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                 },
-                {title: "Importer", field: "importer_name", widthGrow: 1.3, editor: canEdit ? "list" : false,
+                {title: "Payment will be made by", field: "importer_name", widthGrow: 1.4, editor: canEdit ? "list" : false,
                     editorParams: {values: consignerOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                 },
-                {title: "Agent", field: "agent_name", widthGrow: 0.9, editor: canEdit ? "list" : false,
-                    editorParams: {values: agentOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
+                {title: "Pipeline", field: "pipeline_name", widthGrow: 1, formatter: cargoPillFormatter,
+                    editor: canEdit ? makeMultiSelectEditor(pipelineNames) : false,
+                    cellEdited: function(cell) {
+                        // pipeline is the parent — drop terminals no longer mapped to it
+                        const row = cell.getRow();
+                        const allowed = terminalsForRow(row.getData());
+                        const kept = _splitMulti(row.getData().unload_terminal).filter(t => allowed.includes(t));
+                        row.update({unload_terminal: kept.join(', ')});
+                    }
                 },
-                {title: "Pipeline", field: "pipeline_name", widthGrow: 0.9, editor: canEdit ? "list" : false,
-                    editorParams: {values: pipelineOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
-                },
-                {title: "Unload Terminal", field: "unload_terminal", widthGrow: 1, editor: canEdit ? "list" : false,
-                    editorParams: {values: terminalOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
+                {title: "Unload Terminal", field: "unload_terminal", widthGrow: 1.2, formatter: cargoPillFormatter,
+                    editor: canEdit ? makeMultiSelectEditor(cell => terminalsForRow(cell.getRow().getData())) : false
                 },
                 canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 60, widthGrow: 0, hozAlign: "center", headerSort: false,
                     cellClick: function(e, cell) { deleteSubRow('consigners', cell.getRow().getData().id, vcnId); }
