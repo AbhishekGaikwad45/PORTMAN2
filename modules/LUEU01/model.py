@@ -1,556 +1,144 @@
 from database import get_db, get_cursor
-from datetime import datetime, date, timedelta
+from datetime import datetime
+
+# parcel_ids on ldud_parcel_ops point at the VCN's parcel source table,
+# chosen by the linked VCN's operation_type (whitelisted — safe to interpolate).
+def _parse_ids(csv):
+    return [int(x) for x in str(csv or '').split(',') if str(x).strip().isdigit()]
 
 
-def get_all_lines(page=1, size=20, equipment_name=None, filters=None):
+def _num(v):
+    if v is None or (isinstance(v, str) and v.strip() == ''):
+        return None
+    return v
+
+
+def get_vessels_with_started_parcels():
     conn = get_db()
     cur = get_cursor(conn)
-    offset = (page - 1) * size
-
-    allowed = {'entry_date', 'shift', 'source_display', 'cargo_name',
-               'delay_name', 'berth_name', 'operator_name', 'route_name'}
-    where_clauses, params = [], []
-
-    if equipment_name:
-        where_clauses.append('equipment_name = %s')
-        params.append(equipment_name)
-
-    for f in (filters or []):
-        field = f.get('field', '')
-        if field not in allowed:
-            continue
-        ftype = f.get('type')
-        if ftype == 'contains' and f.get('value'):
-            where_clauses.append(f"{field} ILIKE %s")
-            params.append(f"%{f['value']}%")
-        elif ftype == 'multi' and f.get('values'):
-            ph = ','.join(['%s'] * len(f['values']))
-            where_clauses.append(f"{field} IN ({ph})")
-            params.extend(f['values'])
-        elif ftype == 'range':
-            if f.get('from'):
-                where_clauses.append(f"{field} >= %s")
-                params.append(f['from'])
-            if f.get('to'):
-                where_clauses.append(f"{field} <= %s")
-                params.append(f['to'])
-
-    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-
-    cur.execute(f'SELECT COUNT(*) as cnt FROM lueu_lines {where_sql}', params)
-    total = cur.fetchone()['cnt']
-    cur.execute(f'SELECT * FROM lueu_lines {where_sql} ORDER BY id DESC LIMIT %s OFFSET %s',
-                params + [size, offset])
+    cur.execute('''
+        SELECT h.id AS vcn_id, h.vcn_doc_num, h.vessel_name, h.berth_name,
+               COUNT(po.id) AS parcel_count
+        FROM ldud_parcel_ops po
+        JOIN ldud_header l ON l.id = po.ldud_id
+        JOIN vcn_header h ON h.id = l.vcn_id
+        WHERE po.start_dt IS NOT NULL
+        GROUP BY h.id, h.vcn_doc_num, h.vessel_name, h.berth_name
+        ORDER BY h.vcn_doc_num DESC
+    ''')
     rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
-    # Look up customer names from cargo declarations for VCN sources
-    # and flag multi-customer sources
-    source_keys = set()
-    for r in rows:
-        if r.get('source_type') and r.get('source_id'):
-            source_keys.add((r['source_type'], r['source_id']))
 
-    # Build map of (source_type, source_id) -> {cargo_name: customer_name}
-    source_customer_map = {}  # key -> {cargo_name: customer_name}
-    source_multi_customer = {}  # key -> bool (has multiple customers)
+def get_started_parcels(vcn_id):
+    conn = get_db()
+    cur = get_cursor(conn)
+    # operation_type decides which table holds the parcel master rows
+    cur.execute('SELECT operation_type FROM vcn_header WHERE id=%s', [vcn_id])
+    row = cur.fetchone()
+    op = (row or {}).get('operation_type') if row else None
+    is_export = op == 'Export'
+    tbl = 'vcn_export_cargo_declaration' if is_export else 'vcn_consigners'
+    qty_col = 'bl_quantity' if is_export else 'quantity'
 
-    for src_type, src_id in source_keys:
-        cargo_customers = {}
-        if src_type == 'VCN':
-            cur.execute("""
-                SELECT cargo_name, customer_name FROM vcn_cargo_declaration WHERE vcn_id = %s AND customer_name IS NOT NULL
-                UNION ALL
-                SELECT cargo_name, customer_name FROM vcn_export_cargo_declaration WHERE vcn_id = %s AND customer_name IS NOT NULL
-            """, [src_id, src_id])
-            for cr in cur.fetchall():
-                if cr['cargo_name'] and cr['customer_name']:
-                    cargo_customers[cr['cargo_name']] = cr['customer_name']
+    cur.execute('''
+        SELECT po.id AS parcel_op_id, po.parcel_ids, po.cargo_name,
+               po.start_dt, po.end_dt
+        FROM ldud_parcel_ops po
+        JOIN ldud_header l ON l.id = po.ldud_id
+        WHERE l.vcn_id = %s AND po.start_dt IS NOT NULL
+        ORDER BY po.id
+    ''', [vcn_id])
+    parcels = [dict(r) for r in cur.fetchall()]
 
-        source_customer_map[(src_type, src_id)] = cargo_customers
-        unique_customers = set(cargo_customers.values())
-        source_multi_customer[(src_type, src_id)] = len(unique_customers) > 1
+    # resolve parcel_no + declared qty from the source table
+    all_ids = sorted({pid for p in parcels for pid in _parse_ids(p['parcel_ids'])})
+    labels, qty = {}, {}
+    if all_ids:
+        cur.execute(f'SELECT id, parcel_no, {qty_col} AS q FROM {tbl} WHERE id = ANY(%s)', [all_ids])
+        for r in cur.fetchall():
+            labels[r['id']] = r['parcel_no'] or f"#{r['id']}"
+            try:
+                qty[r['id']] = float(str(r['q']).replace(',', '')) if r['q'] is not None else 0.0
+            except (ValueError, TypeError):
+                qty[r['id']] = 0.0
 
-    # Enrich rows with customer_name (only when multi-customer)
-    for r in rows:
-        key = (r.get('source_type'), r.get('source_id'))
-        is_multi = source_multi_customer.get(key, False)
-        r['_multi_customer'] = is_multi
-        if is_multi:
-            cargo_customers = source_customer_map.get(key, {})
-            r['customer_name'] = cargo_customers.get(r.get('cargo_name'), '')
-        else:
-            r['customer_name'] = ''
-
+    # logged qty per parcel (non-deleted)
+    pop_ids = [p['parcel_op_id'] for p in parcels]
+    logged = {}
+    if pop_ids:
+        cur.execute('''SELECT parcel_op_id, COALESCE(SUM(quantity),0) AS s
+                       FROM lueu_parcel_log
+                       WHERE parcel_op_id = ANY(%s) AND is_deleted IS NOT TRUE
+                       GROUP BY parcel_op_id''', [pop_ids])
+        logged = {r['parcel_op_id']: float(r['s'] or 0) for r in cur.fetchall()}
     conn.close()
 
-    return {
-        'data': rows,
-        'last_page': (total + size - 1) // size,
-        'total': total
-    }
+    out = []
+    for p in parcels:
+        ids = _parse_ids(p['parcel_ids'])
+        out.append({
+            'parcel_op_id': p['parcel_op_id'],
+            'parcel_no': ', '.join(labels.get(i, f"#{i}") for i in ids) or '—',
+            'cargo_name': p['cargo_name'] or '',
+            'declared_qty': round(sum(qty.get(i, 0.0) for i in ids), 3),
+            'logged_qty': round(logged.get(p['parcel_op_id'], 0.0), 3),
+            'uom': 'MT',
+            'start_dt': p['start_dt'],
+            'end_dt': p['end_dt'],
+            'status': 'Completed' if p['end_dt'] else 'In Progress',
+        })
+    return out
 
 
-def save_line(data):
+_LOG_COLS = ['parcel_op_id', 'entry_date', 'from_time', 'to_time', 'quantity',
+             'quantity_uom', 'medium', 'equipment_name', 'delay_name', 'shift',
+             'operator_name', 'shift_incharge', 'berth_name', 'remarks']
+
+
+def get_log(parcel_op_id):
     conn = get_db()
     cur = get_cursor(conn)
+    cur.execute('''SELECT * FROM lueu_parcel_log
+                   WHERE parcel_op_id=%s AND is_deleted IS NOT TRUE
+                   ORDER BY entry_date, from_time, id''', [parcel_op_id])
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
-    # Coerce blank strings to None for numeric columns — Postgres rejects '' on real/integer.
-    def _num(key):
-        v = data.get(key)
-        if v is None or (isinstance(v, str) and v.strip() == ''):
-            return None
-        return v
-    data['quantity']  = _num('quantity')
-    data['source_id'] = _num('source_id')
 
-    line_id = data.get('id')
-
-    if line_id:
-        cur.execute('''
-            UPDATE lueu_lines SET
-                source_type = %s, source_id = %s, source_display = %s,
-                equipment_name = %s, operator_name = %s, delay_name = %s, cargo_name = %s,
-                operation_type = %s, quantity = %s, quantity_uom = %s, route_name = %s,
-                start_time = %s, end_time = %s, entry_date = %s,
-                shift = %s, from_time = %s, to_time = %s, system_name = %s,
-                berth_name = %s, shift_incharge = %s, remarks = %s
-            WHERE id = %s
-        ''', [
-            data.get('source_type'), data.get('source_id'), data.get('source_display'),
-            data.get('equipment_name'), data.get('operator_name'),
-            data.get('delay_name'), data.get('cargo_name'), data.get('operation_type'),
-            data.get('quantity'), data.get('quantity_uom'), data.get('route_name'),
-            data.get('start_time'), data.get('end_time'), data.get('entry_date'),
-            data.get('shift'), data.get('from_time'), data.get('to_time'), data.get('system_name'),
-            data.get('berth_name'), data.get('shift_incharge'), data.get('remarks'), line_id
-        ])
+def save_log(data):
+    # Direct Pipe carries no equipment
+    if data.get('medium') == 'Direct Pipe':
+        data['equipment_name'] = None
+    data['quantity'] = _num(data.get('quantity'))
+    conn = get_db()
+    cur = get_cursor(conn)
+    if data.get('id'):
+        sets = ', '.join(f'{c}=%s' for c in _LOG_COLS)
+        cur.execute(f'UPDATE lueu_parcel_log SET {sets} WHERE id=%s',
+                    [data.get(c) for c in _LOG_COLS] + [data['id']])
+        row_id = data['id']
     else:
-        cur.execute('''
-            INSERT INTO lueu_lines
-            (source_type, source_id, source_display, equipment_name, operator_name,
-             delay_name, cargo_name, operation_type, quantity, quantity_uom, route_name,
-             start_time, end_time, entry_date, created_by, created_date,
-             shift, from_time, to_time, system_name, berth_name, shift_incharge, remarks)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        ''', [
-            data.get('source_type'), data.get('source_id'), data.get('source_display'),
-            data.get('equipment_name'), data.get('operator_name'),
-            data.get('delay_name'), data.get('cargo_name'), data.get('operation_type'),
-            data.get('quantity'), data.get('quantity_uom'), data.get('route_name'),
-            data.get('start_time'), data.get('end_time'), data.get('entry_date'),
-            data.get('created_by'), datetime.now().strftime('%Y-%m-%d'),
-            data.get('shift'), data.get('from_time'), data.get('to_time'), data.get('system_name'),
-            data.get('berth_name'), data.get('shift_incharge'), data.get('remarks')
-        ])
-        line_id = cur.fetchone()['id']
-
+        cols = _LOG_COLS + ['created_by', 'created_date']
+        vals = [data.get(c) for c in _LOG_COLS] + [data.get('created_by'),
+                                                   datetime.now().strftime('%Y-%m-%d')]
+        ph = ', '.join(['%s'] * len(cols))
+        cur.execute(f'INSERT INTO lueu_parcel_log ({", ".join(cols)}) VALUES ({ph}) RETURNING id', vals)
+        row_id = cur.fetchone()['id']
     conn.commit()
     conn.close()
-    return line_id
+    return row_id
 
 
-def soft_delete_lines(ids, username=None):
-    """Soft-delete lueu lines. Returns empty list (billing no longer tracked via lueu_lines)."""
+def soft_delete_log(ids, username):
     conn = get_db()
     cur = get_cursor(conn)
     today = datetime.now().strftime('%Y-%m-%d')
-    for line_id in ids:
-        cur.execute('''
-            UPDATE lueu_lines
-            SET is_deleted = TRUE, deleted_by = %s, deleted_date = %s
-            WHERE id = %s AND (is_deleted IS NOT TRUE)
-        ''', [username, today, line_id])
+    for log_id in ids:
+        cur.execute('''UPDATE lueu_parcel_log
+                       SET is_deleted=TRUE, deleted_by=%s, deleted_date=%s
+                       WHERE id=%s AND is_deleted IS NOT TRUE''', [username, today, log_id])
     conn.commit()
     conn.close()
-    return []   # caller checks for invoiced_lines to trigger auto-CN; none here
-
-
-def split_line(line_id, split_qty, split_remark, created_by=None):
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT * FROM lueu_lines WHERE id = %s', [line_id])
-    parent = cur.fetchone()
-    if not parent:
-        conn.close()
-        return None
-    parent = dict(parent)
-    original_qty = float(parent.get('quantity') or 0)
-    split_qty = float(split_qty)
-    remaining_qty = original_qty - split_qty
-
-    # Mark parent as split, update its quantity to the remaining
-    cur.execute('''UPDATE lueu_lines SET is_split = TRUE, quantity = %s WHERE id = %s''',
-                [remaining_qty, line_id])
-
-    # Create child line with split quantity
-    cur.execute('''
-        INSERT INTO lueu_lines
-        (source_type, source_id, source_display, equipment_name, operator_name,
-         delay_name, cargo_name, operation_type, quantity, quantity_uom, route_name,
-         start_time, end_time, entry_date, created_by, created_date,
-         shift, from_time, to_time, system_name, berth_name, shift_incharge, remarks,
-         is_split, parent_line_id, split_quantity, split_remark)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s)
-        RETURNING id
-    ''', [
-        parent.get('source_type'), parent.get('source_id'), parent.get('source_display'),
-        parent.get('equipment_name'), parent.get('operator_name'),
-        parent.get('delay_name'), parent.get('cargo_name'), parent.get('operation_type'),
-        split_qty, parent.get('quantity_uom'), parent.get('route_name'),
-        parent.get('start_time'), parent.get('end_time'), parent.get('entry_date'),
-        created_by, datetime.now().strftime('%Y-%m-%d'),
-        parent.get('shift'), parent.get('from_time'), parent.get('to_time'),
-        parent.get('system_name'), parent.get('berth_name'), parent.get('shift_incharge'),
-        split_remark or parent.get('remarks'),
-        line_id, split_qty, split_remark
-    ])
-    child_id = cur.fetchone()['id']
-
-    # Also update parent's split fields
-    cur.execute('''UPDATE lueu_lines SET split_quantity = %s, split_remark = %s WHERE id = %s''',
-                [remaining_qty, 'Parent line (split)', line_id])
-
-    conn.commit()
-    conn.close()
-    return {'child_id': child_id, 'parent_qty': remaining_qty, 'child_qty': split_qty}
-
-
-def get_vcn_options():
-    """Get VCN entries with vessel name and anchored time for dropdown."""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('''
-        SELECT h.id, h.vcn_doc_num, h.vessel_name, a.anchorage_arrival
-        FROM vcn_header h
-        LEFT JOIN vcn_anchorage a ON h.id = a.vcn_id
-        ORDER BY h.vcn_doc_num DESC
-    ''')
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-
-def get_bl_progress(source_type, source_id):
-    """Return BL declared qty vs handled qty per cargo for a VCN source."""
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    declared = []
-    if source_type == 'VCN':
-        cur.execute('''
-            SELECT COALESCE(cargo_name, '') as cargo_name, COALESCE(bl_quantity, 0) as bl_qty, 'Import' as decl_type
-            FROM vcn_cargo_declaration WHERE vcn_id = %s
-        ''', [source_id])
-        for r in cur.fetchall():
-            declared.append({'cargo_name': r['cargo_name'], 'bl_qty': float(r['bl_qty'] or 0), 'decl_type': 'Import'})
-        cur.execute('''
-            SELECT COALESCE(cargo_name, '') as cargo_name, COALESCE(bl_quantity, 0) as bl_qty, 'Export' as decl_type
-            FROM vcn_export_cargo_declaration WHERE vcn_id = %s
-        ''', [source_id])
-        for r in cur.fetchall():
-            declared.append({'cargo_name': r['cargo_name'], 'bl_qty': float(r['bl_qty'] or 0), 'decl_type': 'Export'})
-    # Sum handled quantities from lueu_lines per cargo (exclude deleted)
-    cur.execute('''
-        SELECT COALESCE(cargo_name, '') as cargo_name,
-               COALESCE(SUM(quantity), 0) as handled_qty,
-               MAX(quantity_uom) as uom
-        FROM lueu_lines
-        WHERE source_type = %s AND source_id = %s AND (is_deleted IS NOT TRUE)
-        GROUP BY cargo_name
-    ''', [source_type, source_id])
-    handled_map = {}
-    uom_map = {}
-    for r in cur.fetchall():
-        handled_map[r['cargo_name']] = float(r['handled_qty'] or 0)
-        uom_map[r['cargo_name']] = r['uom'] or ''
-
-    conn.close()
-
-    result = []
-    seen = set()
-    for d in declared:
-        cargo = d['cargo_name']
-        bl_qty = d['bl_qty']
-        handled = handled_map.get(cargo, 0)
-        seen.add(cargo)
-        result.append({
-            'cargo_name': cargo,
-            'bl_qty': round(bl_qty, 3),
-            'handled_qty': round(handled, 3),
-            'uom': uom_map.get(cargo, ''),
-            'remaining': round(bl_qty - handled, 3),
-            'exceeded': handled > bl_qty and bl_qty > 0,
-            'exceeded_by': round(max(0.0, handled - bl_qty), 3),
-            'decl_type': d.get('decl_type', ''),
-        })
-
-    # Handled cargos with no declaration at all
-    for cargo, handled in handled_map.items():
-        if cargo not in seen:
-            result.append({
-                'cargo_name': cargo,
-                'bl_qty': 0,
-                'handled_qty': round(handled, 3),
-                'uom': uom_map.get(cargo, ''),
-                'remaining': round(-handled, 3),
-                'exceeded': True,
-                'exceeded_by': round(handled, 3),
-                'decl_type': 'No Declaration',
-            })
-
-    return result
-
-
-
-def get_dashboard_data():
-    """Return all data for the LUEU01 operations dashboard."""
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    today = date.today()
-    yesterday = today - timedelta(days=1)
-    month_start = today.replace(day=1)
-    # Financial year starts April 1
-    fy_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
-
-    today_s     = today.strftime('%Y-%m-%d')
-    yesterday_s = yesterday.strftime('%Y-%m-%d')
-    month_start_s = month_start.strftime('%Y-%m-%d')
-    fy_start_s  = fy_start.strftime('%Y-%m-%d')
-
-    # ── KPI stats ────────────────────────────────────────────────────────────
-    def _sum_qty(from_date, to_date=None):
-        if to_date:
-            cur.execute(
-                "SELECT COALESCE(SUM(quantity),0) AS t FROM lueu_lines "
-                "WHERE entry_date >= %s AND entry_date <= %s AND (is_deleted IS NOT TRUE)",
-                [from_date, to_date]
-            )
-        else:
-            cur.execute(
-                "SELECT COALESCE(SUM(quantity),0) AS t FROM lueu_lines "
-                "WHERE entry_date = %s AND (is_deleted IS NOT TRUE)",
-                [from_date]
-            )
-        return float(cur.fetchone()['t'] or 0)
-
-    kpis = {
-        'ytd':       round(_sum_qty(fy_start_s, today_s), 2),
-        'mtd':       round(_sum_qty(month_start_s, today_s), 2),
-        'yesterday': round(_sum_qty(yesterday_s), 2),
-        'today':     round(_sum_qty(today_s), 2),
-    }
-
-    # ── Active VCNs ──────────────────────────────────────────────────────────
-    cur.execute('''
-        SELECT
-            v.id, v.vcn_doc_num, v.vessel_name, v.doc_status,
-            cd.cargo_name,
-            COALESCE(cd.bl_quantity, 0) AS bl_quantity,
-            COALESCE(cd.quantity_uom, '') AS uom,
-            'Import' AS decl_type
-        FROM vcn_header v
-        JOIN vcn_cargo_declaration cd ON cd.vcn_id = v.id
-        WHERE v.doc_status != 'Closed'
-        UNION ALL
-        SELECT
-            v.id, v.vcn_doc_num, v.vessel_name, v.doc_status,
-            cd.cargo_name,
-            COALESCE(cd.bl_quantity, 0) AS bl_quantity,
-            COALESCE(cd.quantity_uom, '') AS uom,
-            'Export' AS decl_type
-        FROM vcn_header v
-        JOIN vcn_export_cargo_declaration cd ON cd.vcn_id = v.id
-        WHERE v.doc_status != 'Closed'
-        ORDER BY id DESC
-    ''')
-    vcn_declarations = cur.fetchall()
-
-    # Actual handled per VCN + cargo
-    cur.execute('''
-        SELECT source_id, COALESCE(cargo_name,'') AS cargo_name,
-               COALESCE(SUM(quantity),0) AS actual
-        FROM lueu_lines
-        WHERE source_type = 'VCN' AND (is_deleted IS NOT TRUE)
-        GROUP BY source_id, cargo_name
-    ''')
-    vcn_actual = {}
-    for r in cur.fetchall():
-        vcn_actual[(r['source_id'], r['cargo_name'])] = float(r['actual'] or 0)
-
-    vcn_rows = []
-    seen_vcn = {}
-    for r in vcn_declarations:
-        key = (r['id'], r['cargo_name'], r['decl_type'])
-        if key in seen_vcn:
-            continue
-        seen_vcn[key] = True
-        bl = float(r['bl_quantity'] or 0)
-        actual = vcn_actual.get((r['id'], r['cargo_name'] or ''), 0)
-        pct = round((actual / bl * 100) if bl > 0 else 0, 1)
-        vcn_rows.append({
-            'id': r['id'],
-            'doc_num': r['vcn_doc_num'],
-            'vessel_name': r['vessel_name'],
-            'status': r['doc_status'],
-            'cargo_name': r['cargo_name'],
-            'bl_quantity': round(bl, 2),
-            'actual': round(actual, 2),
-            'remaining': round(bl - actual, 2),
-            'pct': pct,
-            'uom': r['uom'],
-            'decl_type': r['decl_type'],
-            'exceeded': actual > bl and bl > 0,
-        })
-
-    # ── Shift breakdown: Today + Yesterday ───────────────────────────────────
-    cur.execute('''
-        SELECT
-            entry_date,
-            shift,
-            COALESCE(SUM(quantity), 0) AS total_tonnes,
-            ROUND(COALESCE(SUM(
-                CASE
-                    WHEN from_time IS NOT NULL AND to_time IS NOT NULL
-                         AND from_time != '' AND to_time != ''
-                    THEN
-                        CASE
-                            WHEN to_time > from_time
-                            THEN (
-                                (CAST(SPLIT_PART(to_time,':',1) AS INT)*60 + CAST(SPLIT_PART(to_time,':',2) AS INT))
-                              - (CAST(SPLIT_PART(from_time,':',1) AS INT)*60 + CAST(SPLIT_PART(from_time,':',2) AS INT))
-                            ) / 60.0
-                            ELSE
-                            (1440
-                              - (CAST(SPLIT_PART(from_time,':',1) AS INT)*60 + CAST(SPLIT_PART(from_time,':',2) AS INT))
-                              + (CAST(SPLIT_PART(to_time,':',1) AS INT)*60 + CAST(SPLIT_PART(to_time,':',2) AS INT))
-                            ) / 60.0
-                        END
-                    ELSE 0
-                END
-            ), 0)::numeric, 2) AS total_hrs
-        FROM lueu_lines
-        WHERE entry_date IN (%s, %s) AND (is_deleted IS NOT TRUE)
-        GROUP BY entry_date, shift
-        ORDER BY entry_date, shift
-    ''', [today_s, yesterday_s])
-
-    shifts_raw = cur.fetchall()
-
-    shifts = {'today': {}, 'yesterday': {}}
-    for r in shifts_raw:
-        day = 'today' if r['entry_date'] == today_s else 'yesterday'
-        shift = r['shift'] or '?'
-        shifts[day][shift] = {
-            'tonnes': round(float(r['total_tonnes'] or 0), 2),
-            'hrs':    float(r['total_hrs'] or 0),
-        }
-
-    # ── Current shift (A=06-14, B=14-22, C=22-06) ───────────────────────────
-    now = datetime.now()
-    h = now.hour
-    if 6 <= h < 14:
-        current_shift = 'A'
-    elif 14 <= h < 22:
-        current_shift = 'B'
-    else:
-        current_shift = 'C'
-
-    # ── All equipment master list ─────────────────────────────────────────────
-    cur.execute('SELECT name FROM equipment ORDER BY name')
-    all_equipment = [r['name'] for r in cur.fetchall()]
-
-    # ── Today aggregates per equipment ───────────────────────────────────────
-    cur.execute('''
-        SELECT
-            equipment_name,
-            COUNT(*)                         AS entry_count,
-            COALESCE(SUM(quantity), 0)       AS today_qty,
-            MAX(quantity_uom)                AS uom,
-            COUNT(CASE WHEN shift = %s THEN 1 END) AS current_shift_count
-        FROM lueu_lines
-        WHERE entry_date = %s AND (is_deleted IS NOT TRUE)
-          AND equipment_name IS NOT NULL AND equipment_name != ''
-        GROUP BY equipment_name
-    ''', [current_shift, today_s])
-    eq_agg = {r['equipment_name']: dict(r) for r in cur.fetchall()}
-
-    # ── Most recent assignment per equipment today (by highest id) ───────────
-    cur.execute('''
-        SELECT DISTINCT ON (equipment_name)
-            equipment_name,
-            source_display,
-            cargo_name,
-            shift,
-            from_time,
-            to_time,
-            shift_incharge,
-            operator_name,
-            delay_name,
-            id
-        FROM lueu_lines
-        WHERE entry_date = %s AND (is_deleted IS NOT TRUE)
-          AND equipment_name IS NOT NULL AND equipment_name != ''
-        ORDER BY equipment_name, id DESC
-    ''', [today_s])
-    eq_latest = {r['equipment_name']: dict(r) for r in cur.fetchall()}
-
-    # ── Last entry across all equipment today ────────────────────────────────
-    cur.execute('''
-        SELECT equipment_name, to_time, created_by, source_display, id
-        FROM lueu_lines
-        WHERE entry_date = %s AND (is_deleted IS NOT TRUE)
-          AND to_time IS NOT NULL AND to_time != ''
-        ORDER BY id DESC
-        LIMIT 1
-    ''', [today_s])
-    last_row = cur.fetchone()
-    last_entry = dict(last_row) if last_row else None
-
-    conn.close()
-
-    # ── Build equipment board ─────────────────────────────────────────────────
-    equipment_board = []
-    for eq in all_equipment:
-        agg = eq_agg.get(eq, {})
-        lat = eq_latest.get(eq, {})
-        entry_count = int(agg.get('entry_count', 0))
-        today_qty   = round(float(agg.get('today_qty', 0)), 2)
-        cur_shift_count = int(agg.get('current_shift_count', 0))
-
-        if entry_count == 0:
-            status = 'no_data'
-        elif cur_shift_count == 0:
-            status = 'idle'   # has entries today but none in current shift
-        else:
-            status = 'active'
-
-        equipment_board.append({
-            'name':            eq,
-            'status':          status,
-            'entry_count':     entry_count,
-            'today_qty':       today_qty,
-            'uom':             agg.get('uom') or '',
-            'source_display':  lat.get('source_display') or '',
-            'cargo_name':      lat.get('cargo_name') or '',
-            'last_shift':      lat.get('shift') or '',
-            'last_to_time':    lat.get('to_time') or '',
-            'shift_incharge':  lat.get('shift_incharge') or '',
-            'operator_name':   lat.get('operator_name') or '',
-            'delay_name':      lat.get('delay_name') or '',
-        })
-
-    return {
-        'kpis':            kpis,
-        'vcn':             vcn_rows,
-        'shifts':          shifts,
-        'equipment_board': equipment_board,
-        'current_shift':   current_shift,
-        'last_entry':      last_entry,
-        'as_of':           now.strftime('%d-%b-%Y %H:%M:%S'),
-        'today':           today_s,
-        'yesterday':       yesterday_s,
-    }
