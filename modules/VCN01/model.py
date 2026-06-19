@@ -157,19 +157,26 @@ def _operation_type(cur, vcn_id):
 def get_picker_parcels(vcn_id):
     """Operation-type-aware parcel list for cross-module pickers (LDUD).
     Import → consigner rows; Export → export cargo declaration rows.
-    Returns a unified shape: id, parcel_no, cargo_name, consigner_name, quantity."""
+    Returns: id, parcel_no, cargo_name, consigner_name, quantity, terminals (list).
+    Terminals come from the import consigner's unload_terminal (multi-value, comma
+    separated); Export parcels have no terminal source → empty list."""
     conn = get_db()
     cur = get_cursor(conn)
-    if _operation_type(cur, vcn_id) == 'Export':
+    is_export = _operation_type(cur, vcn_id) == 'Export'
+    if is_export:
         cur.execute('''SELECT id, parcel_no, cargo_name, customer_name AS consigner_name,
-                              bl_quantity AS quantity
+                              bl_quantity AS quantity, NULL AS unload_terminal
                        FROM vcn_export_cargo_declaration WHERE vcn_id=%s
                        ORDER BY parcel_seq NULLS LAST, id''', (vcn_id,))
     else:
-        cur.execute('''SELECT id, parcel_no, cargo_name, consigner_name, quantity
+        cur.execute('''SELECT id, parcel_no, cargo_name, consigner_name, quantity, unload_terminal
                        FROM vcn_consigners WHERE vcn_id=%s
                        ORDER BY parcel_seq NULLS LAST, id''', (vcn_id,))
-    rows = [dict(r) for r in cur.fetchall()]
+    rows = []
+    for r in cur.fetchall():
+        d = dict(r)
+        d['terminals'] = [t.strip() for t in str(d.pop('unload_terminal', '') or '').split(',') if t.strip()]
+        rows.append(d)
     conn.close()
     return rows
 

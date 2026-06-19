@@ -153,6 +153,7 @@ def get_parcels(vcn_id):
         'cargo_name': p.get('cargo_name'),
         'consigner_name': p.get('consigner_name'),
         'quantity': p.get('quantity'),
+        'terminals': p.get('terminals', []),
     } for p in model.get_picker_parcels(vcn_id)]
     return jsonify(parcels)
 

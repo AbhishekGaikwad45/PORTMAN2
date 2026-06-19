@@ -252,29 +252,27 @@ def get_parcel_ops(ldud_id):
 
 
 def save_parcel_op(data):
+    # One row = one parcel + terminal + quantity (start/end). The same parcel may
+    # appear on multiple rows (e.g. one per terminal), so no merge/uniqueness guard.
     _clean_empty(data)
     ids = _parse_ids(data.get('parcel_ids'))
+    parcel_ids = ','.join(map(str, ids)) if ids else None
+    quantity = data.get('quantity')
+    if isinstance(quantity, str) and quantity.strip() == '':
+        quantity = None
     conn = get_db()
     cur = get_cursor(conn)
-    tbl = _parcel_table_for_ldud(cur, data['ldud_id'])
-    # Guard: merged parcels must share a single cargo name
-    cargo_name = data.get('cargo_name')
-    if len(ids) > 1:
-        cur.execute(f'SELECT DISTINCT cargo_name FROM {tbl} WHERE id = ANY(%s)', (ids,))
-        cargos = [r['cargo_name'] for r in cur.fetchall()]
-        if len(set(cargos)) > 1:
-            conn.close()
-            raise ValueError('Cannot merge parcels with different cargo names: ' + ', '.join(map(str, cargos)))
-        cargo_name = cargos[0] if cargos else cargo_name
-    parcel_ids = ','.join(map(str, ids)) if ids else None
+    cols = ['parcel_ids', 'cargo_name', 'terminal_name', 'quantity', 'start_dt', 'end_dt']
+    vals = [parcel_ids, data.get('cargo_name'), data.get('terminal_name'), quantity,
+            data.get('start_dt'), data.get('end_dt')]
     if data.get('id'):
-        cur.execute('''UPDATE ldud_parcel_ops SET parcel_ids=%s, cargo_name=%s, start_dt=%s, end_dt=%s WHERE id=%s''',
-                   [parcel_ids, cargo_name, data.get('start_dt'), data.get('end_dt'), data['id']])
+        cur.execute(f"UPDATE ldud_parcel_ops SET {', '.join(f'{c}=%s' for c in cols)} WHERE id=%s",
+                    vals + [data['id']])
         row_id = data['id']
     else:
-        cur.execute('''INSERT INTO ldud_parcel_ops (ldud_id, parcel_ids, cargo_name, start_dt, end_dt)
-                      VALUES (%s, %s, %s, %s, %s) RETURNING id''',
-                   [data['ldud_id'], parcel_ids, cargo_name, data.get('start_dt'), data.get('end_dt')])
+        cur.execute(f'''INSERT INTO ldud_parcel_ops (ldud_id, {', '.join(cols)})
+                       VALUES ({', '.join(['%s'] * (len(cols) + 1))}) RETURNING id''',
+                    [data['ldud_id']] + vals)
         row_id = cur.fetchone()['id']
     conn.commit()
     conn.close()
