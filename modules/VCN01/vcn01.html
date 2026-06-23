@@ -461,6 +461,7 @@
     let quantityUoms = [];
     let defaultUom = '';
     let portNames = [];
+    let berthNames = [];   // PBM01 Port Berth Master
     let moduleConfig = {};
 
     // Store sub-table instances
@@ -680,7 +681,7 @@
     }
 
     async function loadMasterData() {
-        const [vesselsRes, agentsRes, custRes, cargoRes, dsRes, dmRes, cnRes, uomRes, portRes, plRes, trRes, configRes] = await Promise.all([
+        const [vesselsRes, agentsRes, custRes, cargoRes, dsRes, dmRes, cnRes, uomRes, portRes, plRes, trRes, berthRes, configRes] = await Promise.all([
             fetch('/api/module/VCN01/vessels'),
             fetch('/api/module/VAM01/all'),
             fetch('/api/module/VCUM01/all'),
@@ -692,6 +693,7 @@
             fetch('/api/module/VPM01/all'),
             fetch('/api/module/PLM01/all'),
             fetch('/api/module/TRM01/all'),
+            fetch('/api/module/PBM01/all'),
             fetch('/admin/api/config/VCN01')
         ]);
         vessels = await vesselsRes.json();
@@ -726,6 +728,7 @@
         const uomDefaultData = await uomDefaultRes.json();
         defaultUom = uomDefaultData.default || '';
         portNames = await portRes.json();
+        berthNames = await berthRes.json();
         moduleConfig = await configRes.json();
         initFilterConfig();
         initTable();
@@ -786,7 +789,8 @@
             {title: "Vessel Name", field: "vessel_name", width: 130},
             {title: "LOA", field: "loa", editor: canEdit ? "number" : false, width: 75, hozAlign: "right"},
             {title: "DFT", field: "draft", editor: canEdit ? "number" : false, width: 70, hozAlign: "right"},
-            {title: "Berth", field: "berth_name", editor: canEdit ? "input" : false, width: 100},
+            {title: "Berth", field: "berth_name", width: 100, editor: canEdit ? "list" : false,
+                editorParams: function() { return {values: berthNames, autocomplete: true, allowEmpty: true, listOnEmpty: true}; }},
             {title: "NOR Tendered", field: "nor_tendered", width: 140, formatter: datetimeCellFormatter,
                 editor: canEdit ? datetimeEditor : false},
             {title: "Vessel Agent", field: "vessel_agent_name", editor: canEdit ? "list" : false,
