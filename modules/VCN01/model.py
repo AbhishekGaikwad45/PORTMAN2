@@ -497,13 +497,13 @@ def get_approval_eligibility(vcn_id):
         if cur.fetchone()['cnt'] < 1:
             missing.append('Export Cargo Declaration (min 1 complete entry: cargo name, BL no, date, quantity, UOM)')
     else:
-        # import cargo is declared via the consigner (customer details) table
+        # import cargo is declared via the Parcels (consigner) table
         cur.execute('''SELECT COUNT(*) as cnt FROM vcn_consigners
                        WHERE vcn_id=%s AND consigner_name IS NOT NULL AND consigner_name != \'\'
                        AND cargo_name IS NOT NULL AND cargo_name != \'\'
                        AND quantity IS NOT NULL AND quantity != \'\'''', (vcn_id,))
         if cur.fetchone()['cnt'] < 1:
-            missing.append('Consigner Details (min 1 entry with consigner, cargo and quantity)')
+            missing.append('Parcels (min 1 entry with consignee, cargo and quantity)')
 
     conn.close()
     return {'eligible': len(missing) == 0, 'missing': missing}

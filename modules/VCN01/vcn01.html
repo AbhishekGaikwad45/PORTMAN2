@@ -1080,11 +1080,11 @@
             layout: "fitColumns",
             height: 180,
             ajaxURL: `/api/module/VCN01/consigners/${vcnId}`,
-            columnDefaults: { headerSort: false },
+            columnDefaults: { headerSort: true },   // click header to sort asc/desc
             dataLoaded: function() { renderCargoQuotas(vcnId); },
             cellEdited: () => markDirty('consigners'),
             columns: [
-                {title: "Parcel No", field: "parcel_no", width: 130, headerSort: false},
+                {title: "Parcel No", field: "parcel_no", width: 130},
                 {title: "Ln", field: "igm_line_no", width: 70, widthGrow: 0, hozAlign: "center",
                     editor: canEdit ? "input" : false
                 },

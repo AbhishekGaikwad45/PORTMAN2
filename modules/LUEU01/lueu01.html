@@ -82,8 +82,31 @@
     recomputeTotals(pid);
   }
 
+  // ── parcel metrics: avg flow rate, run hours, ETC (Estimated Time of Completion) ──
+  function fmtDateTime(dt) {
+    const p = n => String(n).padStart(2, '0');
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${p(dt.getDate())} ${mon[dt.getMonth()]} ${dt.getFullYear()}, ${p(dt.getHours())}:${p(dt.getMinutes())}`;
+  }
+  function etcText(rate, remaining) {           // estimated completion as a date-time
+    if (!(rate > 0) || !(remaining > 0)) return '';
+    return fmtDateTime(new Date(Date.now() + (remaining / rate) * 3600 * 1000));
+  }
+  function metricsChip(label, val) {
+    return `<span style="display:inline-flex;align-items:baseline;gap:4px;background:#f1f5f9;border-radius:999px;`
+      + `padding:1px 9px;margin-right:5px;font-size:11px;"><span style="color:#64748b;">${label}</span>`
+      + `<b style="color:#0f172a;">${val}</b></span>`;
+  }
+  function metricsHTML(rate, hours, remaining) {
+    let html = metricsChip('Avg', `${(+rate).toFixed(1)} MT/Hr`) + metricsChip('Run', `${(+hours).toFixed(1)} h`);
+    const etc = etcText(rate, remaining);
+    if (etc) html += metricsChip('ETC', etc);
+    if (remaining < 0) html += `<span style="color:#dc2626;font-weight:600;font-size:11px;">over by ${r3(Math.abs(remaining))}</span>`;
+    return html;
+  }
+
   // Total = running cumulative of Last Hour; Remaining = target - Total (computed, not stored).
-  // Also refreshes the per-parcel metrics (avg flow rate, op hours, ETA).
+  // Also refreshes the per-parcel metrics.
   function recomputeTotals(pid) {
     const t = subTables[pid];
     if (!t) return;
@@ -96,13 +119,35 @@
       row.update({_total: r3(cum), _remaining: r3(target - cum)});
     });
     const m = document.getElementById(`metrics-${pid}`);
-    if (m) {
-      const rate = hours > 0 ? cum / hours : 0;
-      const remaining = target - cum;
-      const eta = (rate > 0 && remaining > 0) ? remaining / rate : 0;
-      m.innerHTML = `Avg <b>${rate.toFixed(1)}</b> MT/Hr · ${hours.toFixed(1)} h`
-        + (eta > 0 ? ` · ETA ~<b>${eta.toFixed(1)}</b> h` : '')
-        + (remaining < 0 ? ` · <span style="color:#dc2626">over by ${Math.abs(r3(remaining))}</span>` : '');
+    if (m) m.innerHTML = metricsHTML(hours > 0 ? cum / hours : 0, hours, target - cum);
+  }
+
+  // When a parcel's logged total reaches its target, auto-set its End to the last
+  // logbook row's date + To time (End is not user-editable).
+  async function maybeAutoEnd(pid) {
+    const t = subTables[pid];
+    if (!t) return;
+    const target = parcelTargets[pid] || 0;
+    const rows = t.getRows();
+    let cum = 0;
+    rows.forEach(r => cum += parseFloat(r.getData().quantity || 0) || 0);
+    let end = '';
+    if (target > 0 && cum >= target - 1e-6) {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const d = rows[i].getData();
+        if (d.entry_date && d.to_time) {
+          const hhmm = String(d.to_time).length === 5 ? d.to_time : String(d.to_time).padStart(5, '0');
+          end = `${d.entry_date}T${hhmm}`;
+          break;
+        }
+      }
+    }
+    if (end !== (parcelEnd[pid] || '')) {
+      await fetch('/api/module/LUEU01/parcel/times', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({parcel_op_id: pid, start_dt: parcelStart[pid] || '', end_dt: end})
+      });
+      parcelEnd[pid] = end;
     }
   }
 
@@ -127,13 +172,22 @@
     if (_suppress) return;
     const d = cell.getRow().getData(), pid = d.parcel_op_id, val = cell.getValue();
     const revert = () => { _suppress = true; cell.setValue(cell.getOldValue() || ''); _suppress = false; };
-    if (val && !/^\d{1,2}:\d{2}$/.test(val)) { alert('Time must be HH:MM.'); return revert(); }
-    const start = parcelStart[pid];
-    if (val && start) {
-      const dt = toDT(d.entry_date, val);
-      if (dt && new Date(start) > dt) { alert(`Time cannot be before parcel Start (${start.replace('T', ' ')}).`); return revert(); }
+    // strict HH:MM with valid ranges (rejects e.g. 25:00, 12:75)
+    if (val) {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(val);
+      if (!m || +m[1] > 23 || +m[2] > 59) { alert('Time must be HH:MM (00:00–23:59).'); return revert(); }
     }
-    if (d.from_time && d.to_time && rowHours(d.from_time, d.to_time) <= 0) {
+    // "not before parcel Start" applies only to From (the interval's start).
+    // To may wrap past midnight (e.g. 23:00 → 00:00 is the next day), so it is
+    // NOT compared to Start — only required to be after From.
+    if (cell.getField() === 'from_time' && val && parcelStart[pid]) {
+      const dt = toDT(d.entry_date, val);
+      if (dt && new Date(parcelStart[pid]) > dt) {
+        alert(`From cannot be before parcel Start (${parcelStart[pid].replace('T', ' ')}).`); return revert();
+      }
+    }
+    // To must differ from From (rowHours already treats To < From as next-day wrap)
+    if (d.from_time && d.to_time && d.from_time === d.to_time) {
       alert('"To" must be after "From".'); return revert();
     }
     recomputeTotals(pid);
@@ -209,18 +263,18 @@
       const open = selected.expanded.includes(p.parcel_op_id);
       const statusColor = p.status === 'Completed' ? '#15803d' : '#c2410c';
       const term = p.terminal_name ? ` · ${p.terminal_name}` : '';
-      const eta = (p.avg_rate > 0 && p.remaining_qty > 0) ? ` · ETA ~${(p.remaining_qty / p.avg_rate).toFixed(1)} h` : '';
       return `<div class="parcel-card">
         <div class="parcel-head" onclick="toggleParcel(${p.parcel_op_id})">
           <div><b>${p.parcel_no}</b> — ${p.cargo_name}${term}
-            <span id="status-${p.parcel_op_id}" style="font-size:11px;color:${statusColor};">● ${p.status}</span>
-            <span id="metrics-${p.parcel_op_id}" style="font-size:11px;color:#475569;margin-left:8px;">Avg <b>${p.avg_rate}</b> MT/Hr · ${p.op_hours} h${eta}</span></div>
+            <span id="status-${p.parcel_op_id}" style="font-size:11px;font-weight:600;color:${statusColor};margin-left:6px;">● ${p.status}</span>
+            <span id="metrics-${p.parcel_op_id}" style="margin-left:10px;">${metricsHTML(p.avg_rate, p.op_hours, p.remaining_qty)}</span></div>
           <div class="progress-pill">${p.logged_qty} / ${p.target_qty} ${p.uom} (${pct}%)</div>
         </div>
         <div id="log-wrap-${p.parcel_op_id}" style="display:${open ? 'block' : 'none'};padding:0 8px 8px;">
           <div style="display:flex;gap:16px;align-items:center;padding:6px 2px;font-size:12px;">
             <label>Start: <input type="datetime-local" id="start-${p.parcel_op_id}" value="${p.start_dt || ''}" ${dis} onchange="saveParcelTimes(${p.parcel_op_id})"></label>
-            <label>End: <input type="datetime-local" id="end-${p.parcel_op_id}" value="${p.end_dt || ''}" min="${p.start_dt || ''}" ${dis} onchange="saveParcelTimes(${p.parcel_op_id})"></label>
+            <label style="color:#64748b;">End: <input type="datetime-local" id="end-${p.parcel_op_id}" value="${p.end_dt || ''}" disabled style="background:#f1f5f9;" title="Set automatically when the parcel quantity is completed"></label>
+            <span style="font-size:11px;color:#94a3b8;">(auto on completion)</span>
           </div>
           ${canEdit ? `<div style="margin:4px 0;">
             <button class="lueu-btn" onclick="addLogRow(${p.parcel_op_id}, '${berth.replace(/'/g, "\\'")}')">+ Add</button>
@@ -326,7 +380,8 @@
       const j = await res.json();
       if (j.id && !d.id) row.update({id: j.id});
     }
-    renderParcels();  // refresh progress bars
+    await maybeAutoEnd(pid);   // auto-set End when the parcel is completed
+    renderParcels();           // refresh progress bars + metrics + End
   }
 
   async function deleteLogRow(row) {
@@ -338,6 +393,8 @@
       body: JSON.stringify({ids: [d.id]})
     });
     row.delete();
+    await maybeAutoEnd(d.parcel_op_id);  // re-evaluate completion after removal
+    renderParcels();
   }
 
   async function refreshInPlace() {
