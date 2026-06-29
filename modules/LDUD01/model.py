@@ -267,6 +267,31 @@ def save_parcel_op(data):
         quantity = None
     conn = get_db()
     cur = get_cursor(conn)
+
+    # Guard: quantity can't exceed the VCN parcel quantity. Across rows that share
+    # a parcel (e.g. one parcel split over terminals) the total can't exceed it either.
+    if ids and quantity is not None:
+        tbl = _parcel_table_for_ldud(cur, data['ldud_id'])
+        qty_col = 'bl_quantity' if tbl == 'vcn_export_cargo_declaration' else 'quantity'
+        cur.execute(f'SELECT {qty_col} AS q FROM {tbl} WHERE id = ANY(%s)', (ids,))
+        cap = 0.0
+        for r in cur.fetchall():
+            try:
+                cap += float(str(r['q']).replace(',', '')) if r['q'] is not None else 0.0
+            except (ValueError, TypeError):
+                pass
+        cur.execute('SELECT id, parcel_ids, quantity FROM ldud_parcel_ops WHERE ldud_id=%s', [data['ldud_id']])
+        used = 0.0
+        for r in cur.fetchall():
+            if data.get('id') and r['id'] == data['id']:
+                continue
+            if set(_parse_ids(r['parcel_ids'])) & set(ids):
+                used += float(r['quantity'] or 0)
+        if cap > 0 and float(quantity) + used > cap + 1e-6:
+            conn.close()
+            raise ValueError(f"Quantity {round(float(quantity), 3)} exceeds the available VCN parcel "
+                             f"quantity ({round(cap - used, 3)} MT).")
+
     cols = ['parcel_ids', 'cargo_name', 'terminal_name', 'quantity']
     vals = [parcel_ids, data.get('cargo_name'), data.get('terminal_name'), quantity]
     if data.get('id'):

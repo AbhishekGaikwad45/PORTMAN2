@@ -1383,7 +1383,28 @@
                         return {values: rowTerminals(cell), autocomplete: true, allowEmpty: true, listOnEmpty: true};
                     }},
                 {title: "Quantity", field: "quantity", widthGrow: 1, hozAlign: "right",
-                    editor: canEdit ? "number" : false, editorParams: {min: 0, step: 0.01}},
+                    editor: canEdit ? "number" : false, editorParams: {min: 0, step: 0.01},
+                    cellEdited: function(cell) {
+                        const row = cell.getRow();
+                        const myIds = String(row.getData().parcel_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+                        if (!myIds.length) return;
+                        // cap = sum of these parcels' VCN quantities
+                        let cap = 0;
+                        myIds.forEach(id => { const p = parcelById[id]; if (p && p.quantity != null) cap += parseFloat(p.quantity) || 0; });
+                        // minus quantity already allocated on OTHER rows sharing any of these parcels
+                        let used = 0;
+                        subTables[ldudId].parcel_ops.getRows().forEach(r => {
+                            if (r === row) return;
+                            const ids = String(r.getData().parcel_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+                            if (ids.some(id => myIds.includes(id))) used += parseFloat(r.getData().quantity || 0) || 0;
+                        });
+                        const avail = Math.round((cap - used) * 1000) / 1000;
+                        const v = parseFloat(cell.getValue() || 0) || 0;
+                        if (cap > 0 && v > avail) {
+                            alert(`Quantity exceeds the available VCN parcel quantity (${Math.max(0, avail)} MT) — clamped.`);
+                            cell.setValue(Math.max(0, avail));
+                        }
+                    }},
                 canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, widthGrow: 0, hozAlign: "center", headerSort: false,
                     cellClick: function(e, cell) { deleteSubRow('parcel_ops', cell.getRow().getData().id, ldudId); }
                 } : null
