@@ -625,10 +625,21 @@
 
     // datetimeEditor and dateEditor are now global (defined in base.html)
 
-    // LDUD01 shows all timestamps as DD-MM-YYYY HH:MM (drop the global " IST" suffix).
-    // Overrides the global formatter for this page only.
+    // LDUD01 shows all timestamps as DD-MM-YYYY HH:MM. Overrides the global
+    // formatter for this page only. Handles two shapes:
+    //   - text columns: ISO 'YYYY-MM-DDTHH:MM'  → via global formatDateTime
+    //   - timestamp columns: RFC822 'Fri, 26 Jun 2026 18:30:00 GMT' (naive, so
+    //     read the components directly — no timezone conversion)
     window.datetimeCellFormatter = function(cell) {
-        return formatDateTime(cell.getValue()).replace(/ IST$/, '');
+        var val = cell.getValue();
+        if (!val) return '';
+        var m = String(val).match(/(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}):(\d{2})/);
+        if (m) {
+            var mon = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',
+                       Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'}[m[2]] || '01';
+            return String(m[1]).padStart(2, '0') + '-' + mon + '-' + m[3] + ' ' + m[4] + ':' + m[5];
+        }
+        return formatDateTime(val).replace(/ IST$/, '');
     };
 
     function normalizeDate(value) {

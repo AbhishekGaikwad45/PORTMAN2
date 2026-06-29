@@ -54,7 +54,7 @@ def get_started_parcels(vcn_id):
     cur = get_cursor(conn)
     cur.execute('''
         SELECT po.id AS parcel_op_id, po.parcel_ids, po.cargo_name, po.terminal_name,
-               po.quantity AS target_qty, po.start_dt, po.end_dt
+               po.quantity AS op_qty, po.start_dt, po.end_dt, po.expected_start
         FROM ldud_parcel_ops po
         JOIN ldud_header l ON l.id = po.ldud_id
         WHERE l.vcn_id = %s
@@ -62,15 +62,24 @@ def get_started_parcels(vcn_id):
     ''', [vcn_id])
     parcels = [dict(r) for r in cur.fetchall()]
 
-    # resolve parcel_no label from the operation-type source table
+    # resolve parcel_no label + CURRENT quantity from the operation-type source
+    # table, so the validation target tracks VCN updates (falls back to the
+    # parcel-op's own quantity when the parcels can't be resolved).
     cur.execute('SELECT operation_type FROM vcn_header WHERE id=%s', [vcn_id])
     row = cur.fetchone()
-    tbl = 'vcn_export_cargo_declaration' if (row or {}).get('operation_type') == 'Export' else 'vcn_consigners'
+    is_export = (row or {}).get('operation_type') == 'Export'
+    tbl = 'vcn_export_cargo_declaration' if is_export else 'vcn_consigners'
+    qty_col = 'bl_quantity' if is_export else 'quantity'
     all_ids = sorted({pid for p in parcels for pid in _parse_ids(p['parcel_ids'])})
-    labels = {}
+    labels, src_qty = {}, {}
     if all_ids:
-        cur.execute(f'SELECT id, parcel_no FROM {tbl} WHERE id = ANY(%s)', [all_ids])
-        labels = {r['id']: (r['parcel_no'] or f"#{r['id']}") for r in cur.fetchall()}
+        cur.execute(f'SELECT id, parcel_no, {qty_col} AS q FROM {tbl} WHERE id = ANY(%s)', [all_ids])
+        for r in cur.fetchall():
+            labels[r['id']] = r['parcel_no'] or f"#{r['id']}"
+            try:
+                src_qty[r['id']] = float(str(r['q']).replace(',', '')) if r['q'] is not None else 0.0
+            except (ValueError, TypeError):
+                src_qty[r['id']] = 0.0
 
     # logged qty + operating hours per parcel (non-deleted), for total & avg flow rate
     pop_ids = [p['parcel_op_id'] for p in parcels]
@@ -88,7 +97,8 @@ def get_started_parcels(vcn_id):
     out = []
     for p in parcels:
         ids = _parse_ids(p['parcel_ids'])
-        target = float(p['target_qty'] or 0)
+        # target tracks the current VCN parcel quantity; fall back to the parcel-op snapshot
+        target = sum(src_qty.get(i, 0.0) for i in ids) or float(p['op_qty'] or 0)
         logged, hours = agg.get(p['parcel_op_id'], [0.0, 0.0])
         out.append({
             'parcel_op_id': p['parcel_op_id'],
@@ -101,11 +111,21 @@ def get_started_parcels(vcn_id):
             'op_hours': round(hours, 2),
             'avg_rate': round(logged / hours, 2) if hours > 0 else 0,
             'uom': 'MT',
+            'expected_start': p['expected_start'],
             'start_dt': p['start_dt'],
             'end_dt': p['end_dt'],
             'status': 'Completed' if p['end_dt'] else 'In Progress',
         })
     return out
+
+
+def set_expected_start(parcel_op_id, expected_start):
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('UPDATE ldud_parcel_ops SET expected_start=%s WHERE id=%s',
+                [expected_start or None, parcel_op_id])
+    conn.commit()
+    conn.close()
 
 
 def set_parcel_times(parcel_op_id, start_dt, end_dt):
