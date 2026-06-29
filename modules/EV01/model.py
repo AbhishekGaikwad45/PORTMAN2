@@ -309,17 +309,32 @@ def _clean_empty(data):
             data[k] = None
     return data
 
+_MOVED = 'Closed - Other Terminal'
+
+
 def get_data(page=1, size=20, filters=None):
+    # Vessels moved to another terminal are hidden from the main grid
+    # (shown in the bottom accordion via get_moved_to_terminal()).
     conn = get_db()
     cur = get_cursor(conn)
     try:
-        cur.execute('SELECT COUNT(*) FROM expected_vessels')
+        cur.execute('SELECT COUNT(*) FROM expected_vessels WHERE doc_status IS DISTINCT FROM %s', [_MOVED])
         total = cur.fetchone()['count']
-        cur.execute('SELECT * FROM expected_vessels ORDER BY id DESC LIMIT %s OFFSET %s',
-                    [size, (page - 1) * size])
+        cur.execute('SELECT * FROM expected_vessels WHERE doc_status IS DISTINCT FROM %s ORDER BY id DESC LIMIT %s OFFSET %s',
+                    [_MOVED, size, (page - 1) * size])
         return [dict(r) for r in cur.fetchall()], total
     finally:
         conn.close()
+
+
+def get_moved_to_terminal():
+    """Vessels closed because they were handled at another terminal."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT * FROM expected_vessels WHERE doc_status=%s ORDER BY id DESC', [_MOVED])
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
 def save(data, username=None):
     _clean_empty(data)

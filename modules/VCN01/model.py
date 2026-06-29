@@ -208,26 +208,12 @@ def _parse_qty(v):
 
 
 def save_consigner(data):
+    # The per-cargo quota (from EV01) is informational only — the "Available per
+    # cargo" panel shows allocated vs total and flags over-allocation, but parcels
+    # are NOT blocked from exceeding it.
     _clean_empty(data)
     conn = get_db()
     cur = get_cursor(conn)
-    # Quota guard: total parcels for a cargo can't exceed its captured per-cargo
-    # quantity (only enforced when a quota exists for that cargo on this VCN).
-    cargo = data.get('cargo_name')
-    if data.get('vcn_id') and cargo:
-        cur.execute('SELECT total_qty FROM vcn_cargo_quota WHERE vcn_id=%s AND cargo_name=%s',
-                    [data['vcn_id'], cargo])
-        q = cur.fetchone()
-        if q and q['total_qty'] is not None:
-            cur.execute('SELECT id, quantity FROM vcn_consigners WHERE vcn_id=%s AND cargo_name=%s',
-                        [data['vcn_id'], cargo])
-            others = sum(_parse_qty(r['quantity']) for r in cur.fetchall()
-                         if not (data.get('id') and r['id'] == data['id']))
-            new_total = others + _parse_qty(data.get('quantity'))
-            if new_total > float(q['total_qty']) + 1e-6:
-                conn.close()
-                raise ValueError(f"{cargo} parcels total {round(new_total, 3)} exceed available "
-                                 f"{round(float(q['total_qty']), 3)}.")
     if data.get('id'):
         cur.execute(f"UPDATE vcn_consigners SET {', '.join(f'{c}=%s' for c in _CONSIGNER_COLS)} WHERE id=%s",
                    [data.get(c) for c in _CONSIGNER_COLS] + [data['id']])

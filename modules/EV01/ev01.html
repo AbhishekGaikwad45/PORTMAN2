@@ -167,6 +167,13 @@
 </div>
 
 <div id="table"></div>
+
+<details id="movedAccordion" style="margin-top:12px;border:1px solid #e2e8f0;border-radius:6px;" ontoggle="if(this.open) loadMovedVessels()">
+    <summary style="padding:8px 12px;cursor:pointer;font-weight:600;color:#475569;background:#f8fafc;border-radius:6px;">
+        Moved to Other Terminal <span id="movedCount" style="color:#94a3b8;font-weight:400;"></span>
+    </summary>
+    <div id="movedBody" style="padding:8px 12px;"></div>
+</details>
 {% endblock %}
 
 {% block scripts %}
@@ -215,6 +222,29 @@
         closeTerminalModal();
         alert(`Vessel closed — moved to ${terminal}.`);
         table.setData('/api/module/EV01/data');
+        loadMovedVessels();
+    }
+
+    async function loadMovedVessels() {
+        let rows = [];
+        try { rows = await fetch('/api/module/EV01/moved_to_terminal').then(r => r.json()); } catch (e) {}
+        const cnt = document.getElementById('movedCount');
+        if (cnt) cnt.textContent = `(${rows.length})`;
+        const body = document.getElementById('movedBody');
+        if (!body) return;
+        if (!rows.length) { body.innerHTML = '<div style="color:#94a3b8;font-size:12px;">None.</div>'; return; }
+        const fmt = v => v ? new Date(v).toLocaleString('en-GB', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+        body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="text-align:left;color:#64748b;border-bottom:1px solid #e2e8f0;">
+                <th style="padding:4px 8px;">Vessel</th><th style="padding:4px 8px;">VIA No.</th>
+                <th style="padding:4px 8px;">Cargo</th><th style="padding:4px 8px;">Moved to Terminal</th>
+                <th style="padding:4px 8px;">ETA</th></tr></thead>
+            <tbody>` + rows.map(r => `<tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:4px 8px;">${r.vessel_name || ''}</td>
+                <td style="padding:4px 8px;">${r.via_number || ''}</td>
+                <td style="padding:4px 8px;">${r.cargo_name || ''}</td>
+                <td style="padding:4px 8px;">${r.terminal_name || ''}</td>
+                <td style="padding:4px 8px;">${fmt(r.eta)}</td></tr>`).join('') + `</tbody></table>`;
     }
 
     const permissions = {
@@ -582,5 +612,6 @@
 
     initTable();
     loadTerminals();
+    loadMovedVessels();   // populate the bottom accordion count
 </script>
 {% endblock %}

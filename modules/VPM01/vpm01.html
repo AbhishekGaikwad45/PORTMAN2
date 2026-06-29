@@ -30,6 +30,7 @@
             layout: "fitColumns",
             columns: [
                 {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+                {title: "Port Code", field: "port_code", editor: canEdit ? "input" : false, width: 140},
                 {title: "Port Name", field: "name", editor: canEdit ? "input" : false}
             ],
             pagination: true,

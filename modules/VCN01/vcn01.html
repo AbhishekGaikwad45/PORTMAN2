@@ -751,8 +751,14 @@
         const vesselOptions = {};
         vessels.forEach(v => { vesselOptions[v.value] = v.value; });
 
+        // value = port name (stored/displayed); label = "CODE — Name" so the
+        // autocomplete dropdown matches on either the port code or the name.
         const portOptions = {};
-        portNames.forEach(p => { portOptions[p] = p; });
+        portNames.forEach(p => {
+            const name = (p && typeof p === 'object') ? p.name : p;
+            const code = (p && typeof p === 'object') ? p.port_code : '';
+            portOptions[name] = code ? `${code} — ${name}` : name;
+        });
 
         const columns = [
             {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},

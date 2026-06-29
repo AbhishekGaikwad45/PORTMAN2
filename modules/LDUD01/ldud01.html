@@ -717,6 +717,8 @@
             {title: "BL Quantity", field: "bl_quantities_display", width: 160, frozen: true,
                 formatter: function(cell) { return cargoColorBadges(cell.getValue()); }
             },
+            {title: "Anchorage Time", field: "anchored_datetime", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter},
             {title: "NOR Tendered", field: "nor_tendered", editor: canEdit ? datetimeEditor : false, width: 150,
                 formatter: datetimeCellFormatter},
             {title: "Agent Name", field: "agent_name", width: 120},

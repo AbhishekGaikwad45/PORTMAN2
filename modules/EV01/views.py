@@ -95,6 +95,11 @@ def upload_commit():
     return jsonify({'success': True, **result})
 
 
+@bp.route('/api/module/EV01/moved_to_terminal')
+@login_required
+def moved_to_terminal_list():
+    return jsonify(model.get_moved_to_terminal())
+
 @bp.route('/api/module/EV01/move_to_terminal/<int:ev_id>', methods=['POST'])
 @login_required
 def move_to_terminal(ev_id):
