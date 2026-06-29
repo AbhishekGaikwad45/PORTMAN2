@@ -122,7 +122,17 @@ def delete_header(row_id):
 # line: product + receiver + BL). vessel agent is captured on the header.
 _CONSIGNER_COLS = ['igm_line_no', 'bl_no', 'bl_date', 'cargo_name', 'quantity',
                    'consigner_name', 'importer_name',
-                   'pipeline_name', 'unload_terminal']
+                   'pipeline_name', 'unload_terminal',
+                   'toll_applicable', 'equipment_names']
+
+
+def get_equipment():
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT name FROM equipment ORDER BY name')
+    rows = [r['name'] for r in cur.fetchall()]
+    conn.close()
+    return rows
 
 
 def _parcel_no(cur, vcn_id, seq):

@@ -450,6 +450,7 @@
     let vesselAgents = [];
     let customers = [];
     let pipelineNames = [];
+    let equipmentNames = [];
     let terminalNames = [];
     let pipelineTerminalMap = {};   // pipeline_name -> [terminal_name,...] (PLTM01)
     let cargoTypes = [];
@@ -701,6 +702,7 @@
         vesselAgents = await agentsRes.json();
         customers = await custRes.json();
         pipelineNames = await plRes.json();
+        try { equipmentNames = await (await fetch('/api/module/VCN01/equipment')).json(); } catch (e) { equipmentNames = []; }
         terminalNames = await trRes.json();
         // Pipeline → Terminal mapping (PLTM01) for dependent terminal filtering
         try {
@@ -1139,6 +1141,11 @@
                     // terminal is only selectable once a pipeline is chosen (PLTM01 mapping drives the options)
                     editable: function(cell) { return canEdit && _splitMulti(cell.getRow().getData().pipeline_name).length > 0; }
                 },
+                {title: "Toll", field: "toll_applicable", width: 70, widthGrow: 0, hozAlign: "center",
+                    formatter: "tickCross", formatterParams: {allowEmpty: true},
+                    editor: canEdit ? "tickCross" : false, editorParams: {tristate: false}},
+                {title: "Equipment", field: "equipment_names", widthGrow: 1.2, formatter: cargoPillFormatter,
+                    editor: canEdit ? makeMultiSelectEditor(equipmentNames) : false},
                 canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 60, widthGrow: 0, hozAlign: "center", headerSort: false,
                     cellClick: function(e, cell) { deleteSubRow('consigners', cell.getRow().getData().id, vcnId); }
                 } : null

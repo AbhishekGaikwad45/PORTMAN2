@@ -49,6 +49,11 @@ def get_data():
 def get_vessels():
     return jsonify(model.get_vessels())
 
+@bp.route('/api/module/VCN01/equipment')
+@login_required
+def get_equipment():
+    return jsonify(model.get_equipment())
+
 @bp.route('/api/module/VCN01/save', methods=['POST'])
 @login_required
 def save():
