@@ -609,6 +609,14 @@
         // Convert stored YYYY-MM-DDTHH:MM to display DD-MM-YYYY HH:MM
         function _dbToDisplay(val) {
             if (!val) return '';
+            // RFC822 ('Fri, 26 Jun 2026 18:30:00 GMT') from a timestamp column —
+            // read components directly (no tz shift) so the editor never opens blank.
+            var rfc = String(val).match(/(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}):(\d{2})/);
+            if (rfc) {
+                var mon = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',
+                           Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'}[rfc[2]] || '01';
+                return String(rfc[1]).padStart(2,'0') + '-' + mon + '-' + rfc[3] + ' ' + rfc[4] + ':' + rfc[5];
+            }
             var s = String(val).replace('T', ' ');
             var parts = s.split(' ');
             if (parts.length < 2) return '';
