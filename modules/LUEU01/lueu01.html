@@ -357,7 +357,13 @@
 
   function currentShift() { const h = new Date().getHours(); return h >= 6 && h < 14 ? 'A' : h >= 14 && h < 22 ? 'B' : 'C'; }
   function _tmin(hhmm) { const a = String(hhmm).split(':'); return (+a[0] || 0) * 60 + (+a[1] || 0); }
-  function _addDays(dateStr, n) { const d = new Date(dateStr + 'T00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+  // UTC-based so the local timezone can't shift the date back (e.g. IST +5:30).
+  function _addDays(dateStr, n) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + n);
+    return dt.toISOString().slice(0, 10);
+  }
 
   function addLogRow(pid, defaultBerth) {
     const t = subTables[pid];
