@@ -66,13 +66,23 @@
     return isNaN(dt) ? null : dt;
   }
 
-  // Expected (planned) start — persisted on the LDUD parcel-op.
+  // Expected (planned) start + flow rate — persisted on the LDUD parcel-op.
+  // The planned ETC is derived from these; the actual ETC stays log-driven.
   async function saveExpectedStart(pid) {
     const v = document.getElementById(`exp-${pid}`).value;
+    const rate = document.getElementById(`exprate-${pid}`).value;
     await fetch('/api/module/LUEU01/parcel/expected_start', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({parcel_op_id: pid, expected_start: v})
+      body: JSON.stringify({parcel_op_id: pid, expected_start: v, expected_flow_rate: rate})
     });
+    const span = document.getElementById(`expetc-${pid}`);
+    if (span) span.innerHTML = expEtcChip(rate, parcelTargets[pid] || 0, v);
+  }
+
+  // Planned ETC = expected Start + target / expected flow rate.
+  function expEtcChip(rate, target, startDt) {
+    const etc = etcText(rate, target, startDt);
+    return etc ? metricsChip('ETC (Exp)', etc) : '';
   }
 
   // Parcel start/end are entered here in LUEU01 (persisted on the LDUD parcel-op).
@@ -126,8 +136,10 @@
     let cum = 0, hours = 0;
     t.getRows().forEach(row => {
       const d = row.getData();
+      // ponytail: once the parcel qty is complete, later rows add no Run hours/ETC
+      const complete = target > 0 && cum >= target - 1e-6;
       cum += parseFloat(d.quantity || 0) || 0;
-      hours += rowHours(d.from_time, d.to_time);
+      if (!complete) hours += rowHours(d.from_time, d.to_time);
     });
     t.getRows().forEach(r => r.reformat());   // refresh self-computing Total/Rem cells
     const m = document.getElementById(`metrics-${pid}`);
@@ -285,6 +297,8 @@
         <div id="log-wrap-${p.parcel_op_id}" style="display:${open ? 'block' : 'none'};padding:0 8px 8px;">
           <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:6px 2px;font-size:12px;">
             <label>Expected Start: <input type="datetime-local" id="exp-${p.parcel_op_id}" value="${p.expected_start || ''}" ${dis} onchange="saveExpectedStart(${p.parcel_op_id})"></label>
+            <label>Expected Rate: <input type="number" id="exprate-${p.parcel_op_id}" value="${p.expected_flow_rate || ''}" step="0.01" min="0" style="width:80px;" ${dis} onchange="saveExpectedStart(${p.parcel_op_id})"> MT/Hr</label>
+            <span id="expetc-${p.parcel_op_id}">${expEtcChip(p.expected_flow_rate, p.target_qty, p.expected_start)}</span>
             <label>Start: <input type="datetime-local" id="start-${p.parcel_op_id}" value="${p.start_dt || ''}" ${dis} onchange="saveParcelTimes(${p.parcel_op_id})"></label>
             <label style="color:#64748b;">End: <input type="datetime-local" id="end-${p.parcel_op_id}" value="${p.end_dt || ''}" disabled style="background:#f1f5f9;" title="Set automatically when the parcel quantity is completed"></label>
             <span style="font-size:11px;color:#94a3b8;">(auto on completion)</span>

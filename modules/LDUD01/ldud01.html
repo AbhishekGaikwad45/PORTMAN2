@@ -488,18 +488,13 @@
     let holdMasterList = [];
     let equipmentList = [];
     let subTables = {};
-    let stowagePlanData = {}; // Store stowage plan data per LDUD ID
 
     // Dirty tracking
     let dirtySubSections = {};
     let headerDirty = false;
     let _isSaving = false;
     let dirtyRowIds = new Set();
-    let stowageHoldMeta = {}; // Hold metadata per LDUD ID
-    let vesselOpsHoldFields = {}; // Dynamic vessel ops hold columns per LDUD ID
     let currentOperationTypes = {}; // Track operation type per ldud ID
-    let holdCargoConfig = {}; // Per-hold cargo config per LDUD ID
-    let vcnCargoCache = {}; // VCN-specific cargo names per LDUD ID (for Export)
     let currentLdudId = null;
 
     // Module-scope so openDetailsModal and closure functions can access them
@@ -650,17 +645,6 @@
         return str;
     }
 
-    function sortHoldNames(a, b) {
-        const aNumMatch = String(a).match(/\d+/);
-        const bNumMatch = String(b).match(/\d+/);
-        const aNum = aNumMatch ? parseInt(aNumMatch[0], 10) : NaN;
-        const bNum = bNumMatch ? parseInt(bNumMatch[0], 10) : NaN;
-
-        if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aNum !== bNum) {
-            return aNum - bNum;
-        }
-        return String(a).localeCompare(String(b));
-    }
 
     const CARGO_COLORS = [
         {bg:'#dbeafe', text:'#1d4ed8', border:'#93c5fd'},  // blue
@@ -1000,92 +984,7 @@
         const mainRow = table.getRows().find(r => r.getData().id === ldudId);
         const vcnId = mainRow ? mainRow.getData().vcn_id : null;
 
-        // Fetch stowage plan for this VCN
-        let holdOptions = {};
-        stowageHoldMeta[ldudId] = {};
-        vesselOpsHoldFields[ldudId] = [];
-        if (vcnId) {
-            // Stowage plan was removed from VCN01 for JNPA (liquid berths) —
-            // tolerate a missing endpoint and fall back to no holds.
-            let stowageData = [];
-            try {
-                const stowageRes = await fetch(`/api/module/VCN01/stowage/${vcnId}`);
-                if (stowageRes.ok) stowageData = await stowageRes.json();
-            } catch (e) { /* no stowage source — keep empty */ }
-            stowagePlanData[ldudId] = stowageData;
-
-            // Build unique holds with their total quantities
-            const holdMap = {};
-            const cargoMap = {};
-            stowageData.forEach(s => {
-                if (s.hold_name) {
-                    if (!holdMap[s.hold_name]) {
-                        holdMap[s.hold_name] = 0;
-                    }
-                    holdMap[s.hold_name] += parseFloat(s.hatchwise_quantity || 0);
-
-                    if (!cargoMap[s.hold_name]) {
-                        cargoMap[s.hold_name] = new Set();
-                    }
-                    if (s.cargo_name) {
-                        cargoMap[s.hold_name].add(s.cargo_name);
-                    }
-                }
-            });
-
-            const holdNames = Object.keys(holdMap).sort(sortHoldNames);
-            holdNames.forEach(h => {
-                holdOptions[h] = h;
-                const cargoNamesForHold = cargoMap[h] ? Array.from(cargoMap[h]).join(', ') : '';
-                stowageHoldMeta[ldudId][h] = {
-                    stowage_qty: holdMap[h] || 0,
-                    cargo_name: cargoNamesForHold
-                };
-            });
-
-            vesselOpsHoldFields[ldudId] = holdNames.map((holdName, idx) => ({
-                hold_name: holdName,
-                field: `hold_${idx + 1}`,
-                stowage_qty: stowageHoldMeta[ldudId][holdName] ? stowageHoldMeta[ldudId][holdName].stowage_qty : 0,
-                cargo_name: stowageHoldMeta[ldudId][holdName] ? stowageHoldMeta[ldudId][holdName].cargo_name : ''
-            }));
-        } else {
-            stowagePlanData[ldudId] = [];
-        }
-
-        // ponytail: hold_cargo config removed with the MV-discharge sub-table
-        holdCargoConfig[ldudId] = {};
-
-        if (operationType === 'Export' && vcnId) {
-            // Build export holds from vessel's no_of_holds
-            const vesselHoldsRes = await fetch(`/api/module/VCN01/vessel_holds/${vcnId}`);
-            const vesselHoldsData = await vesselHoldsRes.json();
-            const numHolds = vesselHoldsData.no_of_holds || 0;
-            const exportHolds = [];
-            for (let i = 1; i <= numHolds; i++) {
-                const holdName = `Hold ${i}`;
-                exportHolds.push({
-                    hold_name: holdName,
-                    field: `hold_${i}`,
-                    stowage_qty: 0,
-                    cargo_name: holdCargoConfig[ldudId][holdName] || ''
-                });
-            }
-            vesselOpsHoldFields[ldudId] = exportHolds;
-
-            // Fetch cargo names specific to this VCN for the hold cargo panel (both import+export tables)
-            const vcnExportCargoRes = await fetch(`/api/module/VCN01/all_cargo_names/${vcnId}`);
-            vcnCargoCache[ldudId] = await vcnExportCargoRes.json();
-        } else if (operationType !== 'Export') {
-            // Import: override stowage cargo with saved holdCargoConfig
-            vesselOpsHoldFields[ldudId].forEach(def => {
-                if (holdCargoConfig[ldudId][def.hold_name]) {
-                    def.cargo_name = holdCargoConfig[ldudId][def.hold_name];
-                }
-            });
-        }
-
-        // Fetch parcels for this VCN so we can show a Parcel picker in the vessel-ops sub-table
+        // Fetch parcels for this VCN to drive the Parcel Operations picker.
         const parcelOptions = {};
         let parcelList = [];
         if (vcnId) {

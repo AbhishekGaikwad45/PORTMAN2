@@ -54,7 +54,8 @@ def get_started_parcels(vcn_id):
     cur = get_cursor(conn)
     cur.execute('''
         SELECT po.id AS parcel_op_id, po.parcel_ids, po.cargo_name, po.terminal_name,
-               po.quantity AS op_qty, po.start_dt, po.end_dt, po.expected_start
+               po.quantity AS op_qty, po.start_dt, po.end_dt, po.expected_start,
+               po.expected_flow_rate
         FROM ldud_parcel_ops po
         JOIN ldud_header l ON l.id = po.ldud_id
         WHERE l.vcn_id = %s
@@ -81,15 +82,28 @@ def get_started_parcels(vcn_id):
             except (ValueError, TypeError):
                 src_qty[r['id']] = 0.0
 
-    # logged qty + operating hours per parcel (non-deleted), for total & avg flow rate
+    # per-parcel target (current VCN parcel qty, falling back to the op snapshot)
+    targets = {}
+    for p in parcels:
+        ids = _parse_ids(p['parcel_ids'])
+        targets[p['parcel_op_id']] = sum(src_qty.get(i, 0.0) for i in ids) or float(p['op_qty'] or 0)
+
+    # logged qty + operating hours per parcel (non-deleted), for total & avg flow rate.
+    # ponytail: hardcoded completion cap — once cumulative qty reaches the target,
+    # later log rows (top-ups, idle entries) are dropped from Run hours so they
+    # can't drag the actual ETC out. Rows must be ordered for the cap to apply.
     pop_ids = [p['parcel_op_id'] for p in parcels]
     agg = {}  # parcel_op_id -> [logged_qty, hours]
     if pop_ids:
         cur.execute('''SELECT parcel_op_id, from_time, to_time, COALESCE(quantity,0) AS q
                        FROM lueu_parcel_log
-                       WHERE parcel_op_id = ANY(%s) AND is_deleted IS NOT TRUE''', [pop_ids])
+                       WHERE parcel_op_id = ANY(%s) AND is_deleted IS NOT TRUE
+                       ORDER BY parcel_op_id, entry_date, from_time, id''', [pop_ids])
         for r in cur.fetchall():
             a = agg.setdefault(r['parcel_op_id'], [0.0, 0.0])
+            tgt = targets.get(r['parcel_op_id'], 0)
+            if tgt > 0 and a[0] >= tgt - 1e-6:
+                continue  # parcel already complete — ignore this row
             a[0] += float(r['q'] or 0)
             a[1] += _hours(r['from_time'], r['to_time'])
     conn.close()
@@ -97,8 +111,7 @@ def get_started_parcels(vcn_id):
     out = []
     for p in parcels:
         ids = _parse_ids(p['parcel_ids'])
-        # target tracks the current VCN parcel quantity; fall back to the parcel-op snapshot
-        target = sum(src_qty.get(i, 0.0) for i in ids) or float(p['op_qty'] or 0)
+        target = targets[p['parcel_op_id']]
         logged, hours = agg.get(p['parcel_op_id'], [0.0, 0.0])
         out.append({
             'parcel_op_id': p['parcel_op_id'],
@@ -112,6 +125,7 @@ def get_started_parcels(vcn_id):
             'avg_rate': round(logged / hours, 2) if hours > 0 else 0,
             'uom': 'MT',
             'expected_start': p['expected_start'],
+            'expected_flow_rate': _num(p['expected_flow_rate']),
             'start_dt': p['start_dt'],
             'end_dt': p['end_dt'],
             'status': 'Completed' if p['end_dt'] else 'In Progress',
@@ -119,11 +133,11 @@ def get_started_parcels(vcn_id):
     return out
 
 
-def set_expected_start(parcel_op_id, expected_start):
+def set_expected_start(parcel_op_id, expected_start, expected_flow_rate=None):
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('UPDATE ldud_parcel_ops SET expected_start=%s WHERE id=%s',
-                [expected_start or None, parcel_op_id])
+    cur.execute('UPDATE ldud_parcel_ops SET expected_start=%s, expected_flow_rate=%s WHERE id=%s',
+                [expected_start or None, _num(expected_flow_rate), parcel_op_id])
     conn.commit()
     conn.close()
 

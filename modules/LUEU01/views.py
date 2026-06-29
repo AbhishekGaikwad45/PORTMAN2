@@ -68,7 +68,7 @@ def set_expected_start():
     pid = data.get('parcel_op_id')
     if not pid:
         return jsonify({'error': 'Missing parcel_op_id'}), 400
-    model.set_expected_start(pid, data.get('expected_start'))
+    model.set_expected_start(pid, data.get('expected_start'), data.get('expected_flow_rate'))
     return jsonify({'success': True})
 
 
