@@ -524,6 +524,15 @@
 
     // Multi-select checkbox dropdown editor; optionsList may be an array or a
     // function(cell) -> array (used for pipeline-dependent terminal options).
+    // BL Date can't be in the future
+    function validateBlDate(cell) {
+        const v = cell.getValue();
+        if (!v) return;
+        const d = new Date(String(v).replace(' ', 'T'));
+        const today = new Date(); today.setHours(23, 59, 59, 999);
+        if (!isNaN(d) && d > today) { alert('BL Date cannot be in the future.'); cell.setValue(cell.getOldValue() || ''); }
+    }
+
     function makeMultiSelectEditor(optionsList) {
         return function(cell, onRendered, success, cancel) {
             const opts = (typeof optionsList === 'function') ? (optionsList(cell) || []) : optionsList;
@@ -1101,7 +1110,7 @@
                 },
                 {title: "BL No", field: "bl_no", widthGrow: 1, editor: canEdit ? "input" : false},
                 {title: "BL Date", field: "bl_date", widthGrow: 0.9, editor: canEdit ? dateEditor : false,
-                    formatter: dateCellFormatter
+                    formatter: dateCellFormatter, cellEdited: validateBlDate
                 },
                 {title: "Cargo Name", field: "cargo_name", widthGrow: 1.2, editor: canEdit ? "list" : false,
                     editorParams: {values: cargoOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
@@ -1240,7 +1249,7 @@
                         editorParams: {values: customerOptions, autocomplete: true, allowEmpty: true}
                     },
                     {title: "BL No", field: "bl_no", widthGrow: 1, editor: canEdit ? "input" : false},
-                    {title: "BL Date", field: "bl_date", widthGrow: 1, editor: canEdit ? dateEditor : false, formatter: dateCellFormatter},
+                    {title: "BL Date", field: "bl_date", widthGrow: 1, editor: canEdit ? dateEditor : false, formatter: dateCellFormatter, cellEdited: validateBlDate},
                     {title: "BL Quantity", field: "bl_quantity", widthGrow: 1, editor: canEdit ? "number" : false, hozAlign: "right",
                         editorParams: {min: 0, step: 0.01},
                         formatter: function(cell) {

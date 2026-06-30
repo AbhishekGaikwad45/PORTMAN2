@@ -7,6 +7,15 @@ def _clean_empty(data):
             data[k] = None
     return data
 
+def default_discharge_port():
+    """Name of the port flagged default in VPM01 (auto-fills VCN Discharge Port)."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("SELECT name FROM port_master WHERE is_default_discharge LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    return row['name'] if row else None
+
 def get_next_doc_num():
     import datetime
     conn = get_db()

@@ -142,6 +142,7 @@ def move_to_vcn(ev_id):
         'nor_tendered':      ev.get('nor'),
         'berth_name':        ev.get('berth_name'),
         'doc_date':          str(ev.get('eta').date()) if ev.get('eta') else None,
+        'discharge_port':    vcn_model.default_discharge_port(),
     }
     vcn_id, vcn_doc_num = vcn_model.save_header(vcn_data)
     # Per-cargo totals (available-to-allocate) captured before parcels are saved,
