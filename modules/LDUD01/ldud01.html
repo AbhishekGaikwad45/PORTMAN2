@@ -678,11 +678,15 @@
     }
     function validateSofOrder(cell) {
         const field = cell.getField(), data = cell.getRow().getData();
-        const idx = SOF_ORDER.indexOf(field);
         const cur = _sofDt(cell.getValue());
-        if (idx < 0 || !cur) return;
+        if (!cur) return;
         const title = cell.getColumn().getDefinition().title;
         const revert = (msg) => { alert(msg); cell.setValue(cell.getOldValue() || ''); };
+        // no SOF time can be in the future (applies to every field, incl. Custom Clearance)
+        if (cur > new Date()) return revert(`${title} cannot be in the future.`);
+        // Custom Clearance is "Free" — exempt from the ordering chain
+        const idx = SOF_ORDER.indexOf(field);
+        if (idx < 0) return;
         // not before the closest earlier filled time
         for (let i = idx - 1; i >= 0; i--) {
             const p = _sofDt(data[SOF_ORDER[i]]);
@@ -757,7 +761,7 @@
             {title: "Pilot Pickup Time", field: "pilot_pickup_time", editor: canEdit ? datetimeEditor : false, width: 160,
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Custom Clearance", field: "custom_clearance", editor: canEdit ? datetimeEditor : false, width: 150,
-                formatter: datetimeCellFormatter},
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Agent/Custom/Stevedore On Board", field: "agent_stevedore_onboard", editor: canEdit ? datetimeEditor : false, width: 200,
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "First Line", field: "first_line", editor: canEdit ? datetimeEditor : false, width: 150,
