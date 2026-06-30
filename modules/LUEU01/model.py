@@ -55,7 +55,7 @@ def get_started_parcels(vcn_id):
     cur.execute('''
         SELECT po.id AS parcel_op_id, po.parcel_ids, po.cargo_name, po.terminal_name,
                po.quantity AS op_qty, po.start_dt, po.end_dt, po.expected_start,
-               po.expected_flow_rate
+               po.expected_flow_rate, l.alongside_datetime
         FROM ldud_parcel_ops po
         JOIN ldud_header l ON l.id = po.ldud_id
         WHERE l.vcn_id = %s
@@ -142,6 +142,7 @@ def get_started_parcels(vcn_id):
             'pipeline_name': ', '.join(_distinct(src_pipe)),
             'expected_start': p['expected_start'],
             'expected_flow_rate': _num(p['expected_flow_rate']),
+            'alongside_datetime': p['alongside_datetime'],
             'start_dt': p['start_dt'],
             'end_dt': p['end_dt'],
             'status': 'Completed' if p['end_dt'] else 'In Progress',

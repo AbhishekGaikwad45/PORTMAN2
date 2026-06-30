@@ -91,6 +91,11 @@ def get_data():
 def get_vcn_list():
     return jsonify(model.get_vcn_list())
 
+@bp.route('/api/module/LDUD01/parcels-completion/<int:ldud_id>')
+@login_required
+def parcels_completion(ldud_id):
+    return jsonify(model.parcels_completion(ldud_id))
+
 @bp.route('/api/module/LDUD01/vcn_list/export')
 @login_required
 def get_export_vcn_list():

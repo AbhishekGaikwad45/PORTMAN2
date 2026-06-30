@@ -216,6 +216,20 @@ def delete_header(row_id):
     conn.close()
 
 
+def parcels_completion(ldud_id):
+    """Whether every parcel-op for this LDUD has an actual End time recorded in
+    LUEU01 — gates the post-departure SOF times (cast off, pilot board, etc.)."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT COUNT(*) AS total,
+                          COUNT(*) FILTER (WHERE end_dt IS NULL OR end_dt = '') AS incomplete
+                   FROM ldud_parcel_ops WHERE ldud_id=%s''', [ldud_id])
+    r = cur.fetchone()
+    conn.close()
+    total, incomplete = r['total'], r['incomplete']
+    return {'total': total, 'incomplete': incomplete, 'all_done': total > 0 and incomplete == 0}
+
+
 # Parcel Operations sub-table — each row covers one VCN parcel, or several
 # parcels MERGED together (only allowed when they share the same cargo name).
 # parcel_ids is a CSV of parcel ids: vcn_consigners.id for Import LDUDs,

@@ -669,7 +669,7 @@
     // SOF times must be non-decreasing in this order. Custom Clearance is "Free"
     // (no constraint) so it's excluded from the chain on both sides.
     const SOF_ORDER = ['anchored_datetime', 'nor_tendered', 'nor_accepted', 'pilot_pickup_time',
-                       'agent_stevedore_onboard', 'first_line', 'alongside_datetime',
+                       'first_line', 'alongside_datetime', 'agent_stevedore_onboard',
                        'cast_off_datetime', 'pilot_board_departure', 'pilot_disembarked'];
     function _sofDt(v) {
         if (!v) return null;
@@ -697,7 +697,18 @@
             const n = _sofDt(data[SOF_ORDER[i]]);
             if (n) { if (cur > n) return revert(`${title} cannot be later than the following time.`); break; }
         }
+        // post-departure times need every LUEU01 parcel completed (actual End set)
+        if (SOF_GATED.includes(field) && data.id) {
+            fetch(`/api/module/LDUD01/parcels-completion/${data.id}`).then(r => r.json()).then(j => {
+                if (!j.all_done) {
+                    alert(`${title} can be set only after all LUEU01 parcels are completed with End times` +
+                          (j.total === 0 ? ' (no parcels recorded yet).' : ` — ${j.incomplete} of ${j.total} still pending.`));
+                    cell.setValue(cell.getOldValue() || '');
+                }
+            }).catch(() => {});
+        }
     }
+    const SOF_GATED = ['cast_off_datetime', 'pilot_board_departure', 'pilot_disembarked'];
 
     function initTable() {
         isApprover = moduleConfig.approver_id == '{{ session.user_id }}' || isAdmin;
@@ -760,13 +771,13 @@
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Pilot Pickup Time", field: "pilot_pickup_time", editor: canEdit ? datetimeEditor : false, width: 160,
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
-            {title: "Custom Clearance", field: "custom_clearance", editor: canEdit ? datetimeEditor : false, width: 150,
-                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
-            {title: "Agent/Custom/Stevedore On Board", field: "agent_stevedore_onboard", editor: canEdit ? datetimeEditor : false, width: 200,
-                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "First Line", field: "first_line", editor: canEdit ? datetimeEditor : false, width: 150,
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Along Side", field: "alongside_datetime", editor: canEdit ? datetimeEditor : false, width: 160,
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
+            {title: "Custom Clearance", field: "custom_clearance", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
+            {title: "Agent/Custom/Stevedore On Board", field: "agent_stevedore_onboard", editor: canEdit ? datetimeEditor : false, width: 200,
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Cast Off Date/Time", field: "cast_off_datetime", editor: canEdit ? datetimeEditor : false, width: 160,
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
