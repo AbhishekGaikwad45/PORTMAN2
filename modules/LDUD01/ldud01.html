@@ -666,6 +666,35 @@
         }).join('');
     }
 
+    // SOF times must be non-decreasing in this order. Custom Clearance is "Free"
+    // (no constraint) so it's excluded from the chain on both sides.
+    const SOF_ORDER = ['anchored_datetime', 'nor_tendered', 'nor_accepted', 'pilot_pickup_time',
+                       'agent_stevedore_onboard', 'first_line', 'alongside_datetime',
+                       'cast_off_datetime', 'pilot_board_departure', 'pilot_disembarked'];
+    function _sofDt(v) {
+        if (!v) return null;
+        const d = new Date(String(v).replace(' ', 'T'));
+        return isNaN(d) ? null : d;
+    }
+    function validateSofOrder(cell) {
+        const field = cell.getField(), data = cell.getRow().getData();
+        const idx = SOF_ORDER.indexOf(field);
+        const cur = _sofDt(cell.getValue());
+        if (idx < 0 || !cur) return;
+        const title = cell.getColumn().getDefinition().title;
+        const revert = (msg) => { alert(msg); cell.setValue(cell.getOldValue() || ''); };
+        // not before the closest earlier filled time
+        for (let i = idx - 1; i >= 0; i--) {
+            const p = _sofDt(data[SOF_ORDER[i]]);
+            if (p) { if (cur < p) return revert(`${title} cannot be earlier than the preceding time.`); break; }
+        }
+        // not after the closest later filled time
+        for (let i = idx + 1; i < SOF_ORDER.length; i++) {
+            const n = _sofDt(data[SOF_ORDER[i]]);
+            if (n) { if (cur > n) return revert(`${title} cannot be later than the following time.`); break; }
+        }
+    }
+
     function initTable() {
         isApprover = moduleConfig.approver_id == '{{ session.user_id }}' || isAdmin;
         const canEdit = permissions.can_edit || permissions.can_add;
@@ -718,27 +747,29 @@
             {title: "BL Quantity", field: "bl_quantities_display", width: 160, frozen: true,
                 formatter: function(cell) { return cargoColorBadges(cell.getValue()); }
             },
-            {title: "Anchorage Time", field: "anchored_datetime", editor: canEdit ? datetimeEditor : false, width: 150,
-                formatter: datetimeCellFormatter},
-            {title: "NOR Tendered", field: "nor_tendered", editor: canEdit ? datetimeEditor : false, width: 150,
-                formatter: datetimeCellFormatter},
             {title: "Agent Name", field: "agent_name", width: 120},
+            {title: "Anchorage Time", field: "anchored_datetime", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
+            {title: "NOR Tendered", field: "nor_tendered", editor: canEdit ? datetimeEditor : false, width: 150,
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "NOR Accepted", field: "nor_accepted", editor: canEdit ? datetimeEditor : false, width: 150,
-                formatter: datetimeCellFormatter},
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
+            {title: "Pilot Pickup Time", field: "pilot_pickup_time", editor: canEdit ? datetimeEditor : false, width: 160,
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Custom Clearance", field: "custom_clearance", editor: canEdit ? datetimeEditor : false, width: 150,
                 formatter: datetimeCellFormatter},
             {title: "Agent/Custom/Stevedore On Board", field: "agent_stevedore_onboard", editor: canEdit ? datetimeEditor : false, width: 200,
-                formatter: datetimeCellFormatter},
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "First Line", field: "first_line", editor: canEdit ? datetimeEditor : false, width: 150,
-                formatter: datetimeCellFormatter},
-            {title: "Alongside (Date/Time)", field: "alongside_datetime", editor: canEdit ? datetimeEditor : false, width: 160,
-                formatter: datetimeCellFormatter},
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
+            {title: "Along Side", field: "alongside_datetime", editor: canEdit ? datetimeEditor : false, width: 160,
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Cast Off Date/Time", field: "cast_off_datetime", editor: canEdit ? datetimeEditor : false, width: 160,
-                formatter: datetimeCellFormatter},
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Pilot Board Departure", field: "pilot_board_departure", editor: canEdit ? datetimeEditor : false, width: 160,
-                formatter: datetimeCellFormatter},
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Pilot Disembarked", field: "pilot_disembarked", editor: canEdit ? datetimeEditor : false, width: 160,
-                formatter: datetimeCellFormatter},
+                formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
             {title: "Status", field: "doc_status", width: 110,
                 formatter: function(cell) {
                     const val = cell.getValue();
