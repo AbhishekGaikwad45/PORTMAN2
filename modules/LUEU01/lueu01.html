@@ -369,8 +369,16 @@
       {title: "Berth", field: "berth_name", editor: canEdit ? "list" : false, editorParams: list(masters.berths), width: 88},
       {title: "Remarks", field: "remarks", editor: canEdit ? "input" : false, width: 100},
       canDelete ? {title: "", width: 32, headerSort: false, hozAlign: "center",
-        formatter: () => '<button class="lueu-btn secondary" style="padding:1px 5px;">X</button>',
-        cellClick: (e, cell) => deleteLogRow(cell.getRow())} : null
+        // delete only from the bottom — X shows on the last row only
+        formatter: (cell) => {
+          const rows = cell.getTable().getRows();
+          return cell.getRow() === rows[rows.length - 1]
+            ? '<button class="lueu-btn secondary" style="padding:1px 5px;">X</button>' : '';
+        },
+        cellClick: (e, cell) => {
+          const rows = cell.getTable().getRows();
+          if (cell.getRow() === rows[rows.length - 1]) deleteLogRow(cell.getRow());
+        }} : null
     ].filter(Boolean);
   }
 
