@@ -109,9 +109,17 @@ def get_data(page=1, size=20, filters=None):
             cur.execute('''SELECT vcn_id, cargo_name, bl_quantity, quantity_uom FROM vcn_cargo_declaration
                            WHERE vcn_id = ANY(%s) AND cargo_name IS NOT NULL''', (vcn_ids,))
             import_cargo = cur.fetchall()
-            cur.execute('''SELECT vcn_id, cargo_name, bl_quantity, quantity_uom FROM vcn_export_cargo_declaration
+            # Export cargo now mirrors the import consigner shape: quantity (TEXT), no UOM
+            cur.execute('''SELECT vcn_id, cargo_name, quantity FROM vcn_export_cargo_declaration
                            WHERE vcn_id = ANY(%s) AND cargo_name IS NOT NULL''', (vcn_ids,))
-            export_cargo = cur.fetchall()
+            export_cargo = []
+            for c in cur.fetchall():
+                try:
+                    qty = float(str(c['quantity']).replace(',', '')) if c['quantity'] else 0.0
+                except ValueError:
+                    qty = 0.0
+                export_cargo.append({'vcn_id': c['vcn_id'], 'cargo_name': c['cargo_name'],
+                                     'bl_quantity': qty, 'quantity_uom': 'MT'})
             # Import cargo now lives in the VCN consigner (IGM line) table
             cur.execute('''SELECT vcn_id, cargo_name, quantity FROM vcn_consigners
                            WHERE vcn_id = ANY(%s) AND cargo_name IS NOT NULL''', (vcn_ids,))
@@ -286,8 +294,8 @@ def save_parcel_op(data):
     # a parcel (e.g. one parcel split over terminals) the total can't exceed it either.
     if ids and quantity is not None:
         tbl = _parcel_table_for_ldud(cur, data['ldud_id'])
-        qty_col = 'bl_quantity' if tbl == 'vcn_export_cargo_declaration' else 'quantity'
-        cur.execute(f'SELECT {qty_col} AS q FROM {tbl} WHERE id = ANY(%s)', (ids,))
+        # both source tables now use a TEXT 'quantity' column (export mirrors import)
+        cur.execute(f'SELECT quantity AS q FROM {tbl} WHERE id = ANY(%s)', (ids,))
         cap = 0.0
         for r in cur.fetchall():
             try:

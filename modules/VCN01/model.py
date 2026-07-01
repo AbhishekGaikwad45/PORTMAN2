@@ -525,8 +525,6 @@ def get_approval_eligibility(vcn_id):
         missing.append('Vessel Name')
     if not header['vessel_agent_name']:
         missing.append('Agent Name')
-    if not header['cargo_type']:
-        missing.append('Cargo Type')
     if not header['discharge_port']:
         missing.append('Discharge Port')
 

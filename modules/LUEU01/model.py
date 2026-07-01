@@ -70,7 +70,7 @@ def get_started_parcels(vcn_id):
     row = cur.fetchone()
     is_export = (row or {}).get('operation_type') == 'Export'
     tbl = 'vcn_export_cargo_declaration' if is_export else 'vcn_consigners'
-    qty_col = 'bl_quantity' if is_export else 'quantity'
+    qty_col = 'quantity'  # both source tables now use a TEXT 'quantity' column (export mirrors import)
     # equipment_names / pipeline_name / unload_terminal only exist on the import consigner table
     equip_col = 'NULL' if is_export else 'equipment_names'
     pipe_col = 'NULL' if is_export else 'pipeline_name'
