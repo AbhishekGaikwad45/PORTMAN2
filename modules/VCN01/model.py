@@ -153,6 +153,36 @@ def _parcel_no(cur, vcn_id, seq):
     return f"{doc}/P{seq}" if doc else f"P{seq}"
 
 
+def _sync_header_cargo(cur, vcn_id):
+    """Keep vcn_header.cargo_type in sync with the parcels' cargo names.
+    Recomputes it from the distinct cargo names across import consigners and
+    export declarations, so editing a parcel's cargo reflects on the header."""
+    if not vcn_id:
+        return
+    cur.execute('''
+        SELECT cargo_name FROM vcn_consigners WHERE vcn_id=%s AND cargo_name IS NOT NULL
+        UNION
+        SELECT cargo_name FROM vcn_export_cargo_declaration WHERE vcn_id=%s AND cargo_name IS NOT NULL
+    ''', (vcn_id, vcn_id))
+    names = []
+    for r in cur.fetchall():
+        for name in (r['cargo_name'] or '').split(','):   # consigner rows may be comma-separated
+            name = name.strip()
+            if name and name not in names:
+                names.append(name)
+    cur.execute('UPDATE vcn_header SET cargo_type=%s WHERE id=%s',
+                [', '.join(sorted(names)), vcn_id])
+
+
+def get_header_cargo_type(vcn_id):
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT cargo_type FROM vcn_header WHERE id=%s', [vcn_id])
+    row = cur.fetchone()
+    conn.close()
+    return (row or {}).get('cargo_type') if row else None
+
+
 def get_parcels(vcn_id):
     conn = get_db()
     cur = get_cursor(conn)
@@ -254,6 +284,7 @@ def save_consigner(data):
                        VALUES ({', '.join(['%s'] * (len(cols) + 1))}) RETURNING id''',
                    [data['vcn_id']] + vals)
         row_id = cur.fetchone()['id']
+    _sync_header_cargo(cur, data.get('vcn_id'))
     conn.commit()
     conn.close()
     return row_id
@@ -315,9 +346,14 @@ def get_igm_document(vcn_id):
 def delete_consigner(row_id):
     conn = get_db()
     cur = get_cursor(conn)
+    cur.execute('SELECT vcn_id FROM vcn_consigners WHERE id=%s', (row_id,))
+    r = cur.fetchone()
+    vcn_id = r['vcn_id'] if r else None
     cur.execute('DELETE FROM vcn_consigners WHERE id=%s', (row_id,))
+    _sync_header_cargo(cur, vcn_id)
     conn.commit()
     conn.close()
+    return vcn_id
 
 # Delays sub-table operations
 def get_delays(vcn_id):
@@ -419,6 +455,7 @@ def save_export_cargo_declaration(data):
                     data.get('bl_no'), data.get('bl_date'), data.get('bl_quantity'),
                     data.get('quantity_uom'), seq, parcel_no])
         row_id = cur.fetchone()['id']
+    _sync_header_cargo(cur, data.get('vcn_id'))
     conn.commit()
     conn.close()
     return row_id
@@ -426,9 +463,14 @@ def save_export_cargo_declaration(data):
 def delete_export_cargo_declaration(row_id):
     conn = get_db()
     cur = get_cursor(conn)
+    cur.execute('SELECT vcn_id FROM vcn_export_cargo_declaration WHERE id=%s', (row_id,))
+    r = cur.fetchone()
+    vcn_id = r['vcn_id'] if r else None
     cur.execute('DELETE FROM vcn_export_cargo_declaration WHERE id=%s', (row_id,))
+    _sync_header_cargo(cur, vcn_id)
     conn.commit()
     conn.close()
+    return vcn_id
 
 def get_export_cargo_names_for_vcn(vcn_id):
     conn = get_db()

@@ -180,7 +180,8 @@ def save_consigner():
     parcel = model.get_parcel(row_id) or {}
     return jsonify({'success': True, 'id': row_id,
                     'parcel_no': parcel.get('parcel_no'),
-                    'parcel_seq': parcel.get('parcel_seq')})
+                    'parcel_seq': parcel.get('parcel_seq'),
+                    'cargo_type': model.get_header_cargo_type(request.json.get('vcn_id'))})
 
 @bp.route('/api/module/VCN01/consigners/delete', methods=['POST'])
 @login_required
@@ -189,8 +190,8 @@ def delete_consigner():
     # sub-table rows are deletable by anyone who can edit/add (not gated on can_delete)
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
-    model.delete_consigner(request.json.get('id'))
-    return jsonify({'success': True})
+    vcn_id = model.delete_consigner(request.json.get('id'))
+    return jsonify({'success': True, 'cargo_type': model.get_header_cargo_type(vcn_id)})
 
 # Delays endpoints
 @bp.route('/api/module/VCN01/delays/<int:vcn_id>')
@@ -260,7 +261,8 @@ def save_export_cargo():
     parcel = model.get_export_parcel(row_id) or {}
     return jsonify({'success': True, 'id': row_id,
                     'parcel_no': parcel.get('parcel_no'),
-                    'parcel_seq': parcel.get('parcel_seq')})
+                    'parcel_seq': parcel.get('parcel_seq'),
+                    'cargo_type': model.get_header_cargo_type(request.json.get('vcn_id'))})
 
 @bp.route('/api/module/VCN01/export_cargo/delete', methods=['POST'])
 @login_required
@@ -269,8 +271,8 @@ def delete_export_cargo():
     # sub-table rows are deletable by anyone who can edit/add (not gated on can_delete)
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
-    model.delete_export_cargo_declaration(request.json.get('id'))
-    return jsonify({'success': True})
+    vcn_id = model.delete_export_cargo_declaration(request.json.get('id'))
+    return jsonify({'success': True, 'cargo_type': model.get_header_cargo_type(vcn_id)})
 
 @bp.route('/api/module/VCN01/export_cargo_names/<int:vcn_id>')
 @login_required
