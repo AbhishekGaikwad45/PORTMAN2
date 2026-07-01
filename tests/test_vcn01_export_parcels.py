@@ -47,3 +47,22 @@ def test_export_parcel_roundtrip():
         conn = get_db(); cur = get_cursor(conn)
         cur.execute('DELETE FROM vcn_header WHERE id=%s', [vcn_id])
         conn.commit(); conn.close()
+
+
+def test_export_approval_eligibility_and_picker_no_dropped_columns():
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("""INSERT INTO vcn_header (operation_type, vessel_name, vessel_agent_name, cargo_type, discharge_port)
+                   VALUES ('Export','V','A','Bulk','PORTX') RETURNING id""")
+    vcn_id = cur.fetchone()['id']; conn.commit(); conn.close()
+    try:
+        model.save_export_cargo_declaration({'vcn_id': vcn_id, 'cargo_name': 'EDIBLE OIL',
+            'quantity': '50', 'consigner_name': 'ABS'})
+        elig = model.get_approval_eligibility(vcn_id)   # must not raise UndefinedColumn
+        assert elig['eligible'] is True, elig
+        picker = model.get_picker_parcels(vcn_id)       # must not raise
+        assert len(picker) == 1
+        assert picker[0]['consigner_name'] == 'ABS'
+        assert picker[0]['quantity'] == '50'
+    finally:
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute('DELETE FROM vcn_header WHERE id=%s', [vcn_id]); conn.commit(); conn.close()

@@ -220,14 +220,13 @@ def get_picker_parcels(vcn_id):
     """Operation-type-aware parcel list for cross-module pickers (LDUD).
     Import → consigner rows; Export → export cargo declaration rows.
     Returns: id, parcel_no, cargo_name, consigner_name, quantity, terminals (list).
-    Terminals come from the import consigner's unload_terminal (multi-value, comma
-    separated); Export parcels have no terminal source → empty list."""
+    Terminals come from the consigner/export row's unload_terminal (multi-value,
+    comma separated)."""
     conn = get_db()
     cur = get_cursor(conn)
     is_export = _operation_type(cur, vcn_id) == 'Export'
     if is_export:
-        cur.execute('''SELECT id, parcel_no, cargo_name, customer_name AS consigner_name,
-                              bl_quantity AS quantity, NULL AS unload_terminal
+        cur.execute('''SELECT id, parcel_no, cargo_name, consigner_name, quantity, unload_terminal
                        FROM vcn_export_cargo_declaration WHERE vcn_id=%s
                        ORDER BY parcel_seq NULLS LAST, id''', (vcn_id,))
     else:
@@ -534,13 +533,11 @@ def get_approval_eligibility(vcn_id):
     op_type = header['operation_type']
     if op_type == 'Export':
         cur.execute('''SELECT COUNT(*) as cnt FROM vcn_export_cargo_declaration
-                       WHERE vcn_id=%s AND cargo_name IS NOT NULL AND cargo_name != \'\'
-                       AND bl_quantity IS NOT NULL AND bl_quantity > 0
-                       AND quantity_uom IS NOT NULL AND quantity_uom != \'\'
-                       AND bl_no IS NOT NULL AND bl_no != \'\'
-                       AND bl_date IS NOT NULL''', (vcn_id,))
+                       WHERE vcn_id=%s AND consigner_name IS NOT NULL AND consigner_name != \'\'
+                       AND cargo_name IS NOT NULL AND cargo_name != \'\'
+                       AND quantity IS NOT NULL AND quantity != \'\'''', (vcn_id,))
         if cur.fetchone()['cnt'] < 1:
-            missing.append('Export Cargo Declaration (min 1 complete entry: cargo name, BL no, date, quantity, UOM)')
+            missing.append('Parcels (min 1 entry with consignee, cargo and quantity)')
     else:
         # import cargo is declared via the Parcels (consigner) table
         cur.execute('''SELECT COUNT(*) as cnt FROM vcn_consigners
