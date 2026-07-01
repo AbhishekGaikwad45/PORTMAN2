@@ -134,6 +134,10 @@ _CONSIGNER_COLS = ['igm_line_no', 'bl_no', 'bl_date', 'cargo_name', 'quantity',
                    'pipeline_name', 'unload_terminal',
                    'toll_applicable', 'toll_reason', 'equipment_names']
 
+# Export parcels mirror import parcels minus the BL fields (see spec
+# 2026-07-01-vcn01-export-parcels). Same list-driven CRUD, different table.
+_EXPORT_PARCEL_COLS = [c for c in _CONSIGNER_COLS if c not in ('bl_no', 'bl_date')]
+
 
 def get_equipment():
     conn = get_db()
@@ -216,14 +220,13 @@ def get_picker_parcels(vcn_id):
     """Operation-type-aware parcel list for cross-module pickers (LDUD).
     Import → consigner rows; Export → export cargo declaration rows.
     Returns: id, parcel_no, cargo_name, consigner_name, quantity, terminals (list).
-    Terminals come from the import consigner's unload_terminal (multi-value, comma
-    separated); Export parcels have no terminal source → empty list."""
+    Terminals come from the consigner/export row's unload_terminal (multi-value,
+    comma separated)."""
     conn = get_db()
     cur = get_cursor(conn)
     is_export = _operation_type(cur, vcn_id) == 'Export'
     if is_export:
-        cur.execute('''SELECT id, parcel_no, cargo_name, customer_name AS consigner_name,
-                              bl_quantity AS quantity, NULL AS unload_terminal
+        cur.execute('''SELECT id, parcel_no, cargo_name, consigner_name, quantity, unload_terminal
                        FROM vcn_export_cargo_declaration WHERE vcn_id=%s
                        ORDER BY parcel_seq NULLS LAST, id''', (vcn_id,))
     else:
@@ -419,7 +422,7 @@ def get_all_cargo_names_for_vcn(vcn_id):
 def get_export_cargo_declarations(vcn_id):
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('SELECT * FROM vcn_export_cargo_declaration WHERE vcn_id=%s ORDER BY id DESC', (vcn_id,))
+    cur.execute('SELECT * FROM vcn_export_cargo_declaration WHERE vcn_id=%s ORDER BY parcel_seq NULLS LAST, id', (vcn_id,))
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -429,14 +432,9 @@ def save_export_cargo_declaration(data):
     conn = get_db()
     cur = get_cursor(conn)
     if data.get('id'):
-        cur.execute('''UPDATE vcn_export_cargo_declaration SET egm_shipping_bill_number=%s, egm_shipping_bill_date=%s,
-                       cargo_name=%s, customer_name=%s, bl_no=%s, bl_date=%s, bl_quantity=%s, quantity_uom=%s WHERE id=%s''',
-                   [data.get('egm_shipping_bill_number'), data.get('egm_shipping_bill_date'),
-                    data.get('cargo_name'), data.get('customer_name'),
-                    data.get('bl_no'), data.get('bl_date'), data.get('bl_quantity'),
-                    data.get('quantity_uom'), data['id']])
+        cur.execute(f"UPDATE vcn_export_cargo_declaration SET {', '.join(f'{c}=%s' for c in _EXPORT_PARCEL_COLS)} WHERE id=%s",
+                    [data.get(c) for c in _EXPORT_PARCEL_COLS] + [data['id']])
         row_id = data['id']
-        # backfill parcel_no if created before the VCN had a doc number
         cur.execute('SELECT parcel_seq, parcel_no FROM vcn_export_cargo_declaration WHERE id=%s', [row_id])
         cur_row = cur.fetchone()
         if cur_row and cur_row['parcel_seq'] and not cur_row['parcel_no']:
@@ -447,13 +445,11 @@ def save_export_cargo_declaration(data):
                     [data['vcn_id']])
         seq = cur.fetchone()['nxt']
         parcel_no = _parcel_no(cur, data['vcn_id'], seq)
-        cur.execute('''INSERT INTO vcn_export_cargo_declaration (vcn_id, egm_shipping_bill_number, egm_shipping_bill_date,
-                       cargo_name, customer_name, bl_no, bl_date, bl_quantity, quantity_uom, parcel_seq, parcel_no)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id''',
-                   [data['vcn_id'], data.get('egm_shipping_bill_number'), data.get('egm_shipping_bill_date'),
-                    data.get('cargo_name'), data.get('customer_name'),
-                    data.get('bl_no'), data.get('bl_date'), data.get('bl_quantity'),
-                    data.get('quantity_uom'), seq, parcel_no])
+        cols = _EXPORT_PARCEL_COLS + ['parcel_seq', 'parcel_no']
+        vals = [data.get(c) for c in _EXPORT_PARCEL_COLS] + [seq, parcel_no]
+        cur.execute(f'''INSERT INTO vcn_export_cargo_declaration (vcn_id, {', '.join(cols)})
+                       VALUES ({', '.join(['%s'] * (len(cols) + 1))}) RETURNING id''',
+                    [data['vcn_id']] + vals)
         row_id = cur.fetchone()['id']
     _sync_header_cargo(cur, data.get('vcn_id'))
     conn.commit()
@@ -472,6 +468,7 @@ def delete_export_cargo_declaration(row_id):
     conn.close()
     return vcn_id
 
+
 def get_export_cargo_names_for_vcn(vcn_id):
     conn = get_db()
     cur = get_cursor(conn)
@@ -483,10 +480,10 @@ def get_export_cargo_names_for_vcn(vcn_id):
 def get_export_cargo_total_quantity(vcn_id):
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('SELECT SUM(bl_quantity) FROM vcn_export_cargo_declaration WHERE vcn_id=%s', (vcn_id,))
-    result = cur.fetchone()['sum']
+    cur.execute("SELECT COALESCE(SUM(NULLIF(quantity, '')::numeric), 0) AS s FROM vcn_export_cargo_declaration WHERE vcn_id=%s", (vcn_id,))
+    result = cur.fetchone()['s']
     conn.close()
-    return result or 0
+    return float(result or 0)
 
 def get_export_loading_totals(vcn_id):
     """Loading totals per cargo. ponytail: ldud_vessel_operations was dropped
@@ -536,13 +533,11 @@ def get_approval_eligibility(vcn_id):
     op_type = header['operation_type']
     if op_type == 'Export':
         cur.execute('''SELECT COUNT(*) as cnt FROM vcn_export_cargo_declaration
-                       WHERE vcn_id=%s AND cargo_name IS NOT NULL AND cargo_name != \'\'
-                       AND bl_quantity IS NOT NULL AND bl_quantity > 0
-                       AND quantity_uom IS NOT NULL AND quantity_uom != \'\'
-                       AND bl_no IS NOT NULL AND bl_no != \'\'
-                       AND bl_date IS NOT NULL''', (vcn_id,))
+                       WHERE vcn_id=%s AND consigner_name IS NOT NULL AND consigner_name != \'\'
+                       AND cargo_name IS NOT NULL AND cargo_name != \'\'
+                       AND quantity IS NOT NULL AND quantity != \'\'''', (vcn_id,))
         if cur.fetchone()['cnt'] < 1:
-            missing.append('Export Cargo Declaration (min 1 complete entry: cargo name, BL no, date, quantity, UOM)')
+            missing.append('Parcels (min 1 entry with consignee, cargo and quantity)')
     else:
         # import cargo is declared via the Parcels (consigner) table
         cur.execute('''SELECT COUNT(*) as cnt FROM vcn_consigners

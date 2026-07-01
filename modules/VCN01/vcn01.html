@@ -1240,24 +1240,64 @@
                 cellEdited: () => markDirty('export_cargo'),
                 columns: [
                     {title: "Parcel No", field: "parcel_no", width: 130, headerSort: false},
-                    {title: "EGM/Shipping Bill No", field: "egm_shipping_bill_number", widthGrow: 1, editor: canEdit ? "input" : false},
-                    {title: "EGM/Shipping Bill Date", field: "egm_shipping_bill_date", widthGrow: 1, editor: canEdit ? dateEditor : false, formatter: dateCellFormatter},
-                    {title: "Cargo Name", field: "cargo_name", widthGrow: 1, editor: canEdit ? "list" : false,
-                        editorParams: {values: cargoOptions, autocomplete: true, allowEmpty: true}
+                    {title: "Ln", field: "igm_line_no", width: 70, widthGrow: 0, hozAlign: "center",
+                        editor: canEdit ? "input" : false
                     },
-                    {title: "Customer", field: "customer_name", widthGrow: 1, editor: canEdit ? "list" : false,
-                        editorParams: {values: customerOptions, autocomplete: true, allowEmpty: true}
+                    {title: "Cargo Name", field: "cargo_name", widthGrow: 1.2, editor: canEdit ? "list" : false,
+                        editorParams: {values: cargoOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                     },
-                    {title: "Quantity", field: "bl_quantity", widthGrow: 1, editor: canEdit ? "number" : false, hozAlign: "right",
-                        editorParams: {min: 0, step: 0.01},
-                        formatter: function(cell) {
-                            const val = cell.getValue();
-                            return val != null && val !== '' ? parseFloat(val).toFixed(2) : '';
+                    {title: "Qty (MT)", field: "quantity", widthGrow: 0.8, hozAlign: "right",
+                        editor: canEdit ? "number" : false, editorParams: {min: 0, step: 0.001},
+                        cellEdited: function(cell) {
+                            const v = cell.getValue();
+                            if (v !== '' && v !== null && !isNaN(v)) {
+                                const r = Math.round(parseFloat(v) * 1000) / 1000;
+                                if (r !== parseFloat(v)) cell.setValue(r);
+                            }
                         }
                     },
-                    {title: "Quantity UOM", field: "quantity_uom", widthGrow: 1, editor: canEdit ? "list" : false,
-                        editorParams: {values: uomOptions, autocomplete: true, allowEmpty: true}
+                    {title: "Consignee", field: "consigner_name", widthGrow: 1.3, editor: canEdit ? "list" : false,
+                        editorParams: {values: consignerOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                     },
+                    {title: "Payment will be made by", field: "importer_name", widthGrow: 1.4, editor: canEdit ? "list" : false,
+                        editorParams: {values: consignerOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
+                    },
+                    {title: "Pipeline", field: "pipeline_name", widthGrow: 1, formatter: cargoPillFormatter,
+                        editor: canEdit ? "list" : false,
+                        editorParams: {values: pipelineNames, autocomplete: true, allowEmpty: true, listOnEmpty: true},
+                        cellEdited: function(cell) {
+                            const row = cell.getRow();
+                            const allowed = terminalsForRow(row.getData());
+                            const kept = _splitMulti(row.getData().unload_terminal).filter(t => allowed.includes(t));
+                            row.update({unload_terminal: kept.join(', ')});
+                        }
+                    },
+                    {title: "Unload Terminal", field: "unload_terminal", widthGrow: 1.2,
+                        formatter: function(cell) {
+                            if (!_splitMulti(cell.getRow().getData().pipeline_name).length)
+                                return '<span style="color:#cbd5e1;font-style:italic;">select pipeline first</span>';
+                            return cargoPillFormatter(cell);
+                        },
+                        editor: canEdit ? makeMultiSelectEditor(cell => terminalsForRow(cell.getRow().getData())) : false,
+                        editable: function(cell) { return canEdit && _splitMulti(cell.getRow().getData().pipeline_name).length > 0; }
+                    },
+                    {title: "Toll", field: "toll_applicable", width: 70, widthGrow: 0, hozAlign: "center",
+                        formatter: "tickCross", formatterParams: {allowEmpty: true},
+                        editor: canEdit ? "tickCross" : false, editorParams: {tristate: false},
+                        cellEdited: function(cell) {
+                            const row = cell.getRow();
+                            if (cell.getValue()) { row.update({toll_reason: ''}); return; }
+                            const reason = (prompt('Toll not applicable — enter the reason:', row.getData().toll_reason || '') || '').trim();
+                            if (!reason) { cell.setValue(true); alert('Reason required — Toll kept applicable.'); return; }
+                            row.update({toll_reason: reason});
+                            markDirty('export_cargo');
+                        }},
+                    {title: "Toll Reason", field: "toll_reason", widthGrow: 1.2, editor: canEdit ? "input" : false,
+                        formatter: function(cell) {
+                            return cell.getRow().getData().toll_applicable ? '<span style="color:#cbd5e1">—</span>' : (cell.getValue() || '');
+                        }},
+                    {title: "Equipment", field: "equipment_names", widthGrow: 1.2, formatter: cargoPillFormatter,
+                        editor: canEdit ? makeMultiSelectEditor(equipmentNames) : false},
                     canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 60, widthGrow: 0, hozAlign: "center", headerSort: false,
                         cellClick: function(e, cell) { deleteSubRow('export_cargo', cell.getRow().getData().id, vcnId); }
                     } : null
