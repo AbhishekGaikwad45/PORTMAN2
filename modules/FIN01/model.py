@@ -1,5 +1,6 @@
 from database import get_db, get_cursor
 from datetime import datetime
+from modules.FCAM01 import model as fcam_model
 
 
 # ===== CARGO BILLING HELPERS =====
@@ -650,3 +651,103 @@ def is_vcn_billed(vcn_id):
     billed = bool(cur.fetchone()['billed'])
     conn.close()
     return billed
+
+
+# ===== BILLABLES ENGINE (parcels -> 4 charges, grouped by vessel) =====
+
+_CARGO_GATE = ('Closed', 'Partial Close')
+
+
+def _to_float(v):
+    try:
+        return float(str(v).replace(',', '')) if v not in (None, '') else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def get_customer_billables(customer_type, customer_id):
+    """Billable charges for a customer's parcels, grouped by vessel. Read-only.
+    Bills the payer (importer_name); only parcels whose VCN's latest LDUD is
+    Closed/Partial Close; remaining per charge from the parcel_charge_billed ledger."""
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    if customer_type == 'Customer':
+        cur.execute("SELECT name FROM vessel_customers WHERE id=%s", [customer_id])
+    else:
+        cur.execute("SELECT name FROM vessel_agents WHERE id=%s", [customer_id])
+    row = cur.fetchone()
+    customer_name = row['name'] if row else ''
+
+    cur.execute("""SELECT id, service_code, service_name, sac_code, uom, gst_rate_id,
+                          is_tds, tds_percent, is_tcs, tcs_percent
+                   FROM finance_service_types
+                   WHERE service_code IN ('CHGU01','CHGL01','INFM01','MLAC01','TOLL01')""")
+    svc = {r['service_code']: dict(r) for r in cur.fetchall()}
+
+    cur.execute("""
+        WITH ldud_latest AS (
+            SELECT DISTINCT ON (vcn_id) vcn_id, doc_status
+            FROM ldud_header ORDER BY vcn_id, id DESC
+        )
+        SELECT 'VCN_IMPORT' AS src, c.id, c.parcel_no, c.cargo_name, c.quantity,
+               c.equipment_names, c.toll_applicable,
+               h.id AS vcn_id, h.vcn_doc_num, h.vessel_name, ll.doc_status AS ldud_status
+        FROM vcn_consigners c
+        JOIN vcn_header h ON h.id = c.vcn_id
+        JOIN ldud_latest ll ON ll.vcn_id = h.id
+        WHERE c.importer_name = %s AND ll.doc_status = ANY(%s)
+        UNION ALL
+        SELECT 'VCN_EXPORT' AS src, e.id, e.parcel_no, e.cargo_name, e.quantity,
+               e.equipment_names, e.toll_applicable,
+               h.id AS vcn_id, h.vcn_doc_num, h.vessel_name, ll.doc_status AS ldud_status
+        FROM vcn_export_cargo_declaration e
+        JOIN vcn_header h ON h.id = e.vcn_id
+        JOIN ldud_latest ll ON ll.vcn_id = h.id
+        WHERE e.importer_name = %s AND ll.doc_status = ANY(%s)
+        ORDER BY vcn_doc_num, parcel_no
+    """, [customer_name, list(_CARGO_GATE), customer_name, list(_CARGO_GATE)])
+    parcels = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    vessels = {}
+    for p in parcels:
+        src = p['src']
+        qty = _to_float(p['quantity'])
+        cargo_code = 'CHGU01' if src == 'VCN_IMPORT' else 'CHGL01'
+        # (service_code, cargo_name_for_rate) — cargo_name only for cargo-priced services
+        charges = [(cargo_code, p['cargo_name']), ('INFM01', p['cargo_name'])]
+        if (p['equipment_names'] or '').strip():
+            charges.append(('MLAC01', None))
+        if p['toll_applicable']:
+            charges.append(('TOLL01', None))
+
+        v = vessels.setdefault(p['vcn_id'], {
+            'vcn_id': p['vcn_id'], 'vcn_doc_num': p['vcn_doc_num'],
+            'vessel_name': p['vessel_name'], 'ldud_status': p['ldud_status'],
+            'lines': [], 'total_amount': 0.0,
+        })
+        for code, cargo_for_rate in charges:
+            st = svc.get(code)
+            if not st:
+                continue
+            remaining = round(qty - billed_qty(src, p['id'], st['id']), 3)
+            if remaining <= 1e-6:
+                continue
+            rate_info = fcam_model.get_customer_rate(
+                customer_type, customer_id, st['id'], cargo_name=cargo_for_rate)
+            rate = float(rate_info['rate']) if rate_info and rate_info.get('rate') is not None else 0.0
+            amount = round(remaining * rate, 2)
+            v['lines'].append({
+                'cargo_source_type': src, 'cargo_source_id': p['id'],
+                'parcel_no': p['parcel_no'], 'service_type_id': st['id'],
+                'service_code': code, 'service_name': st['service_name'],
+                'cargo_name': p['cargo_name'] or '', 'qty': remaining,
+                'uom': st['uom'] or 'MT', 'rate': rate, 'amount': amount,
+                'sac_code': st['sac_code'] or '', 'gst_rate_id': st['gst_rate_id'],
+                'is_tds': st['is_tds'], 'tds_percent': float(st['tds_percent'] or 0),
+                'is_tcs': st['is_tcs'], 'tcs_percent': float(st['tcs_percent'] or 0),
+            })
+            v['total_amount'] = round(v['total_amount'] + amount, 2)
+
+    return {'vessels': list(vessels.values())}
