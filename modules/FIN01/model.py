@@ -6,61 +6,15 @@ from modules.FCAM01 import model as fcam_model
 # ===== CARGO BILLING HELPERS =====
 
 def _mark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qty, bill_id):
-    """Increment billed_quantity on the correct declaration row."""
-    if not cargo_source_type or not cargo_source_id:
-        return
-    bill_qty = float(bill_qty or 0)
-    if cargo_source_type == 'VCN_IMPORT':
-        cur.execute('''
-            UPDATE vcn_cargo_declaration
-            SET billed_quantity = COALESCE(billed_quantity, 0) + %s,
-                bill_id = %s,
-                is_billed = CASE
-                    WHEN COALESCE(billed_quantity, 0) + %s >= bl_quantity THEN 1
-                    ELSE 0
-                END
-            WHERE id = %s
-        ''', [bill_qty, bill_id, bill_qty, cargo_source_id])
-    elif cargo_source_type == 'VCN_EXPORT':
-        cur.execute('''
-            UPDATE vcn_export_cargo_declaration
-            SET billed_quantity = COALESCE(billed_quantity, 0) + %s,
-                bill_id = %s,
-                is_billed = CASE
-                    WHEN COALESCE(billed_quantity, 0) + %s >= bl_quantity THEN 1
-                    ELSE 0
-                END
-            WHERE id = %s
-        ''', [bill_qty, bill_id, bill_qty, cargo_source_id])
+    """Deprecated no-op. Billed-status now lives in the parcel_charge_billed ledger
+    (see record_parcel_charge/billed_qty); the legacy declaration columns are no
+    longer maintained (the export table's were dropped in jnpa35)."""
+    return
 
 
 def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qty):
-    """Decrement billed_quantity on the correct declaration row (bill delete/reversal)."""
-    if not cargo_source_type or not cargo_source_id:
-        return
-    bill_qty = float(bill_qty or 0)
-    table_map = {
-        'VCN_IMPORT': ('vcn_cargo_declaration', 'bl_quantity'),
-        'VCN_EXPORT': ('vcn_export_cargo_declaration', 'bl_quantity'),
-    }
-    entry = table_map.get(cargo_source_type)
-    if not entry:
-        return
-    table, total_col = entry
-    cur.execute(f'''
-        UPDATE {table}
-        SET billed_quantity = GREATEST(COALESCE(billed_quantity, 0) - %s, 0),
-            is_billed = CASE
-                WHEN GREATEST(COALESCE(billed_quantity, 0) - %s, 0) >= COALESCE({total_col}, 0)
-                     AND COALESCE({total_col}, 0) > 0 THEN 1
-                ELSE 0
-            END,
-            bill_id = CASE
-                WHEN GREATEST(COALESCE(billed_quantity, 0) - %s, 0) <= 0 THEN NULL
-                ELSE bill_id
-            END
-        WHERE id = %s
-    ''', [bill_qty, bill_qty, bill_qty, cargo_source_id])
+    """Deprecated no-op — see _mark_cargo_source_billed."""
+    return
 
 
 # ===== BILL FUNCTIONS =====
