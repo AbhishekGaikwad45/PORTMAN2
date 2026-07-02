@@ -77,6 +77,12 @@
 
     /* Loading */
     .loading { text-align: center; padding: 20px; color: #7f8c8d; font-size: 12px; }
+
+    /* Vessel accordions */
+    .vessel-card { border:1px solid #e2e8f0; border-radius:6px; margin-bottom:10px; }
+    .vessel-head { display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:pointer; background:#f8fafc; }
+    .ldud-badge { font-size:10px; background:#dbeafe; color:#1e40af; padding:1px 7px; border-radius:8px; }
+    .vessel-body { padding:6px 10px; }
 </style>
 
 <div class="module-header">
@@ -137,86 +143,11 @@
 <!-- Billables area (loaded after customer selection) -->
 <div id="billablesArea" style="display:none;">
 
-    <!-- Section A: Cargo Handling -->
+    <!-- Vessel-grouped billable charges -->
     <div class="form-section">
-        <h3>A. Cargo Handling (from Cargo Declarations)</h3>
-        <table class="data-table" id="cargoLinesTable">
-            <thead>
-                <tr>
-                    <th style="width:30px;"><input type="checkbox" id="selectAllCargo" onclick="toggleAllCargo(this)"></th>
-                    <th>Source</th>
-                    <th>Status</th>
-                    <th>Service</th>
-                    <th>Cargo</th>
-                    <th>Proof Docs</th>
-                    <th>BL Date</th>
-                    <th>BL Qty</th>
-                    <th>Billed</th>
-                    <th>Balance</th>
-                    <th>Bill Qty</th>
-                    <th>Rate</th>
-                    <th>Amount</th>
-                </tr>
-            </thead>
-            <tbody id="cargoLinesBody">
-                <tr><td colspan="13" class="empty-state">Select customer and click Load Billables</td></tr>
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Section B: Other Services (collapsed by default) -->
-    <div class="form-section">
-        <h3 class="collapsible-header" onclick="toggleSection('otherServices')">
-            <span class="toggle-icon">▶</span>
-            B. Other Services
-            <span id="otherServicesBadge" style="font-size:10px; background:#3498db; color:white; padding:1px 7px; border-radius:10px; font-weight:normal;"></span>
-        </h3>
-        <div id="otherServicesContent" class="collapsible-content">
-            <table class="data-table" id="otherServicesTable">
-                <thead>
-                    <tr>
-                        <th style="width:30px;"><input type="checkbox" id="selectAllServices" onclick="toggleAllServices(this)"></th>
-                        <th>Record #</th>
-                        <th>Date</th>
-                        <th>Service Type</th>
-                        <th>Qty</th>
-                        <th>UOM</th>
-                        <th>Rate</th>
-                        <th>Amount</th>
-                        <th>Ref</th>
-                    </tr>
-                </thead>
-                <tbody id="otherServicesBody">
-                    <tr><td colspan="9" class="empty-state">No other services</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Section C: Already Billed (collapsed, read-only) -->
-    <div class="form-section billed-section">
-        <h3 class="collapsible-header" onclick="toggleSection('billedHistory')">
-            <span class="toggle-icon">▶</span>
-            C. Already Billed (Reference)
-        </h3>
-        <div id="billedHistoryContent" class="collapsible-content">
-            <table class="data-table billed-table" id="billedTable">
-                <thead>
-                    <tr>
-                        <th>Bill #</th>
-                        <th>Bill Date</th>
-                        <th>Agreement</th>
-                        <th>Service</th>
-                        <th>Qty</th>
-                        <th>Rate</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody id="billedBody">
-                    <tr><td colspan="8" class="empty-state">No billed history</td></tr>
-                </tbody>
-            </table>
+        <h3>Billable Charges by Vessel</h3>
+        <div id="billablesRoot">
+            <div class="empty-state">Select customer and click Load Billables</div>
         </div>
     </div>
 
@@ -225,28 +156,8 @@
 <!-- Sticky Total Bar -->
 <div class="total-bar" id="totalBar" style="display:none;">
     <div class="total-item">
-        <span class="total-label">Selected</span>
-        <span class="total-value selected-count" id="totalSelectedCount">0 items</span>
-    </div>
-    <div class="total-item">
-        <span class="total-label">Subtotal</span>
-        <span class="total-value" id="totalSubtotal">₹0.00</span>
-    </div>
-    <div class="total-item">
-        <span class="total-label">GST</span>
-        <span class="total-value" id="totalGst">₹0.00</span>
-    </div>
-    <div class="total-item" id="tdsItem" style="display:none;">
-        <span class="total-label">TDS</span>
-        <span class="total-value" id="totalTds" style="color:#e74c3c;">-₹0.00</span>
-    </div>
-    <div class="total-item" id="tcsItem" style="display:none;">
-        <span class="total-label">TCS</span>
-        <span class="total-value" id="totalTcs" style="color:#e67e22;">+₹0.00</span>
-    </div>
-    <div class="total-item">
-        <span class="total-label">Total</span>
-        <span class="total-value highlight" id="totalAmount">₹0.00</span>
+        <span class="total-label">Selected Total</span>
+        <span class="total-value highlight" id="selectedTotal">₹0.00</span>
     </div>
     <div class="spacer"></div>
     <button class="btn btn-success" onclick="generateBill()" style="font-size: 12px; padding: 8px 20px;">
@@ -333,13 +244,10 @@ async function loadBillables() {
         const resp = await fetch(`/api/module/FIN01/customer-billables/${ct}/${cid}`);
         billableData = await resp.json();
 
-        renderCargoCards(billableData.cargo_handling || []);
-        renderOtherServices(billableData.other_services || []);
-        renderBilledHistory(billableData.billed || []);
+        renderVessels(billableData.vessels || []);
 
         document.getElementById('billablesArea').style.display = 'block';
         document.getElementById('totalBar').style.display = 'flex';
-        recalcTotals();
     } catch(e) {
         alert('Error loading billables: ' + e.message);
     } finally {
@@ -348,395 +256,63 @@ async function loadBillables() {
     }
 }
 
-function renderCargoCards(cards) {
-    const tbody = document.getElementById('cargoLinesBody');
+function renderVessels(vessels) {
+    const root = document.getElementById('billablesRoot'); // container that held cargo cards
+    if (!vessels.length) { root.innerHTML = '<div class="empty-state">No billable vessels for this customer.</div>'; return; }
+    root.innerHTML = vessels.map((v, vi) => `
+        <div class="vessel-card" data-vcn="${v.vcn_id}">
+          <div class="vessel-head collapsible-header" onclick="toggleVessel(${vi})">
+            <span class="toggle-icon" id="vic-${vi}">▸</span>
+            <b>${v.vcn_doc_num}</b> · ${v.vessel_name || ''}
+            <span class="ldud-badge">LDUD: ${v.ldud_status}</span>
+            <span style="margin-left:auto;font-weight:600;">Billable: ₹${(v.total_amount||0).toFixed(2)}</span>
+          </div>
+          <div class="vessel-body" id="vb-${vi}" style="display:none;">
+            <table class="data-table"><thead><tr>
+              <th></th><th>Parcel</th><th>Cargo</th><th>Service</th><th>Qty</th><th>Rate</th><th>Amount</th>
+            </tr></thead><tbody>
+            ${v.lines.map((l, li) => `
+              <tr>
+                <td><input type="checkbox" class="bl-chk" data-vi="${vi}" data-li="${li}" ${l.rate>0?'checked':''} onchange="recalcSel()"></td>
+                <td>${l.parcel_no||''}</td><td>${l.cargo_name||''}</td>
+                <td>${l.service_name} <small>(${l.service_code})</small></td>
+                <td style="text-align:right"><input type="number" class="bl-qty" data-vi="${vi}" data-li="${li}" value="${l.qty}" max="${l.qty}" step="0.001" style="width:80px" onchange="clampQty(this,${l.qty});recalcSel()"> ${l.uom}</td>
+                <td style="text-align:right"><input type="number" class="bl-rate" data-vi="${vi}" data-li="${li}" value="${l.rate||''}" step="0.01" placeholder="0.00" style="width:80px" onchange="recalcSel()">${l.rate>0?'':' <span style="color:#dc2626;font-size:10px">enter rate</span>'}</td>
+                <td style="text-align:right" id="amt-${vi}-${li}">₹${(l.amount||0).toFixed(2)}</td>
+              </tr>`).join('')}
+            </tbody></table>
+          </div>
+        </div>`).join('');
+    window._vessels = vessels;
+    recalcSel();
+}
 
-    if (!cards || cards.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" class="empty-state">No cargo handling lines found for this customer</td></tr>';
-        return;
-    }
+function toggleVessel(vi) {
+    const b = document.getElementById('vb-'+vi), ic = document.getElementById('vic-'+vi);
+    const open = b.style.display === 'none';
+    b.style.display = open ? 'block' : 'none'; ic.textContent = open ? '▾' : '▸';
+}
 
-    tbody.innerHTML = '';
-    cards.forEach((card, idx) => {
-        const isBillable = card.is_billable;
-        const totalQty   = parseFloat(card.total_quantity || 0);
-        const billedQty  = parseFloat(card.billed_quantity || 0);
-        const balance    = parseFloat(card.billable_quantity || 0);
-        const statusColor = isBillable
-            ? (card.doc_status === 'Closed' ? '#27ae60' : '#f39c12')
-            : '#e74c3c';
-        const statusLabel = card.doc_status || 'Not Closed';
-        const proofModule = card.ldud_id ? 'LDUD01' : '';
-        const proofSourceId = card.ldud_id || null;
-        const proofCell = proofSourceId
-            ? `<button onclick="viewProofDocs('${proofModule}', ${proofSourceId})" style="padding:2px 8px;background:#ebf8ff;border:1px solid #90cdf4;border-radius:4px;cursor:pointer;font-size:11px;color:#2b6cb0;font-weight:500;">View Docs</button>`
-            : `<span style="font-size:10px;color:#a0aec0;">${card.bl_no || '-'}</span>`;
+function clampQty(inp, max) {
+    let v = parseFloat(inp.value)||0; if (v > max) inp.value = max; if (v < 0) inp.value = 0;
+}
 
-        const tr = document.createElement('tr');
-        if (!isBillable) tr.style.opacity = '0.6';
-
-        tr.innerHTML = `
-            <td>${isBillable ? `<input type="checkbox" class="cargo-line-check" data-idx="${idx}" onchange="recalcTotals()">` : '🔒'}</td>
-            <td style="font-size:10px;">${card.doc_label || card.source_type + '-' + card.source_id}</td>
-            <td><span style="background:${statusColor};color:white;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;">${statusLabel}</span></td>
-            <td style="font-size:10px;">${card.service_name || '-'}</td>
-            <td>${card.cargo_name || '-'}</td>
-            <td>${proofCell}</td>
-            <td style="font-size:10px;">${card.bl_date ? card.bl_date.substring(0, 10) : '-'}</td>
-            <td style="text-align:right;">${totalQty.toFixed(2)}</td>
-            <td style="text-align:right; color:${billedQty > 0 ? '#e67e22' : '#95a5a6'}; font-size:10px;">${billedQty > 0 ? billedQty.toFixed(2) : '-'}</td>
-            <td style="text-align:right; font-weight:600; color:${billedQty > 0 ? '#2980b9' : 'inherit'};">${balance.toFixed(2)} ${card.uom || ''}</td>
-            <td>${isBillable ? `<input type="number" step="0.01" min="0.01" max="${balance.toFixed(2)}" id="cargo_line_billqty_${idx}" value="${balance.toFixed(2)}" data-balance="${balance.toFixed(2)}" onchange="validateBillQty(this); recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;">` : '-'}</td>
-            <td>${isBillable ? `<input type="number" step="0.01" id="cargo_line_rate_${idx}" placeholder="0.00" onchange="recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;">` : '-'}</td>
-            <td style="text-align:right;font-weight:600;" id="cargo_line_amt_${idx}">-</td>
-        `;
-        tbody.appendChild(tr);
-
-        // Auto-load rate from agreement
-        if (isBillable && card.service_type_id) {
-            loadCargoLineRate(idx, card.service_type_id, card.cargo_name);
-        }
+function recalcSel() {
+    let sel = 0;
+    document.querySelectorAll('.bl-chk').forEach(chk => {
+        const vi = chk.dataset.vi, li = chk.dataset.li;
+        const qty = parseFloat(document.querySelector(`.bl-qty[data-vi="${vi}"][data-li="${li}"]`).value)||0;
+        const rate = parseFloat(document.querySelector(`.bl-rate[data-vi="${vi}"][data-li="${li}"]`).value)||0;
+        const amt = Math.round(qty*rate*100)/100;
+        document.getElementById(`amt-${vi}-${li}`).textContent = '₹'+amt.toFixed(2);
+        if (chk.checked) sel += amt;
     });
+    const el = document.getElementById('selectedTotal'); if (el) el.textContent = '₹'+sel.toFixed(2);
 }
 
-function toggleAllCargo(masterCb) {
-    document.querySelectorAll('.cargo-line-check').forEach(cb => {
-        cb.checked = masterCb.checked;
-    });
-    recalcTotals();
-}
-
-async function loadCargoLineRate(idx, serviceTypeId, cargoName) {
-    const ct = document.getElementById('customerType').value;
-    const cid = document.getElementById('customerId').value;
-    const agId = document.getElementById('agreementId').value;
-
-    // Try cargo-specific rate first
-    if (cargoName) {
-        let url = `/api/module/FIN01/cargo-rates/${ct}/${cid}/${serviceTypeId}`;
-        if (agId) url += `?agreement_id=${agId}`;
-        try {
-            const resp = await fetch(url);
-            const json = await resp.json();
-            if (json.success && json.rates && json.rates[cargoName] != null) {
-                const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
-                if (rateInput) {
-                    rateInput.value = parseFloat(json.rates[cargoName]).toFixed(2);
-                    recalcTotals();
-                    return;
-                }
-            }
-        } catch(e) {}
-    }
-
-    // Fallback to generic rate
-    let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
-    if (agId) url += `?agreement_id=${agId}`;
-    try {
-        const resp = await fetch(url);
-        const json = await resp.json();
-        if (json.success) {
-            const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
-            if (rateInput) {
-                rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
-                recalcTotals();
-            }
-        }
-    } catch(e) {}
-}
-
-function renderOtherServices(records) {
-    const tbody = document.getElementById('otherServicesBody');
-    const badge = document.getElementById('otherServicesBadge');
-    badge.textContent = records.length > 0 ? records.length : '';
-
-    if (records.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No unbilled service records for this customer</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = '';
-    records.forEach((rec, idx) => {
-        const st = serviceTypesMap[rec.service_type_id] || {};
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td><input type="checkbox" class="service-check" data-idx="${idx}" data-id="${rec.id}"
-                data-qty="${rec.billable_quantity || 0}" data-stype="${rec.service_type_id || ''}"
-                onchange="onServiceChecked(this)"></td>
-            <td>${rec.record_number}</td>
-            <td>${formatDateDMY(rec.record_date || '')}</td>
-            <td>${rec.service_name || ''}</td>
-            <td>${parseFloat(rec.billable_quantity || 0).toFixed(2)}</td>
-            <td>${rec.billable_uom || st.uom || ''}</td>
-            <td><input type="number" step="0.01" id="svc_rate_${idx}" placeholder="0.00"
-                data-idx="${idx}" onchange="recalcTotals()" style="width:80px; padding:3px 5px; font-size:11px;"></td>
-            <td id="svc_amount_${idx}" style="font-weight:600;">-</td>
-            <td style="font-size:10px; color:#7f8c8d;">${rec.ref_source_display || '-'}</td>
-        `;
-        tbody.appendChild(tr);
-
-        // Auto-load rate
-        if (rec.service_type_id) {
-            loadServiceRate(idx, rec.service_type_id);
-        }
-    });
-}
-
-async function loadServiceRate(idx, serviceTypeId) {
-    const ct = document.getElementById('customerType').value;
-    const cid = document.getElementById('customerId').value;
-    const agId = document.getElementById('agreementId').value;
-    let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
-    if (agId) url += `?agreement_id=${agId}`;
-
-    try {
-        const resp = await fetch(url);
-        const json = await resp.json();
-        if (json.success) {
-            const rateInput = document.getElementById(`svc_rate_${idx}`);
-            if (rateInput) {
-                rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
-                recalcTotals();
-            }
-        }
-    } catch(e) {}
-}
-
-function onServiceChecked(cb) {
-    recalcTotals();
-}
-
-function toggleAllServices(masterCb) {
-    document.querySelectorAll('.service-check').forEach(cb => {
-        cb.checked = masterCb.checked;
-    });
-    recalcTotals();
-}
-
-function renderBilledHistory(items) {
-    const tbody = document.getElementById('billedBody');
-    if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No prior billing history</td></tr>';
-        return;
-    }
-    tbody.innerHTML = items.map(item => `
-        <tr>
-            <td>${item.bill_number || ''}</td>
-            <td>${formatDateDMY(item.bill_date || '')}</td>
-            <td>${item.agreement_display || '-'}</td>
-            <td>${item.service_name || item.description || ''}</td>
-            <td>${parseFloat(item.quantity || 0).toFixed(2)}</td>
-            <td>${parseFloat(item.rate || 0).toFixed(2)}</td>
-            <td>₹${parseFloat(item.line_amount || 0).toFixed(2)}</td>
-            <td>${item.bill_status || ''}</td>
-        </tr>
-    `).join('');
-}
-
-function validateBillQty(input) {
-    const max = parseFloat(input.dataset.balance || 0);
-    let val = parseFloat(input.value || 0);
-    if (val > max) { input.value = max.toFixed(2); val = max; }
-    if (val < 0) { input.value = '0.00'; }
-}
-
-function recalcTotals() {
-    let subtotal = 0;
-    let tdsTotal = 0;
-    let tcsTotal = 0;
-    let selectedCount = 0;
-    const cargoHandling = billableData.cargo_handling || [];
-
-    // Cargo line items — use bill qty (not total line qty)
-    document.querySelectorAll('.cargo-line-check').forEach(cb => {
-        const idx = parseInt(cb.dataset.idx);
-        const billQtyInput = document.getElementById(`cargo_line_billqty_${idx}`);
-        const qty = parseFloat(billQtyInput ? billQtyInput.value : 0) || 0;
-        const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
-        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
-        const amount = qty * rate;
-        const amtEl = document.getElementById(`cargo_line_amt_${idx}`);
-        if (amtEl) amtEl.textContent = '₹' + amount.toFixed(2);
-        if (cb.checked) {
-            subtotal += amount;
-            selectedCount++;
-            const card = cargoHandling[idx];
-            if (card) {
-                // TDS on basic amount only
-                if (card.is_tds && card.tds_percent > 0) {
-                    tdsTotal += amount * card.tds_percent / 100;
-                }
-                // TCS on basic + GST (calculated below after GST is known)
-                if (card.is_tcs && card.tcs_percent > 0) {
-                    const lineGst = amount * 0.18;
-                    tcsTotal += (amount + lineGst) * card.tcs_percent / 100;
-                }
-            }
-        }
-    });
-
-    // Service record items
-    document.querySelectorAll('.service-check').forEach(cb => {
-        const idx = cb.dataset.idx;
-        const qty = parseFloat(cb.dataset.qty || 0);
-        const rateInput = document.getElementById(`svc_rate_${idx}`);
-        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
-        const amount = qty * rate;
-        const amtEl = document.getElementById(`svc_amount_${idx}`);
-        if (amtEl) amtEl.textContent = '₹' + amount.toFixed(2);
-        if (cb.checked) {
-            subtotal += amount;
-            selectedCount++;
-            const rec = billableData.other_services?.[idx];
-            if (rec) {
-                // TDS on basic amount only
-                if (rec.is_tds && rec.tds_percent > 0) {
-                    tdsTotal += amount * rec.tds_percent / 100;
-                }
-                // TCS on basic + GST
-                if (rec.is_tcs && rec.tcs_percent > 0) {
-                    const lineGst = amount * 0.18;
-                    tcsTotal += (amount + lineGst) * rec.tcs_percent / 100;
-                }
-            }
-        }
-    });
-
-    // GST (simplified — 18% on subtotal; real impl would use per-line GST rates)
-    const gst = subtotal * 0.18;
-    const total = subtotal + gst;
-
-    document.getElementById('totalSelectedCount').textContent = selectedCount + ' item' + (selectedCount !== 1 ? 's' : '');
-    document.getElementById('totalSubtotal').textContent = '₹' + subtotal.toFixed(2);
-    document.getElementById('totalGst').textContent = '₹' + gst.toFixed(2);
-    document.getElementById('totalAmount').textContent = '₹' + total.toFixed(2);
-
-    // Show TDS if applicable
-    const tdsItem = document.getElementById('tdsItem');
-    if (tdsTotal > 0) {
-        tdsItem.style.display = '';
-        document.getElementById('totalTds').textContent = '-₹' + tdsTotal.toFixed(2);
-    } else {
-        tdsItem.style.display = 'none';
-    }
-
-    // Show TCS if applicable
-    const tcsItem = document.getElementById('tcsItem');
-    if (tcsTotal > 0) {
-        tcsItem.style.display = '';
-        document.getElementById('totalTcs').textContent = '+₹' + tcsTotal.toFixed(2);
-    } else {
-        tcsItem.style.display = 'none';
-    }
-}
-
+// #4: wire generate to write bill_lines + ledger (write path is out of scope for this task)
 async function generateBill() {
-    const ct = document.getElementById('customerType').value;
-    const cid = document.getElementById('customerId').value;
-    const billDate = document.getElementById('billDate').value;
-
-    if (!ct || !cid || !billDate) {
-        alert('Please fill in Customer Type, Customer, and Bill Date.');
-        return;
-    }
-
-    const lines = [];
-    const cargoHandling = billableData.cargo_handling || [];
-
-    // Collect selected cargo lines
-    document.querySelectorAll('.cargo-line-check:checked').forEach(cb => {
-        const idx = parseInt(cb.dataset.idx);
-        const card = cargoHandling[idx];
-        if (!card) return;
-        const billQtyInput = document.getElementById(`cargo_line_billqty_${idx}`);
-        const qty = parseFloat(billQtyInput ? billQtyInput.value : 0) || 0;
-        if (qty <= 0) return; // skip zero-qty selections
-        const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
-        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
-        lines.push({
-            line_type: 'cargo_handling',
-            service_type_id: card.service_type_id,
-            service_name: card.service_name || '',
-            description: (card.service_name || '') + ' — ' + (card.cargo_name || '') + ' — ' + card.doc_label,
-            quantity: qty,
-            rate: rate,
-            uom: card.uom || 'MT',
-            line_amount: qty * rate,
-            cargo_source_type: card.cargo_source_type,
-            cargo_source_id: card.cargo_source_id
-        });
-    });
-
-    // Collect other service lines
-    document.querySelectorAll('.service-check:checked').forEach(cb => {
-        const idx = parseInt(cb.dataset.idx);
-        const rec = billableData.other_services[idx];
-        const rateInput = document.getElementById(`svc_rate_${idx}`);
-        const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
-        const qty = parseFloat(rec.billable_quantity || 0);
-        lines.push({
-            line_type: 'service_record',
-            service_type_id: rec.service_type_id,
-            description: rec.service_name,
-            quantity: qty,
-            rate: rate,
-            uom: rec.billable_uom || '',
-            line_amount: qty * rate,
-            service_record_id: rec.id
-        });
-    });
-
-    if (lines.length === 0) {
-        alert('Please select at least one item to bill.');
-        return;
-    }
-
-    // Cargo and other-service lines cannot be mixed in the same bill
-    const hasCargoLines   = lines.some(l => l.line_type === 'cargo_handling');
-    const hasServiceLines = lines.some(l => l.line_type === 'service_record');
-    if (hasCargoLines && hasServiceLines) {
-        alert('Cargo handling lines and other service lines cannot be combined in the same bill.\nPlease create separate bills for each type.');
-        return;
-    }
-
-    const customerOpt = document.getElementById('customerId').selectedOptions[0];
-    const agId = document.getElementById('agreementId').value;
-    const subtotal = lines.reduce((s, l) => s + l.line_amount, 0);
-
-    const payload = {
-        customer_type: ct,
-        customer_id: parseInt(cid),
-        customer_name: customerOpt ? customerOpt.dataset.name : '',
-        customer_gstin: customerOpt ? customerOpt.dataset.gstin : '',
-        customer_state_code: customerOpt ? customerOpt.dataset.stateCode : '',
-        agreement_id: agId ? parseInt(agId) : null,
-        bill_date: billDate,
-        currency_code: document.getElementById('currency').value || 'INR',
-        remarks: document.getElementById('remarks').value,
-        subtotal: subtotal,
-        lines: lines
-    };
-
-    const resp = await fetch('/api/module/FIN01/bill/save', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-    });
-    const result = await resp.json();
-
-    if (result.success) {
-        alert('Bill generated: ' + result.bill_number);
-        window.location.href = `/module/FIN01/bill/${result.id}`;
-    } else {
-        alert('Error: ' + result.error);
-    }
-}
-
-function toggleSection(id) {
-    const content = document.getElementById(id + 'Content');
-    const header = content.previousElementSibling;
-    content.classList.toggle('open');
-    header.classList.toggle('open');
+    alert('Generate Bill (write path) is not yet implemented — coming in a follow-up.');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
