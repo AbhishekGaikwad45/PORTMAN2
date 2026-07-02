@@ -4,9 +4,11 @@ from flask import Blueprint, render_template, request, jsonify, session, redirec
 from functools import wraps
 from . import model
 from database import get_user_permissions, get_module_config
+from modules.FIN01 import model as fin_model
 
 bp = Blueprint('VCN01', __name__, template_folder='.')
 MODULE_CODE = 'VCN01'
+BILLED_LOCK_MSG = 'This vessel has been billed — the record is locked and cannot be changed.'
 
 def login_required(f):
     @wraps(f)
@@ -15,6 +17,12 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
+
+def _billed_locked(vcn_id):
+    """Return a JSON 409 response if the VCN is billed (locked), else None."""
+    if vcn_id and fin_model.is_vcn_billed(vcn_id):
+        return jsonify({'error': BILLED_LOCK_MSG}), 409
+    return None
 
 def get_perms():
     if session.get('is_admin'):
@@ -71,6 +79,9 @@ def save():
     is_approver = str(config.get('approver_id', '')) == str(user_id) or session.get('is_admin')
 
     if not is_new:
+        locked = _billed_locked(data['id'])
+        if locked:
+            return locked
         current_status = model.get_doc_status(data['id'])
         if current_status == 'Approved':
             if not is_approver:
@@ -122,6 +133,9 @@ def send_back():
         return jsonify({'error': 'Missing id'}), 400
     if not comment:
         return jsonify({'error': 'A reason is required when sending back to Draft'}), 400
+    locked = _billed_locked(record_id)
+    if locked:
+        return locked
     model.send_back_to_draft(record_id, comment, session.get('username'))
     return jsonify({'doc_status': 'Draft'})
 
@@ -173,6 +187,9 @@ def save_consigner():
     perms = get_perms()
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
+    locked = _billed_locked(request.json.get('vcn_id'))
+    if locked:
+        return locked
     try:
         row_id = model.save_consigner(request.json)
     except ValueError as e:
@@ -190,6 +207,9 @@ def delete_consigner():
     # sub-table rows are deletable by anyone who can edit/add (not gated on can_delete)
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
+    locked = _billed_locked(model.get_consigner_vcn_id(request.json.get('id')))
+    if locked:
+        return locked
     vcn_id = model.delete_consigner(request.json.get('id'))
     return jsonify({'success': True, 'cargo_type': model.get_header_cargo_type(vcn_id)})
 
@@ -257,6 +277,9 @@ def save_export_cargo():
     perms = get_perms()
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
+    locked = _billed_locked(request.json.get('vcn_id'))
+    if locked:
+        return locked
     row_id = model.save_export_cargo_declaration(request.json)
     parcel = model.get_export_parcel(row_id) or {}
     return jsonify({'success': True, 'id': row_id,
@@ -271,6 +294,9 @@ def delete_export_cargo():
     # sub-table rows are deletable by anyone who can edit/add (not gated on can_delete)
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
+    locked = _billed_locked(model.get_export_parcel_vcn_id(request.json.get('id')))
+    if locked:
+        return locked
     vcn_id = model.delete_export_cargo_declaration(request.json.get('id'))
     return jsonify({'success': True, 'cargo_type': model.get_header_cargo_type(vcn_id)})
 

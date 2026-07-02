@@ -252,6 +252,26 @@ def get_export_parcel(row_id):
     return dict(row) if row else None
 
 
+def get_consigner_vcn_id(row_id):
+    """vcn_id owning an import consigner parcel (for billed-lock checks before delete)."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT vcn_id FROM vcn_consigners WHERE id=%s', [row_id])
+    row = cur.fetchone()
+    conn.close()
+    return row['vcn_id'] if row else None
+
+
+def get_export_parcel_vcn_id(row_id):
+    """vcn_id owning an export cargo parcel (for billed-lock checks before delete)."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT vcn_id FROM vcn_export_cargo_declaration WHERE id=%s', [row_id])
+    row = cur.fetchone()
+    conn.close()
+    return row['vcn_id'] if row else None
+
+
 def _parse_qty(v):
     try:
         return float(str(v).replace(',', '')) if v not in (None, '') else 0.0
@@ -528,24 +548,31 @@ def get_approval_eligibility(vcn_id):
     if not header['discharge_port']:
         missing.append('Discharge Port')
 
+    # Every parcel must be complete for closure. Export and import parcels now
+    # share the same shape, so validate the fields billing/ops need on each row.
     op_type = header['operation_type']
-    if op_type == 'Export':
-        cur.execute('''SELECT COUNT(*) as cnt FROM vcn_export_cargo_declaration
-                       WHERE vcn_id=%s AND consigner_name IS NOT NULL AND consigner_name != \'\'
-                       AND cargo_name IS NOT NULL AND cargo_name != \'\'
-                       AND quantity IS NOT NULL AND quantity != \'\'''', (vcn_id,))
-        if cur.fetchone()['cnt'] < 1:
-            missing.append('Parcels (min 1 entry with consignee, cargo and quantity)')
-    else:
-        # import cargo is declared via the Parcels (consigner) table
-        cur.execute('''SELECT COUNT(*) as cnt FROM vcn_consigners
-                       WHERE vcn_id=%s AND consigner_name IS NOT NULL AND consigner_name != \'\'
-                       AND cargo_name IS NOT NULL AND cargo_name != \'\'
-                       AND quantity IS NOT NULL AND quantity != \'\'''', (vcn_id,))
-        if cur.fetchone()['cnt'] < 1:
-            missing.append('Parcels (min 1 entry with consignee, cargo and quantity)')
-
+    tbl = 'vcn_export_cargo_declaration' if op_type == 'Export' else 'vcn_consigners'
+    cur.execute(f'''SELECT parcel_no, cargo_name, quantity, consigner_name, importer_name,
+                           pipeline_name, unload_terminal
+                    FROM {tbl} WHERE vcn_id=%s ORDER BY parcel_seq NULLS LAST, id''', (vcn_id,))
+    parcels = cur.fetchall()
     conn.close()
+
+    if not parcels:
+        missing.append('At least one parcel')
+    else:
+        required = [('cargo_name', 'Cargo'), ('quantity', 'Qty'),
+                    ('consigner_name', 'Consignee'), ('importer_name', 'Payment by'),
+                    ('pipeline_name', 'Pipeline'), ('unload_terminal', 'Unload Terminal')]
+        bad = []
+        for p in parcels:
+            gaps = [label for field, label in required
+                    if not (str(p[field]).strip() if p[field] is not None else '')]
+            if gaps:
+                bad.append(f"{p['parcel_no'] or '#?'} ({', '.join(gaps)})")
+        if bad:
+            missing.append('Incomplete parcels — ' + '; '.join(bad))
+
     return {'eligible': len(missing) == 0, 'missing': missing}
 
 

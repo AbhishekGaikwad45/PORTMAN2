@@ -600,3 +600,53 @@ def get_invoice_sac_summary(invoice_id):
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ===== PARCEL CHARGE BILLED LEDGER (billed-status store for the AR engine) =====
+
+
+def record_parcel_charge(cur, cargo_source_type, cargo_source_id, service_type_id,
+                         service_code, bill_id, billed_quantity, created_by):
+    """Ledger a billed parcel charge. Called inside the bill-generation transaction
+    (takes the caller's cursor; does NOT commit)."""
+    cur.execute('''INSERT INTO parcel_charge_billed
+        (cargo_source_type, cargo_source_id, service_type_id, service_code,
+         bill_id, billed_quantity, billed_date, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
+        [cargo_source_type, cargo_source_id, service_type_id, service_code,
+         bill_id, billed_quantity, datetime.now().strftime('%Y-%m-%d'), created_by])
+
+
+def void_bill_charges(cur, bill_id):
+    """Remove all ledger rows for a bill (bill cancellation/reversal). Takes the
+    caller's cursor; does NOT commit."""
+    cur.execute('DELETE FROM parcel_charge_billed WHERE bill_id=%s', [bill_id])
+
+
+def billed_qty(cargo_source_type, cargo_source_id, service_type_id):
+    """Total quantity already billed for one parcel + service."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT COALESCE(SUM(billed_quantity), 0) AS q FROM parcel_charge_billed
+                   WHERE cargo_source_type=%s AND cargo_source_id=%s AND service_type_id=%s''',
+                [cargo_source_type, cargo_source_id, service_type_id])
+    q = float(cur.fetchone()['q'] or 0)
+    conn.close()
+    return q
+
+
+def is_vcn_billed(vcn_id):
+    """True if any parcel of this VCN (import consigner or export cargo) has been
+    billed. Used to lock a billed vessel against edits / revert-to-draft."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT EXISTS (
+        SELECT 1 FROM parcel_charge_billed pcb
+        WHERE (pcb.cargo_source_type = 'VCN_IMPORT'
+               AND pcb.cargo_source_id IN (SELECT id FROM vcn_consigners WHERE vcn_id=%s))
+           OR (pcb.cargo_source_type = 'VCN_EXPORT'
+               AND pcb.cargo_source_id IN (SELECT id FROM vcn_export_cargo_declaration WHERE vcn_id=%s))
+    ) AS billed''', [vcn_id, vcn_id])
+    billed = bool(cur.fetchone()['billed'])
+    conn.close()
+    return billed
