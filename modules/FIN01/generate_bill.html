@@ -302,9 +302,48 @@ function recalcSel() {
     const el = document.getElementById('selectedTotal'); if (el) el.textContent = '₹'+sel.toFixed(2);
 }
 
-// #4: wire generate to write bill_lines + ledger (write path is out of scope for this task)
 async function generateBill() {
-    alert('Generate Bill (write path) is not yet implemented — coming in a follow-up.');
+    const vessels = window._vessels || [];
+    const picked = [];
+    document.querySelectorAll('.bl-chk:checked').forEach(chk => {
+        const vi = +chk.dataset.vi, li = +chk.dataset.li;
+        const v = vessels[vi]; const l = v && v.lines[li];
+        if (!l) return;
+        const qty = parseFloat(document.querySelector(`.bl-qty[data-vi="${vi}"][data-li="${li}"]`).value) || 0;
+        const rate = parseFloat(document.querySelector(`.bl-rate[data-vi="${vi}"][data-li="${li}"]`).value) || 0;
+        picked.push({
+            vcn_id: v.vcn_id,
+            cargo_source_type: l.cargo_source_type, cargo_source_id: l.cargo_source_id,
+            service_type_id: l.service_type_id, service_code: l.service_code,
+            service_name: l.service_name, cargo_name: l.cargo_name,
+            quantity: qty, rate: rate, uom: l.uom, gst_rate_id: l.gst_rate_id,
+            sac_code: l.sac_code, gl_code: l.gl_code,
+            tds_applicable: l.is_tds, tds_percent: l.tds_percent,
+        });
+    });
+    if (!picked.length) { alert('Select at least one line to bill.'); return; }
+    if (picked.some(p => !(p.rate > 0))) { alert('Every selected line needs a rate greater than 0.'); return; }
+
+    const ct = document.getElementById('customerType').value;
+    const cidSel = document.getElementById('customerId');
+    const cid = cidSel.value;
+    const opt = cidSel.selectedOptions && cidSel.selectedOptions[0];
+
+    const payload = {
+        customer_type: ct, customer_id: cid, customer_name: (opt ? opt.dataset.name : '') || '',
+        customer_gstin: (opt ? opt.dataset.gstin : '') || '',
+        customer_gst_state_code: (opt ? opt.dataset.stateCode : '') || '',
+        customer_gl_code: '',
+        lines: picked,
+    };
+    const res = await fetch('/api/module/FIN01/bill/generate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    const j = await res.json();
+    if (!j.success) { alert(j.error || 'Bill generation failed'); return; }
+    alert('Bill ' + j.bill_number + ' generated.');
+    loadBillables();   // reload; billed lines drop out via ledger remaining
 }
 
 document.addEventListener('DOMContentLoaded', () => {
