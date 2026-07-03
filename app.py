@@ -156,6 +156,11 @@ register_module(pltm01_info['code'], pltm01_info['name'], pltm01_bp)
 register_module(tkm01_info['code'], tkm01_info['name'], tkm01_bp)
 register_module(ev01_info['code'], ev01_info['name'], ev01_bp)
 
+# SAP inbound callback (token-auth webhook: SAP posts IRN/status back here)
+import sap_inbound
+sap_inbound.ensure_token_table()
+app.add_url_rule('/api/sap/callback', view_func=sap_inbound.sap_callback_view, methods=['POST'])
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
