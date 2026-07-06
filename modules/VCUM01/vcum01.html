@@ -21,6 +21,9 @@
     {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
     {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
     {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+    <button class="btn" onclick="downloadTemplate()" style="background:#17a2b8;color:#fff;">Download Template</button>
+    {% if permissions.can_add %}<button class="btn" onclick="document.getElementById('uploadFile').click()" style="background:#28a745;color:#fff;">Upload CSV</button>
+    <input type="file" id="uploadFile" accept=".csv" style="display:none" onchange="bulkUpload(this)">{% endif %}
     <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
 </div>
 
@@ -130,6 +133,22 @@
             const result = await res.json();
             if (result.id) row.update({id: result.id});
         }
+        table.setData(`/api/module/${MODULE}/data`);
+    }
+
+    function downloadTemplate() {
+        window.location.href = `/api/module/${MODULE}/template`;
+    }
+
+    async function bulkUpload(input) {
+        if (!input.files.length) return;
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        const res = await fetch(`/api/module/${MODULE}/bulk_upload`, {method: 'POST', body: fd});
+        const result = await res.json();
+        input.value = '';
+        if (result.error) { alert(result.error); return; }
+        alert(`Successfully imported ${result.inserted} row(s)`);
         table.setData(`/api/module/${MODULE}/data`);
     }
 

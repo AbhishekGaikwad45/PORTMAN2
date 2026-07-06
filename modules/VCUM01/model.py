@@ -56,6 +56,29 @@ def save_data(data):
     conn.close()
     return row_id
 
+def bulk_insert(rows):
+    conn = get_db()
+    cur = get_cursor(conn)
+    inserted = 0
+    for row in rows:
+        if not row.get('name'):
+            continue
+        cur.execute(f'''INSERT INTO {TABLE}
+            (customer_code, name, sap_customer_code, company_code, gl_code, gstin, gst_state_code, gst_state_name,
+             pan, cin, billing_address, city, pincode, contact_person, contact_email, contact_phone,
+             default_currency, virtual_account_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+            [row.get('customer_code'), row.get('name', ''), row.get('sap_customer_code'), row.get('company_code'),
+             row.get('gl_code'), row.get('gstin'),
+             row.get('gst_state_code'), row.get('gst_state_name'), row.get('pan'), row.get('cin'),
+             row.get('billing_address'), row.get('city'), row.get('pincode'),
+             row.get('contact_person'), row.get('contact_email'), row.get('contact_phone'),
+             row.get('default_currency') or 'INR', row.get('virtual_account_number')])
+        inserted += 1
+    conn.commit()
+    conn.close()
+    return inserted
+
 def delete_data(row_id):
     conn = get_db()
     cur = get_cursor(conn)
