@@ -28,11 +28,14 @@ def upgrade() -> None:
             vessel_name      TEXT,
             customer         TEXT,           -- billed party ('Company' in the MIS sheet)
             payment_by       TEXT,
-            category         TEXT,           -- Category0 (Edible Oil / Chemical / POL / Other Liquid)
-            sub_category1    TEXT,           -- Category1
-            sub_category2    TEXT,           -- extra classification level
-            cargo_class      TEXT,           -- 'Cargo'  (Edible Oil / Other Liquid / Ph.Acid / POL)
-            cargo_name       TEXT,           -- 'Cargo1' (CPO, CDSBO, Acetic Acid, ...)
+            -- cargo classification: same column names as VCG01 vessel_cargo
+            -- so reports can join/group against the cargo master directly
+            cargo_type           TEXT,       -- Edible Oil / Chemical / POL / Other Liquid
+            cargo_category       TEXT,
+            cargo_category_2     TEXT,
+            cargo_sub_category   TEXT,
+            cargo_sub_category_2 TEXT,
+            cargo_name           TEXT,       -- CPO, CDSBO, Acetic Acid, ...
             terminal         TEXT,
             quantity         NUMERIC(14,3),
             overseas_coastal TEXT,
