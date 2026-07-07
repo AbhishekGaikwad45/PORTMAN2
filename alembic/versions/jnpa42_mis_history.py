@@ -29,7 +29,8 @@ def upgrade() -> None:
             customer         TEXT,           -- billed party ('Company' in the MIS sheet)
             payment_by       TEXT,
             category         TEXT,           -- Category0 (Edible Oil / Chemical / POL / Other Liquid)
-            sub_category     TEXT,           -- Category1
+            sub_category1    TEXT,           -- Category1
+            sub_category2    TEXT,           -- extra classification level
             cargo_class      TEXT,           -- 'Cargo'  (Edible Oil / Other Liquid / Ph.Acid / POL)
             cargo_name       TEXT,           -- 'Cargo1' (CPO, CDSBO, Acetic Acid, ...)
             terminal         TEXT,
