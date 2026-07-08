@@ -347,7 +347,7 @@
     const i = selected.expanded.indexOf(pid);
     const wrap = document.getElementById(`log-wrap-${pid}`);
     if (i >= 0) { selected.expanded.splice(i, 1); if (wrap) wrap.style.display = 'none'; }
-    else { selected.expanded.push(pid); if (wrap) wrap.style.display = 'block'; initLogTable(pid); }
+    else { selected.expanded.push(pid); if (wrap) wrap.style.display = 'block'; initLogTable(pid); scrollToLatest(pid); }
     saveSel();
   }
 
@@ -419,8 +419,14 @@
           row.getElement().title = 'Short-close: leftover quantity written off (excluded from Avg rate). Use “Revert Short-close” to undo.';
         }
       },
-      dataLoaded: function() { recomputeTotals(pid); }
+      // rAF: dataLoaded fires before rows render; defer scroll until they exist
+      dataLoaded: function() { recomputeTotals(pid); requestAnimationFrame(() => scrollToLatest(pid)); }
     });
+  }
+
+  function scrollToLatest(pid) {
+    const rows = subTables[pid] ? subTables[pid].getRows() : [];
+    if (rows.length) rows[rows.length - 1].scrollTo().catch(() => {});
   }
 
   function currentShift() { const h = new Date().getHours(); return h >= 6 && h < 14 ? 'A' : h >= 14 && h < 22 ? 'B' : 'C'; }
