@@ -244,11 +244,15 @@ def _jjltpl_bulk_tons(cur, period_start, period_end):
             COALESCE(SUM(quantity), 0) AS qty
         FROM lueu_parcel_log
         WHERE is_deleted IS NOT TRUE
+          AND NULLIF(TRIM(entry_date), '') IS NOT NULL
+          AND NULLIF(TRIM(from_time), '') IS NOT NULL
           AND (entry_date || ' ' || from_time)::timestamp >= %s
           AND (entry_date || ' ' || from_time)::timestamp < %s
     """, (period_start, period_end))
 
-    qty = float(cur.fetchone()["qty"] or 0)
+    row = cur.fetchone()
+
+    qty = float(row["qty"] or 0)
 
     return {
         MEDIUM_DRY_BULK: 0.0,
