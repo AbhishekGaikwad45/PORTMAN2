@@ -278,6 +278,11 @@ def mis_data():
 def mis_upload():
     return _do_upload(parse_mis_csv, 'mis_history', MIS_DB_COLS)
 
+# @bp.route('/api/module/RP01/jjltpl/data')
+# @login_required
+# def jjltpl_data():
+#     return _paged_data('jjltpl')
+
 
 # ──────────────────────────────────────────────────────────────────
 #  Dataset 2: Vessel call master — one row per vessel call, with

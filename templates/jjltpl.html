@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}Daily MIS Report — RP01{% endblock %}
+
+{% block head %}
+<style>
+    .jjltpl-table-wrap {
+        margin-bottom: 22px;
+    }
+    .jjltpl-table-wrap h3 {
+        font-size: 13px;
+        color: var(--text-primary);
+        margin: 0 0 8px;
+    }
+    table.jjltpl-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 12px;
+    }
+    table.jjltpl-table td, table.jjltpl-table th {
+        border: 1px solid var(--border-color);
+        padding: 6px 10px;
+        text-align: center;
+        color: var(--text-primary);
+    }
+    table.jjltpl-table td.label-cell {
+        text-align: left;
+        font-weight: 600;
+        background: var(--bg-secondary);
+    }
+    table.jjltpl-table th {
+        background: var(--bg-secondary);
+        font-weight: 700;
+    }
+    table.jjltpl-table td.empty-cell {
+        color: var(--text-secondary);
+    }
+    .row-day td:nth-child(5), .row-year td:nth-child(5) {
+        background: rgba(74, 144, 217, 0.12);
+    }
+    .row-month td:nth-child(5) {
+        background: rgba(255, 214, 0, 0.18);
+    }
+    .jjltpl-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+    }
+    .jjltpl-toolbar label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+    }
+    .jjltpl-toolbar input, .jjltpl-toolbar select {
+        font-size: 12px;
+        padding: 5px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+    }
+    .window-note {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-bottom: 16px;
+    }
+    #jjltplStatus {
+        font-size: 12px;
+        color: #c62828;
+        margin-bottom: 10px;
+    }
+    .jjltpl-export-btn {
+        margin-left: auto;
+        font-size: 12px;
+        padding: 6px 12px;
+        border: 1px solid #2e7d32;
+        border-radius: 4px;
+        background: #2e7d32;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .jjltpl-export-btn:hover {
+        background: #256428;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
+    <h2 style="margin:0;font-size:20px;color:var(--text-primary);">Daily MIS Report</h2>
+    <span style="background:#4a90d9;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;">RP01</span>
+    <a href="/module/RP01/" style="margin-left:auto;font-size:12px;color:#4a90d9;">&larr; Back to Reports</a>
+</div>
+
+<div class="jjltpl-toolbar">
+    <label for="jjltplDate">Report Date</label>
+    <input type="date" id="jjltplDate">
+    <label for="jjltplTerminal">Terminal</label>
+    <select id="jjltplTerminal">
+        <option value="JJLTPL">JJLTPL</option>
+    </select>
+    <button class="mis-btn" onclick="loadJjltplReport()">Load</button>
+    <button class="jjltpl-export-btn" onclick="exportJjltplReport()">Export to Excel</button>
+</div>
+
+<div id="jjltplStatus"></div>
+<div class="window-note" id="windowNote"></div>
+
+
+<div class="jjltpl-table-wrap">
+    <h3>Vessels on Berth</h3>
+    <table class="jjltpl-table">
+        <thead>
+            <tr>
+                <th>Berth</th>
+                <th>Via</th>
+                <th>Vessel Name</th>
+                <th>Cargo</th>
+                <th>Alongside (Date/Time)</th>
+                <th>Expected Completion (Date/Time)</th>
+                <th>Reason if Vessel Anchored before Berthing</th>
+            </tr>
+        </thead>
+        <tbody id="vesselsBody"></tbody>
+    </table>
+</div>
+
+<div class="jjltpl-table-wrap">
+    <h3>Traffic Throughput (Tons)</h3>
+    <table class="jjltpl-table">
+        <thead>
+            <tr>
+                <th>Period</th>
+                <th>Bulk Vessels</th>
+                <th>Dry Bulk Tons</th>
+                <th>Break Bulk Tons</th>
+                <th>Liquid Bulk Tons</th>
+                <th>Bulk Total Tons</th>
+            </tr>
+        </thead>
+        <tbody id="trafficBody"></tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function todayStr() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function cell(val, fallback) {
+    if (val === null || val === undefined || val === '') {
+        return `<span class="empty-cell">${fallback || '—'}</span>`;
+    }
+    return val;
+}
+
+function fmtDateTime(iso) {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function loadJjltplReport() {
+    const date = document.getElementById('jjltplDate').value || todayStr();
+    const terminal = document.getElementById('jjltplTerminal').value;
+    const status = document.getElementById('jjltplStatus');
+
+    status.textContent = '';
+
+    fetch(`/api/module/RP01/jjltpl/data?date=${date}&terminal=${terminal}`)
+        .then(r => r.json().then(j => ({ ok: r.ok, j })))
+        .then(({ ok, j }) => {
+
+            if (!ok) {
+                status.textContent = j.error || 'Failed to load report.';
+                return;
+            }
+
+            document.getElementById('windowNote').innerHTML =
+                `Showing data from <strong>${fmtDateTime(j.window_start)}</strong>
+                 to <strong>${fmtDateTime(j.window_end)}</strong>
+                 (07:00 → 07:00 operational day)`;
+
+            document.getElementById('vesselsBody').innerHTML =
+                j.vessels_on_berth.map(v => `
+                    <tr>
+                        <td>${cell(v.berth)}</td>
+                        <td>${cell(v.via)}</td>
+                        <td>${cell(v.vessel_name)}</td>
+                        <td>${cell(v.cargo)}</td>
+                        <td>${cell(fmtDateTime(v.alongside_datetime))}</td>
+                        <td>${cell(fmtDateTime(v.expected_completion))}</td>
+                        <td>${cell(v.anchor_reason)}</td>
+                    </tr>
+                `).join('');
+
+            document.getElementById('trafficBody').innerHTML =
+                j.traffic_rows.map(r => `
+                    <tr class="row-${r.period.toLowerCase()}">
+                        <td class="label-cell">${r.period}</td>
+                        <td>${r.bulk_vessels}</td>
+                        <td>${Number(r.dry_bulk_tons).toFixed(3)}</td>
+                        <td>${Number(r.break_bulk_tons).toFixed(3)}</td>
+                        <td>${Number(r.liquid_bulk_tons).toFixed(3)}</td>
+                        <td>${Number(r.bulk_total_tons).toFixed(3)}</td>
+                    </tr>
+                `).join('');
+
+        })
+        .catch(err => {
+            status.textContent = 'Failed to load report: ' + err;
+        });
+}
+
+function exportJjltplReport() {
+    const date = document.getElementById('jjltplDate').value || todayStr();
+    const terminal = document.getElementById('jjltplTerminal').value;
+    window.location.href = `/api/module/RP01/jjltpl/export?date=${date}&terminal=${terminal}`;
+}
+
+document.getElementById('jjltplDate').value = todayStr();
+loadJjltplReport();
+</script>
+{% endblock %}
