@@ -78,16 +78,31 @@ def _jjltpl_year_window(selected_date, window_end):
 
     return fy_start, window_end
 
-def _jjltpl_fy_bulk_tons(cur, period_start, period_end):
+
+def _jjltpl_fin_year_label(selected_date):
+    """
+    Financial-year label matching the `fin_year` column in
+    mis_vessel_master, e.g. 2026-04-.. through 2027-03-.. -> "2026-27".
+
+    NOTE: adjust the format below if your DB actually stores it as
+    "2026-2027", "FY26-27", etc.
+    """
+    if selected_date.month >= 4:
+        start_year = selected_date.year
+    else:
+        start_year = selected_date.year - 1
+    end_year_short = (start_year + 1) % 100
+    return f"{start_year}-{end_year_short:02d}"
+
+
+def _jjltpl_fy_bulk_tons(cur, fin_year):
 
     cur.execute("""
         SELECT
             COALESCE(SUM(quantity),0) AS qty
         FROM mis_vessel_master
-        WHERE NULLIF(cast_off,'') IS NOT NULL
-          AND NULLIF(cast_off,'')::timestamp >= %s
-          AND NULLIF(cast_off,'')::timestamp < %s
-    """, (period_start, period_end))
+        WHERE fin_year = %s
+    """, (fin_year,))
 
     qty = float(cur.fetchone()["qty"] or 0)
 
@@ -99,8 +114,6 @@ def _jjltpl_fy_bulk_tons(cur, period_start, period_end):
     }
 
 
-
-
 from datetime import timedelta
 
 def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
@@ -110,7 +123,7 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
             vh.berth_name AS berth,
             vh.via_number AS via,
             vh.vessel_name,
-            vh.cargo_type,
+            po.cargo_name AS cargo_type,
 
             NULLIF(lh.alongside_datetime,'')::timestamp AS alongside_datetime,
 
@@ -154,7 +167,7 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
             vh.berth_name,
             vh.via_number,
             vh.vessel_name,
-            vh.cargo_type,
+            po.cargo_name,
             lh.alongside_datetime,
             po.start_dt,
             po.expected_start,
@@ -278,10 +291,10 @@ def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
     return row["cnt"] if row and row["cnt"] else 0
 
 
-def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths):
+def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths, fin_year=None):
 
     if label == "YEAR":
-        tons = _jjltpl_fy_bulk_tons(cur, period_start, period_end)
+        tons = _jjltpl_fy_bulk_tons(cur, fin_year)
     else:
         tons = _jjltpl_bulk_tons(cur, period_start, period_end)
 
@@ -306,6 +319,7 @@ def _jjltpl_report_payload(selected_date, terminal):
     window_start, window_end = _jjltpl_window(selected_date)
     month_start, _ = _jjltpl_month_window(selected_date, window_end)
     year_start, _ = _jjltpl_year_window(selected_date, window_end)
+    fin_year = _jjltpl_fin_year_label(selected_date)
 
     conn = get_db()
     try:
@@ -314,7 +328,7 @@ def _jjltpl_report_payload(selected_date, terminal):
         traffic_rows = [
             _jjltpl_period_row(cur, 'DAY', window_start, window_end, terminal, berths),
             _jjltpl_period_row(cur, 'MONTH', month_start, window_end, terminal, berths),
-            _jjltpl_period_row(cur, 'YEAR', year_start, window_end, terminal, berths),
+            _jjltpl_period_row(cur, 'YEAR', year_start, window_end, terminal, berths, fin_year=fin_year),
         ]
     finally:
         conn.close()
