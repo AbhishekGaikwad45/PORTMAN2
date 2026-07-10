@@ -102,12 +102,8 @@ def _jjltpl_bulk_tons(cur, period_start, period_end):
             COALESCE(SUM(quantity), 0) AS qty
         FROM lueu_parcel_log
         WHERE is_deleted IS NOT TRUE
-          AND TO_TIMESTAMP(entry_date || ' ' || from_time,
-                           'YYYY-MM-DD HH24:MI')
-                >= %s
-          AND TO_TIMESTAMP(entry_date || ' ' || from_time,
-                           'YYYY-MM-DD HH24:MI')
-                < %s
+          AND (entry_date::date + from_time::time) >= %s
+          AND (entry_date::date + from_time::time) < %s
     """, (period_start, period_end))
 
     row = cur.fetchone()
