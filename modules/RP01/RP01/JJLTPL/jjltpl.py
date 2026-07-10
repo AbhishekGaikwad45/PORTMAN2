@@ -95,6 +95,31 @@ def _jjltpl_fin_year_label(selected_date):
     return f"{start_year}-{end_year_short:02d}"
 
 
+def _jjltpl_bulk_tons(cur, period_start, period_end):
+
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(quantity), 0) AS qty
+        FROM lueu_parcel_log
+        WHERE is_deleted IS NOT TRUE
+          AND TO_TIMESTAMP(entry_date || ' ' || from_time,
+                           'YYYY-MM-DD HH24:MI')
+                >= %s
+          AND TO_TIMESTAMP(entry_date || ' ' || from_time,
+                           'YYYY-MM-DD HH24:MI')
+                < %s
+    """, (period_start, period_end))
+
+    row = cur.fetchone()
+
+    qty = float(row["qty"] or 0)
+
+    return {
+        MEDIUM_DRY_BULK: 0.0,
+        MEDIUM_BREAK_BULK: 0.0,
+        MEDIUM_LIQUID_BULK: qty,
+        "bulk_total": qty,
+    }
 def _jjltpl_fy_bulk_tons(cur, fin_year):
 
     cur.execute("""
@@ -112,8 +137,6 @@ def _jjltpl_fy_bulk_tons(cur, fin_year):
         MEDIUM_LIQUID_BULK: qty,
         "bulk_total": qty,
     }
-
-
 def _jjltpl_fy_bulk_vessel_count(cur, fin_year):
     """
     Count of vessels in mis_vessel_master for the given financial year.
@@ -310,27 +333,27 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
     return rows
 
 
-def _jjltpl_bulk_tons(cur, period_start, period_end):
+# def _jjltpl_bulk_tons(cur, period_start, period_end):
 
-    cur.execute("""
-        SELECT
-            COALESCE(SUM(quantity), 0) AS qty
-        FROM mis_vessel_master
-        WHERE NULLIF(TRIM(cast_off), '') IS NOT NULL
-          AND NULLIF(TRIM(cast_off), '')::timestamp >= %s
-          AND NULLIF(TRIM(cast_off), '')::timestamp < %s
-    """, (period_start, period_end))
+#     cur.execute("""
+#         SELECT
+#             COALESCE(SUM(quantity), 0) AS qty
+#         FROM mis_vessel_master
+#         WHERE NULLIF(TRIM(cast_off), '') IS NOT NULL
+#           AND NULLIF(TRIM(cast_off), '')::timestamp >= %s
+#           AND NULLIF(TRIM(cast_off), '')::timestamp < %s
+#     """, (period_start, period_end))
 
-    row = cur.fetchone()
+#     row = cur.fetchone()
 
-    qty = float(row["qty"] or 0)
+#     qty = float(row["qty"] or 0)
 
-    return {
-        MEDIUM_DRY_BULK: 0.0,
-        MEDIUM_BREAK_BULK: 0.0,
-        MEDIUM_LIQUID_BULK: qty,
-        "bulk_total": qty,
-    }
+#     return {
+#         MEDIUM_DRY_BULK: 0.0,
+#         MEDIUM_BREAK_BULK: 0.0,
+#         MEDIUM_LIQUID_BULK: qty,
+#         "bulk_total": qty,
+#     }
 
 
 def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
