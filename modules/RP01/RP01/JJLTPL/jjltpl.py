@@ -128,6 +128,64 @@ def _jjltpl_fy_bulk_vessel_count(cur, fin_year):
     return row["cnt"] if row and row["cnt"] else 0
 
 
+def _lueu_parse_ids(csv):
+    return [int(x) for x in str(csv or '').split(',') if str(x).strip().isdigit()]
+
+
+def _lueu_hours(f, t):
+    """Duration in hours between two 'HH:MM' strings (wraps past midnight).
+    Mirrors LUEU01/model.py::_hours exactly."""
+    try:
+        fh, fm = (int(x) for x in str(f).split(':')[:2])
+        th, tm = (int(x) for x in str(t).split(':')[:2])
+    except (ValueError, AttributeError):
+        return 0.0
+    mins = (th * 60 + tm) - (fh * 60 + fm)
+    if mins < 0:
+        mins += 1440
+    return mins / 60.0
+
+
+def _lueu_target_qty(cur, parcel_ids_csv, op_qty, operation_type):
+    """Current target quantity for a parcel-op: sum of its live VCN parcel
+    quantities (import or export source table), falling back to the
+    parcel-op's own snapshot quantity. Mirrors model.py::_single_parcel_target
+    / the target-resolution block in get_started_parcels."""
+    ids = _lueu_parse_ids(parcel_ids_csv)
+    tbl = 'vcn_export_cargo_declaration' if operation_type == 'Export' else 'vcn_consigners'
+    total = 0.0
+    if ids:
+        cur.execute(f'SELECT quantity FROM {tbl} WHERE id = ANY(%s)', [ids])
+        for r in cur.fetchall():
+            try:
+                total += float(str(r['quantity']).replace(',', '')) if r['quantity'] else 0.0
+            except (ValueError, TypeError):
+                pass
+    return total or float(op_qty or 0)
+
+
+def _lueu_log_aggregate(cur, parcel_op_id, target):
+    """Capped aggregation of lueu_parcel_log rows for one parcel-op, exactly
+    mirroring the loop in model.py::get_started_parcels: once cumulative
+    qty (real + shortclose) reaches target, later rows are ignored so they
+    can't drag hours/avg_rate/ETC. Shortclose qty counts toward completion
+    but NOT toward hours or avg_rate."""
+    cur.execute('''SELECT from_time, to_time, COALESCE(quantity,0) AS q, is_shortclose
+                   FROM lueu_parcel_log
+                   WHERE parcel_op_id=%s AND is_deleted IS NOT TRUE
+                   ORDER BY entry_date, from_time NULLS LAST, id''', [parcel_op_id])
+    real_qty, hours, shortclose_qty = 0.0, 0.0, 0.0
+    for r in cur.fetchall():
+        if target > 0 and (real_qty + shortclose_qty) >= target - 1e-6:
+            break
+        if r['is_shortclose']:
+            shortclose_qty += float(r['q'] or 0)
+        else:
+            real_qty += float(r['q'] or 0)
+            hours += _lueu_hours(r['from_time'], r['to_time'])
+    return real_qty, hours, shortclose_qty
+
+
 def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
     cur.execute("""
@@ -135,25 +193,19 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
             vh.berth_name AS berth,
             vh.via_number AS via,
             vh.vessel_name,
+            vh.operation_type,
+
+            po.id AS parcel_op_id,
+            po.parcel_ids,
             po.cargo_name AS cargo_type,
+            po.quantity AS op_qty,
 
             NULLIF(lh.alongside_datetime,'')::timestamp AS alongside_datetime,
 
             NULLIF(po.start_dt,'')::timestamp AS start_dt,
             NULLIF(po.expected_start,'')::timestamp AS expected_start,
 
-            COALESCE(po.expected_flow_rate,0) AS expected_flow_rate,
-            COALESCE(po.quantity,0) AS total_qty,
-
-            COALESCE(
-                SUM(
-                    CASE
-                        WHEN lpl.is_deleted IS NOT TRUE
-                        THEN COALESCE(lpl.quantity,0)
-                        ELSE 0
-                    END
-                ),
-            0) AS handled_qty
+            COALESCE(po.expected_flow_rate,0) AS expected_flow_rate
 
         FROM vcn_header vh
 
@@ -162,9 +214,6 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
         LEFT JOIN ldud_parcel_ops po
             ON po.ldud_id = lh.id
-
-        LEFT JOIN lueu_parcel_log lpl
-            ON lpl.parcel_op_id = po.id
 
         WHERE vh.berth_name = ANY(%s)
 
@@ -175,51 +224,50 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
                 OR NULLIF(lh.cast_off_datetime,'')::timestamp >= %s
           )
 
-        GROUP BY
-            vh.berth_name,
-            vh.via_number,
-            vh.vessel_name,
-            po.cargo_name,
-            lh.alongside_datetime,
-            po.start_dt,
-            po.expected_start,
-            po.expected_flow_rate,
-            po.quantity
-
         ORDER BY
-            vh.berth_name
+            vh.berth_name, po.id
     """, (berths, window_end, window_start))
+
+    raw_rows = cur.fetchall()
 
     rows = []
 
-    for r in cur.fetchall():
+    for r in raw_rows:
 
         expected_completion = None
 
-        # Prefer Actual Start, otherwise Expected Start
-        base_start = r["start_dt"] if r["start_dt"] else r["expected_start"]
+        if r["parcel_op_id"]:
 
-        if (
-            base_start
-            and r["expected_flow_rate"]
-            and float(r["expected_flow_rate"]) > 0
-        ):
+            # Same target resolution + capped log aggregation LUEU01 uses.
+            target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
+            real_qty, hours, shortclose_qty = _lueu_log_aggregate(cur, r["parcel_op_id"], target)
+            remaining_qty = max(target - (real_qty + shortclose_qty), 0)
 
-            balance_qty = max(
-                float(r["total_qty"] or 0) -
-                float(r["handled_qty"] or 0),
-                0
-            )
+            # Matches lueu01.html's etcText() exactly:
+            #   ETC = start_dt + (target_qty / avg_rate) hours
+            # — projected from the fixed start time using the FULL target
+            # (not remaining), not from "now". Only shown while remaining > 0.
+            if remaining_qty > 0:
 
-            duration_hours = (
-                balance_qty /
-                float(r["expected_flow_rate"])
-            )
+                if r["start_dt"] and hours > 0 and real_qty > 0:
+                    avg_rate = real_qty / hours
+                    if avg_rate > 0 and target > 0:
+                        expected_completion = r["start_dt"] + timedelta(
+                            hours=(target / avg_rate)
+                        )
 
-            expected_completion = (
-                base_start +
-                timedelta(hours=duration_hours)
-            )
+                elif (
+                    r["expected_start"]
+                    and r["expected_flow_rate"]
+                    and float(r["expected_flow_rate"]) > 0
+                    and target > 0
+                ):
+                    # Mirrors the separate "ETC (Exp)" chip: expected_start +
+                    # (target / expected_flow_rate), used only when there's
+                    # no actual start yet.
+                    expected_completion = r["expected_start"] + timedelta(
+                        hours=(target / float(r["expected_flow_rate"]))
+                    )
 
         rows.append({
             "berth": r["berth"],
