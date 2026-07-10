@@ -97,16 +97,24 @@ def _jjltpl_fin_year_label(selected_date):
 
 def _jjltpl_bulk_tons(cur, period_start, period_end):
 
-    cur.execute("""
+    print("period_start:", period_start, type(period_start))
+    print("period_end  :", period_end, type(period_end))
+
+    sql = """
         SELECT
             COALESCE(SUM(quantity), 0) AS qty
         FROM lueu_parcel_log
         WHERE is_deleted IS NOT TRUE
           AND (entry_date::date + from_time::time) >= %s
           AND (entry_date::date + from_time::time) < %s
-    """, (period_start, period_end))
+    """
+
+    print(cur.mogrify(sql, (period_start, period_end)).decode())
+
+    cur.execute(sql, (period_start, period_end))
 
     row = cur.fetchone()
+    print(row)
 
     qty = float(row["qty"] or 0)
 
