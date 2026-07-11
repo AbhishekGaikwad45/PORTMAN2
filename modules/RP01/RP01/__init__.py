@@ -18,5 +18,7 @@ bp = Blueprint(
 # `from .. import bp` (or `from . import bp`) finds it already built.
 from . import views
 from .JJLTPL import jjltpl
-from .Berth_plan import view as berth_plan_view
 from .report1 import report1
+from .report2 import report2
+from .Berth_plan import view as berth_plan_view
+

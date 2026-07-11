@@ -1,0 +1,732 @@
+{% extends "base.html" %}
+
+{% block title %}Report-2 — RP01{% endblock %}
+
+{% block head %}
+<style>
+
+:root{
+    --rp-blue:#2F6FED;
+    --rp-blue-dark:#1D4FB8;
+    --rp-green:#16A34A;
+    --rp-green-dark:#0F7C38;
+    --rp-border:#DDE3EA;
+    --rp-bg:#F6F8FA;
+    --rp-card:#FFFFFF;
+    --rp-highlight:#FDF3D0;
+    --rp-highlight-blue:#E8F0FB;
+    --rp-ink:#1F2937;
+    --rp-muted:#6B7280;
+}
+
+.rp01-wrap *{
+    box-sizing:border-box;
+}
+
+.rp01-wrap{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+
+/* ==========================
+        HEADER
+========================== */
+
+.module-header{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:20px;
+    padding-bottom:16px;
+    border-bottom:1px solid var(--rp-border);
+}
+
+.module-header h2{
+    margin:0;
+    font-size:22px;
+    font-weight:700;
+    color:var(--rp-ink);
+}
+
+.rp-badge{
+    background:var(--rp-blue);
+    color:#fff;
+    padding:4px 12px;
+    border-radius:20px;
+    font-size:12px;
+    font-weight:700;
+}
+
+.rp-back{
+    margin-left:auto;
+    color:var(--rp-blue);
+    text-decoration:none;
+}
+
+.rp-back:hover{
+    text-decoration:underline;
+}
+
+/* ==========================
+        TOOLBAR
+========================== */
+
+.report-toolbar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+
+    padding:15px;
+    margin-bottom:15px;
+
+    background:#fff;
+    border:1px solid var(--rp-border);
+    border-radius:10px;
+}
+
+.report-toolbar label{
+    font-weight:600;
+    color:#555;
+}
+
+.report-toolbar select{
+
+    padding:8px 12px;
+    border-radius:6px;
+    border:1px solid var(--rp-border);
+    min-width:140px;
+    background:white;
+
+}
+
+.report-toolbar button{
+
+    padding:8px 18px;
+    border:none;
+    border-radius:6px;
+    color:white;
+    cursor:pointer;
+
+}
+
+.load-btn{
+    background:var(--rp-blue);
+}
+
+.export-btn{
+    background:var(--rp-green);
+    margin-left:auto;
+}
+
+/* ==========================
+      REPORT CARD
+========================== */
+
+.report-card{
+
+    background:white;
+    border:1px solid var(--rp-border);
+    border-radius:10px;
+    overflow:auto;
+
+}
+
+.report-header{
+
+    padding:20px;
+    background:var(--rp-bg);
+    border-bottom:1px solid var(--rp-border);
+
+}
+
+.report-title{
+
+    font-size:22px;
+    font-weight:700;
+    text-align:center;
+    margin-bottom:15px;
+
+}
+
+.report-info{
+
+    width:100%;
+    border-collapse:collapse;
+
+}
+
+.report-info td{
+
+    padding:5px;
+    font-size:14px;
+
+}
+
+.report-info td:first-child{
+
+    width:170px;
+    font-weight:600;
+
+}
+
+.unit{
+
+    text-align:right;
+    font-size:12px;
+    margin-top:10px;
+
+}
+
+/* ==========================
+          TABLE
+========================== */
+
+.report-table{
+
+    width:100%;
+    border-collapse:collapse;
+
+}
+
+.report-table th,
+.report-table td{
+
+    border:1px solid #d8d8d8;
+    padding:8px;
+    font-size:13px;
+
+}
+
+.report-table thead th{
+
+    background:#f2f2f2;
+    text-align:center;
+    font-weight:700;
+
+}
+
+.report-table tbody td{
+
+    text-align:right;
+
+}
+
+.report-table tbody td.category-cell,
+.report-table tbody td.sub-cell{
+
+    text-align:left;
+
+}
+
+.category-header-row td{
+
+    font-weight:700;
+    background:#fafafa;
+
+}
+
+.sub-cell{
+
+    padding-left:20px !important;
+    color:#7B241C;
+
+}
+
+.total-row{
+
+    background:var(--rp-highlight-blue);
+    font-weight:bold;
+
+}
+
+.has-data td{
+
+    background:#FFFDE7;
+}
+
+.status{
+
+    margin-bottom:15px;
+    color:#666;
+
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="rp01-wrap">
+
+<div class="module-header">
+
+<h2>Report-2</h2>
+
+<span class="rp-badge">
+RP01
+</span>
+
+<a href="/module/RP01/" class="rp-back">
+← Back to Reports
+</a>
+
+</div>
+
+<div class="report-toolbar">
+
+<label>Month</label>
+
+<select id="monthSelect"></select>
+
+<button class="load-btn"
+onclick="loadReport()">
+Load
+</button>
+
+<button class="export-btn"
+onclick="exportExcel()">
+Export Excel
+</button>
+
+</div>
+
+<div id="status" class="status"></div>
+
+<div class="report-card">
+
+<div class="report-header">
+
+<div class="report-title">
+
+TRAFFIC HANDLED BY COMMODITY
+(UNLOADED / LOADED / TOTAL)
+
+</div>
+
+<table class="report-info">
+
+<tr>
+
+<td>Name of Port</td>
+
+<td id="portName">
+JNPA
+</td>
+
+</tr>
+
+<tr>
+
+<td>Month</td>
+
+<td id="reportMonth"></td>
+
+</tr>
+
+</table>
+
+<div class="unit">
+(In Tonnes)
+</div>
+
+</div>
+
+<table class="report-table">
+
+<thead id="tableHead">
+
+</thead>
+
+<tbody id="tableBody">
+
+</tbody>
+
+<tfoot id="tableFoot">
+
+</tfoot>
+
+</table>
+
+</div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+let REPORT={};
+
+let MONTHS=[];
+function showStatus(msg){
+    document.getElementById("status").textContent = msg || "";
+}
+
+function loadMeta(){
+
+    showStatus("Loading...");
+
+    fetch("/api/module/RP01/report2/meta")
+    .then(r=>r.json())
+    .then(data=>{
+
+        if(data.error){
+            showStatus(data.error);
+            return;
+        }
+
+        MONTHS = data.months || [];
+
+        const monthSelect = document.getElementById("monthSelect");
+
+        monthSelect.innerHTML = "";
+
+        MONTHS.forEach(m=>{
+
+            monthSelect.innerHTML += `
+                <option value="${m.abbrev}">
+                    ${m.label}
+                </option>
+            `;
+
+        });
+
+        if(MONTHS.length){
+            monthSelect.value = MONTHS[MONTHS.length-1].abbrev;
+        }
+
+        loadReport();
+
+    })
+    .catch(err=>{
+
+        console.error(err);
+        showStatus("Unable to load month list.");
+
+    });
+
+}
+
+function loadReport(){
+
+    const month =
+        document.getElementById("monthSelect").value;
+
+    showStatus("Loading report...");
+
+    fetch(`/api/module/RP01/report2/report?month=${month}`)
+
+    .then(r=>r.json())
+
+    .then(data=>{
+
+        if(data.error){
+
+            showStatus(data.error);
+            return;
+
+        }
+
+        REPORT = data;
+
+        document.getElementById("reportMonth").innerHTML =
+            data.month;
+
+        buildHeader();
+
+        buildBody();
+
+        showStatus("");
+
+    })
+
+    .catch(err=>{
+
+        console.error(err);
+
+        showStatus("Unable to load report.");
+
+    });
+
+}
+
+document
+.getElementById("monthSelect")
+.addEventListener("change",loadReport);
+
+
+function buildHeader(){
+
+    // REPORT.years is already ordered most-recent-first by the backend,
+    // so the UI simply renders them in the order given — that keeps the
+    // "This month (current FY) | This month (prior FY) | Cumulative
+    // (current FY) | Cumulative (prior FY) | ..." sequence from the
+    // physical Appendix-3 form.
+    const years = REPORT.years || [];
+
+    function calendarYear(y){
+        const startYear = Number(y.split("-")[0]);
+        if (["Jan","Feb","Mar"].includes(REPORT.month)) {
+            return startYear + 1;
+        }
+        return startYear;
+    }
+
+    let html="";
+
+    html+=`
+    <tr>
+
+        <th rowspan="3" style="min-width:280px" colspan="2">
+            Commodity
+        </th>
+
+    `;
+
+    years.forEach(()=>{
+        html += `<th colspan="3">TRAFFIC FOR THE MONTH OF</th>`;
+    });
+
+    years.forEach(()=>{
+        html += `<th colspan="3">CUMMULATIVE TRAFFIC UPTO THE</th>`;
+    });
+
+    html+="</tr>";
+
+
+    html+="<tr>";
+
+years.forEach(y => {
+
+    const calYear = calendarYear(y);
+    const yy = String(calYear).slice(-2);
+
+    html += `
+        <th colspan="3">
+            ${REPORT.month}-${yy}
+        </th>
+    `;
+
+});
+
+years.forEach(y => {
+
+    const startYear = y.split("-")[0];
+    const endYear = calendarYear(y);
+
+    html += `
+        <th colspan="3">
+            FY ${y}<br>
+            <small>
+                (MONTH APR-${startYear} TO
+                ${REPORT.month.toUpperCase()}-${endYear})
+            </small>
+        </th>
+    `;
+
+});
+
+    html+="</tr>";
+
+
+
+    html+="<tr>";
+
+    years.forEach(()=>{
+
+        html+=`
+        <th>Unloaded</th>
+        <th>Loaded</th>
+        <th>Total</th>
+        `;
+
+    });
+
+    years.forEach(()=>{
+
+        html+=`
+        <th>Unloaded</th>
+        <th>Loaded</th>
+        <th>Total</th>
+        `;
+
+    });
+
+    html+="</tr>";
+
+    document
+    .getElementById("tableHead")
+    .innerHTML = html;
+
+}
+function formatNumber(value){
+
+    if(value===null || value===undefined)
+        return "";
+
+    return Number(value).toLocaleString(undefined,{
+        minimumFractionDigits:3,
+        maximumFractionDigits:3
+    });
+
+}
+
+
+function buildBody(){
+
+    const rows=REPORT.rows || [];
+    const years=REPORT.years || [];
+    const totals=REPORT.totals || {};
+
+    let bodyHtml="";
+
+    rows.forEach(row=>{
+
+        if(row.type==="header"){
+
+            bodyHtml+=`
+            <tr class="category-header-row">
+                <td class="category-cell" colspan="2">${row.commodity}</td>
+                ${'<td></td>'.repeat(years.length*3*2)}
+            </tr>
+            `;
+            return;
+
+        }
+
+        const rowClass = row.has_data ? "has-data" : "";
+
+        bodyHtml+=`<tr class="${rowClass}">`;
+
+        if(row.sub_label){
+            bodyHtml+=`
+                <td></td>
+                <td class="sub-cell">${row.sub_label}</td>
+            `;
+        } else {
+            bodyHtml+=`
+                <td class="category-cell" colspan="2">${row.commodity}</td>
+            `;
+        }
+
+        /* ---------- Traffic For Month ---------- */
+
+        years.forEach(year=>{
+
+            const v=row.for_month[year] || {
+                unloaded:0,
+                loaded:0,
+                total:0
+            };
+
+            bodyHtml+=`
+                <td>${formatNumber(v.unloaded)}</td>
+                <td>${formatNumber(v.loaded)}</td>
+                <td><b>${formatNumber(v.total)}</b></td>
+            `;
+
+        });
+
+
+        /* ---------- Cumulative ---------- */
+
+        years.forEach(year=>{
+
+            const v=row.upto_month[year] || {
+                unloaded:0,
+                loaded:0,
+                total:0
+            };
+
+            bodyHtml+=`
+                <td>${formatNumber(v.unloaded)}</td>
+                <td>${formatNumber(v.loaded)}</td>
+                <td><b>${formatNumber(v.total)}</b></td>
+            `;
+
+        });
+
+        bodyHtml+="</tr>";
+
+    });
+
+    document.getElementById("tableBody").innerHTML=bodyHtml;
+
+
+    /* ============================
+            GRAND TOTAL
+    ============================= */
+
+    let foot=`
+    <tr class="total-row">
+
+        <td colspan="2" style="text-align:center">
+            GRAND TOTAL
+        </td>
+    `;
+
+    years.forEach(year=>{
+
+        const v=totals.for_month[year] || {
+            unloaded:0,
+            loaded:0,
+            total:0
+        };
+
+        foot+=`
+            <td>${formatNumber(v.unloaded)}</td>
+            <td>${formatNumber(v.loaded)}</td>
+            <td>${formatNumber(v.total)}</td>
+        `;
+
+    });
+
+
+    years.forEach(year=>{
+
+        const v=totals.upto_month[year] || {
+            unloaded:0,
+            loaded:0,
+            total:0
+        };
+
+        foot+=`
+            <td>${formatNumber(v.unloaded)}</td>
+            <td>${formatNumber(v.loaded)}</td>
+            <td>${formatNumber(v.total)}</td>
+        `;
+
+    });
+
+    foot+="</tr>";
+
+    document.getElementById("tableFoot").innerHTML=foot;
+
+}
+
+
+/* ==================================
+        EXPORT EXCEL
+================================== */
+
+function exportExcel(){
+
+    const month=
+        document.getElementById("monthSelect").value;
+
+    window.location=
+        `/api/module/RP01/report2/export?month=${month}`;
+
+}
+
+
+/* ==================================
+        INITIAL LOAD
+================================== */
+
+loadMeta();
+
+</script>
+
+{% endblock %}
