@@ -16,3 +16,4 @@ bp = Blueprint(
 from . import views
 from .JJLTPL import jjltpl
 from .report1 import report1
+from .report2 import report2
