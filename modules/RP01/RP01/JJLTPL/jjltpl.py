@@ -308,6 +308,54 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
         })
 
     # ------------------------------------------------------------------
+    # Collapse multiple parcel/cargo rows belonging to the same vessel
+    # call into a single row:
+    #   - cargoes joined as "cargo1/cargo2" (dedup, order preserved)
+    #   - expected completion = the LATEST (max) ETC among that
+    #     vessel's parcels, since the vessel isn't done until all its
+    #     parcels are done
+    # Grouped by (berth, via, vessel_name, alongside_datetime) — these
+    # four fields are identical across all parcel-ops of one vessel
+    # call, so this is a safe stable key without needing a header id.
+    # ------------------------------------------------------------------
+    grouped = {}
+    order = []
+    for row in rows:
+        key = (row["berth"], row["via"], row["vessel_name"], row["alongside_datetime"])
+        if key not in grouped:
+            grouped[key] = {
+                "berth": row["berth"],
+                "via": row["via"],
+                "vessel_name": row["vessel_name"],
+                "cargo_list": [],
+                "alongside_datetime": row["alongside_datetime"],
+                "expected_completion_list": [],
+                "anchor_reason": row["anchor_reason"],
+            }
+            order.append(key)
+        g = grouped[key]
+        if row["cargo"] and row["cargo"] not in g["cargo_list"]:
+            g["cargo_list"].append(row["cargo"])
+        if row["expected_completion"]:
+            g["expected_completion_list"].append(row["expected_completion"])
+
+    rows = []
+    for key in order:
+        g = grouped[key]
+        # ISO-8601 strings sort chronologically, so max() gives the
+        # latest ETC without needing to parse back to datetime.
+        latest_etc = max(g["expected_completion_list"]) if g["expected_completion_list"] else None
+        rows.append({
+            "berth": g["berth"],
+            "via": g["via"],
+            "vessel_name": g["vessel_name"],
+            "cargo": "/".join(g["cargo_list"]) if g["cargo_list"] else None,
+            "alongside_datetime": g["alongside_datetime"],
+            "expected_completion": latest_etc,
+            "anchor_reason": g["anchor_reason"],
+        })
+
+    # ------------------------------------------------------------------
     # Always show all berths (LB-03 and LB-04)
     # ------------------------------------------------------------------
     existing_berths = {row["berth"] for row in rows}
