@@ -152,14 +152,14 @@ def compute_totals(df, fin_year: str, month_idx: int):
     for_month_sums = for_month.groupby("cargo_sub_category")["quantity_000t"].sum().to_dict()
     upto_month_sums = upto_month.groupby("cargo_sub_category")["quantity_000t"].sum().to_dict()
 
-    for_month_out = {c["key"]: round(for_month_sums.get(c["key"], 0.0), 3) for c in CATEGORY_ORDER}
-    upto_month_out = {c["key"]: round(upto_month_sums.get(c["key"], 0.0), 3) for c in CATEGORY_ORDER}
+    for_month_out = {c["key"]: round(for_month_sums.get(c["key"], 0.0), 6) for c in CATEGORY_ORDER}
+    upto_month_out = {c["key"]: round(upto_month_sums.get(c["key"], 0.0), 6) for c in CATEGORY_ORDER}
 
     return {
         "for_month": for_month_out,
         "upto_month": upto_month_out,
-        "total_for_month": round(sum(for_month_out.values()), 3),
-        "total_upto_month": round(sum(upto_month_out.values()), 3),
+        "total_for_month": round(sum(for_month_out.values()), 6),
+        "total_upto_month": round(sum(upto_month_out.values()), 6),
     }
 
 
@@ -344,6 +344,8 @@ def api_export():
             c_cell.value = ("    " + label) if c["sub"] else label
             d_cell.value = for_m
             e_cell.value = upto_m
+            d_cell.number_format = "0.000000"
+            e_cell.number_format = "0.000000"
 
             b_cell.alignment = center
             c_cell.alignment = left
@@ -375,9 +377,11 @@ def api_export():
         ws[f"D{total_row}"] = totals["total_for_month"]
         ws[f"D{total_row}"].font = bold
         ws[f"D{total_row}"].alignment = right
+        ws[f"D{total_row}"].number_format = "0.000000"
         ws[f"E{total_row}"] = totals["total_upto_month"]
         ws[f"E{total_row}"].font = bold
         ws[f"E{total_row}"].alignment = right
+        ws[f"E{total_row}"].number_format = "0.000000"
         for col in ("B", "C", "D", "E"):
             ws[f"{col}{total_row}"].border = thin_border
 
