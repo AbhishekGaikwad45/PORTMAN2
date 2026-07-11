@@ -1,3 +1,5 @@
+print("LOADED:", __file__)
+
 from flask import Blueprint
 
 MODULE_CODE = 'RP01'
@@ -17,3 +19,4 @@ bp = Blueprint(
 from . import views
 from .JJLTPL import jjltpl
 from .Berth_plan import view as berth_plan_view
+from .report1 import report1

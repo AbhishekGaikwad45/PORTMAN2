@@ -140,6 +140,28 @@ def send_back():
     return jsonify({'doc_status': 'Draft'})
 
 
+@bp.route('/api/module/VCN01/send_to_expected', methods=['POST'])
+@login_required
+def send_to_expected():
+    """Undo an accidental EV01→VCN move — vessel goes back to Expected Vessels."""
+    perms = get_perms()
+    if not perms.get('can_edit'):
+        return jsonify({'error': 'No permission to edit'}), 403
+    record_id = (request.json or {}).get('id')
+    if not record_id:
+        return jsonify({'error': 'Missing id'}), 400
+    locked = _billed_locked(record_id)
+    if locked:
+        return locked
+    if model.get_doc_status(record_id) == 'Approved':
+        return jsonify({'error': 'Approved records cannot be sent back to Expected — send back to Draft first'}), 400
+    try:
+        model.send_back_to_expected(record_id, session.get('username'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 409
+    return jsonify({'success': True})
+
+
 @bp.route('/api/module/VCN01/approval-log/<int:record_id>')
 @login_required
 def approval_log(record_id):

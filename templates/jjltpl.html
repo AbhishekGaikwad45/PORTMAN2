@@ -71,6 +71,19 @@
         color: #c62828;
         margin-bottom: 10px;
     }
+    .jjltpl-load-btn {
+        font-size: 12px;
+        padding: 6px 12px;
+        border: 1px solid #4a90d9;
+        border-radius: 4px;
+        background: #4a90d9;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .jjltpl-load-btn:hover {
+        background: #3a76b3;
+    }
     .jjltpl-export-btn {
         margin-left: auto;
         font-size: 12px;
@@ -98,11 +111,7 @@
 <div class="jjltpl-toolbar">
     <label for="jjltplDate">Report Date</label>
     <input type="date" id="jjltplDate">
-    <label for="jjltplTerminal">Terminal</label>
-    <select id="jjltplTerminal">
-        <option value="JJLTPL">JJLTPL</option>
-    </select>
-    <button class="mis-btn" onclick="loadJjltplReport()">Load</button>
+    <button class="jjltpl-load-btn" onclick="loadJjltplReport()">Load</button>
     <button class="jjltpl-export-btn" onclick="exportJjltplReport()">Export to Excel</button>
 </div>
 
@@ -148,6 +157,8 @@
 
 {% block scripts %}
 <script>
+const JJLTPL_TERMINAL = 'JJLTPL';
+
 function todayStr() {
     return new Date().toISOString().slice(0, 10);
 }
@@ -169,7 +180,7 @@ function fmtDateTime(iso) {
 
 function loadJjltplReport() {
     const date = document.getElementById('jjltplDate').value || todayStr();
-    const terminal = document.getElementById('jjltplTerminal').value;
+    const terminal = JJLTPL_TERMINAL;
     const status = document.getElementById('jjltplStatus');
 
     status.textContent = '';
@@ -221,7 +232,7 @@ function loadJjltplReport() {
 
 function exportJjltplReport() {
     const date = document.getElementById('jjltplDate').value || todayStr();
-    const terminal = document.getElementById('jjltplTerminal').value;
+    const terminal = JJLTPL_TERMINAL;
     window.location.href = `/api/module/RP01/jjltpl/export?date=${date}&terminal=${terminal}`;
 }
 
