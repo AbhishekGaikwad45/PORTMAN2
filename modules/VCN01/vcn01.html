@@ -858,7 +858,16 @@
                     }
                     return `<button class="btn-info-approval" onclick="openApprovalInfoModal(${data.id})">ℹ️ Info</button>`;
                 }
-            }
+            },
+            permissions.can_edit ? {
+                title: "", field: "_send_to_expected", width: 120, headerSort: false, hozAlign: "center",
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    // undo an accidental EV01→VCN move; server also blocks LDUD/billed rows
+                    if (!data.id || data.doc_status === 'Approved') return '';
+                    return `<button class="btn-back-draft" onclick="sendToExpected(${data.id})" title="Send back to Expected Vessels (removes this VCN)">↩ Expected</button>`;
+                }
+            } : null
         ].filter(Boolean);
 
         table = new Tabulator("#table", {
@@ -1591,6 +1600,18 @@
         const row = table.getRows().find(r => r.getData().id === sendBackTargetId);
         if (row) { row.update({doc_status: 'Draft'}); row.reformat(); }
         closeSendBackModal();
+    }
+
+    async function sendToExpected(id) {
+        if (!confirm('Send this vessel back to Expected Vessels? This VCN will be removed.')) return;
+        const res = await fetch('/api/module/VCN01/send_to_expected', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: id})
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        if (currentVcnId === id) closeDetailsModal();
+        table.replaceData();
     }
 
     async function showApprovalLog(id, event) {

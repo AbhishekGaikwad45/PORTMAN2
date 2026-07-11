@@ -127,6 +127,46 @@ def delete_header(row_id):
     conn.commit()
     conn.close()
 
+
+def send_back_to_expected(vcn_id, username):
+    """Undo an accidental EV01→VCN move: recreate the expected_vessels row
+    from the VCN header (reverse of EV01 move_to_vcn) and delete the VCN.
+    Refused when the VCN already has an LDUD. Caller checks billed/Approved."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT * FROM vcn_header WHERE id=%s', [vcn_id])
+        h = cur.fetchone()
+        if not h:
+            raise ValueError('Record not found')
+        h = dict(h)
+        cur.execute('SELECT id FROM ldud_header WHERE vcn_id=%s LIMIT 1', [vcn_id])
+        if cur.fetchone():
+            raise ValueError('This VCN already has an LDUD — it cannot be sent back to Expected Vessels')
+        cur.execute('''SELECT DISTINCT consigner_name FROM vcn_consigners
+                       WHERE vcn_id=%s AND consigner_name IS NOT NULL ORDER BY consigner_name''', [vcn_id])
+        consignees = ', '.join(r['consigner_name'] for r in cur.fetchall()) or None
+        cur.execute('SELECT cargo_name, total_qty FROM vcn_cargo_quota WHERE vcn_id=%s ORDER BY cargo_name', [vcn_id])
+        quotas = [dict(r) for r in cur.fetchall()]
+        cargo = ', '.join(q['cargo_name'] for q in quotas) or h.get('cargo_type')
+        qty = ', '.join(str(q['total_qty']) for q in quotas if q['total_qty'] is not None) or None
+        cur.execute('''INSERT INTO expected_vessels
+                       (vessel_name, via_number, loa, draft, agents, consignees, cargo_name,
+                        quantity, nor, eta, berth_name, doc_status, created_by)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pending',%s) RETURNING id''',
+                    [h.get('vessel_name'), h.get('via_number'), h.get('loa'), h.get('draft'),
+                     h.get('vessel_agent_name'), consignees, cargo, qty,
+                     h.get('nor_tendered'), h.get('doc_date'), h.get('berth_name'), username])
+        ev_id = cur.fetchone()['id']
+        cur.execute('DELETE FROM vcn_header WHERE id=%s', [vcn_id])
+        conn.commit()
+        return ev_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 # Consigner (customer details) sub-table — each row is one PARCEL (one IGM/FORM III
 # line: product + receiver + BL). vessel agent is captured on the header.
 _CONSIGNER_COLS = ['igm_line_no', 'bl_no', 'bl_date', 'cargo_name', 'quantity',
