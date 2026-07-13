@@ -334,7 +334,7 @@ def get_berthed_vessels(window_start, window_end, berths):
                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline
         FROM ldud_header l
         JOIN vcn_header h ON h.id = l.vcn_id
-        LEFT JOIN vessels v ON v.vessel_name = h.vessel_name
+        LEFT JOIN vessels v ON UPPER(TRIM(v.vessel_name)) = UPPER(TRIM(h.vessel_name))
         WHERE h.berth_name = ANY(%s)
           AND l.alongside_datetime IS NOT NULL
           AND (NULLIF(l.alongside_datetime::text, ''))::timestamp < %s
@@ -425,7 +425,7 @@ def get_sailed_vessels(window_start, window_end, berths):
                  WHERE po.ldud_id = l.id) AS cargo_completion_dt
         FROM ldud_header l
         JOIN vcn_header h ON h.id = l.vcn_id
-        LEFT JOIN vessels v ON v.vessel_name = h.vessel_name
+        LEFT JOIN vessels v ON UPPER(TRIM(v.vessel_name)) = UPPER(TRIM(h.vessel_name))
         ORDER BY h.berth_name
     ''')
     headers = [dict(r) for r in cur.fetchall()]
