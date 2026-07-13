@@ -23,6 +23,16 @@ def get_perms():
     return get_user_permissions(session.get('user_id'), MODULE_CODE)
 
 
+LOCKED_MSG = 'This vessel is Closed in LDUD01 — LUEU01 entries are locked.'
+
+
+def _locked(parcel_op_id):
+    """JSON 409 when the op's LDUD is fully Closed, else None."""
+    if parcel_op_id and model.ops_locked([parcel_op_id]):
+        return jsonify({'success': False, 'error': LOCKED_MSG}), 409
+    return None
+
+
 @bp.route('/module/LUEU01/')
 @login_required
 def view():
@@ -54,6 +64,9 @@ def set_parcel_times():
     pid = data.get('parcel_op_id')
     if not pid:
         return jsonify({'error': 'Missing parcel_op_id'}), 400
+    locked = _locked(pid)
+    if locked:
+        return locked
     model.set_parcel_times(pid, data.get('start_dt'), data.get('end_dt'))
     return jsonify({'success': True})
 
@@ -68,6 +81,9 @@ def set_expected_start():
     pid = data.get('parcel_op_id')
     if not pid:
         return jsonify({'error': 'Missing parcel_op_id'}), 400
+    locked = _locked(pid)
+    if locked:
+        return locked
     model.set_expected_start(pid, data.get('expected_start'), data.get('expected_flow_rate'))
     return jsonify({'success': True})
 
@@ -85,6 +101,9 @@ def save_log():
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
     data = request.json or {}
+    locked = _locked(data.get('parcel_op_id'))
+    if locked:
+        return locked
     data['created_by'] = session.get('username')
     return jsonify({'id': model.save_log(data), 'success': True})
 
@@ -98,6 +117,8 @@ def delete_log():
     ids = (request.json or {}).get('ids', [])
     if not ids:
         return jsonify({'error': 'No IDs provided'}), 400
+    if model.logs_locked(ids):
+        return jsonify({'success': False, 'error': LOCKED_MSG}), 409
     model.soft_delete_log(ids, session.get('username'))
     return jsonify({'success': True, 'deleted_count': len(ids)})
 
@@ -111,6 +132,9 @@ def shortclose_parcel():
     pid = (request.json or {}).get('parcel_op_id')
     if not pid:
         return jsonify({'success': False, 'error': 'Missing parcel_op_id'}), 400
+    locked = _locked(pid)
+    if locked:
+        return locked
     try:
         model.shortclose_parcel(pid, session.get('username'))
     except ValueError as e:
@@ -127,6 +151,9 @@ def revert_shortclose():
     pid = (request.json or {}).get('parcel_op_id')
     if not pid:
         return jsonify({'success': False, 'error': 'Missing parcel_op_id'}), 400
+    locked = _locked(pid)
+    if locked:
+        return locked
     try:
         model.revert_shortclose(pid, session.get('username'))
     except ValueError as e:

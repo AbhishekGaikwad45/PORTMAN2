@@ -349,33 +349,74 @@ def get_doc_status(record_id):
 
 
 def get_closure_eligibility(ldud_id):
-    """Minimal closure gate: vessel name + NOR tendered.
-    (≥1 proof-of-quantity document is enforced separately in the view.)
-    Full vs Partial close is chosen manually — can_full_close mirrors eligible.
-    ops_total/bl_total kept at 0 for response-shape compatibility."""
+    """Closure gate: vessel name + NOR tendered (≥1 proof doc is enforced in
+    the view), plus the quantity picture shown before closing:
+      ops_total        — ACTUAL LUEU01 logged quantity (short-close EXCLUDED)
+      bl_total         — parcel target total (live VCN parcel quantities,
+                         falling back to the op snapshot)
+      shortclose_total — written-off leftover, reported separately
+    Full close only when the actual quantity matches the BL total."""
     conn = get_db()
     cur = get_cursor(conn)
     missing = []
 
-    cur.execute('SELECT vessel_name, nor_tendered FROM ldud_header WHERE id=%s', (ldud_id,))
+    cur.execute('SELECT vessel_name, nor_tendered, vcn_id FROM ldud_header WHERE id=%s', (ldud_id,))
     header = cur.fetchone()
     if not header:
         conn.close()
-        return {'eligible': False, 'missing': ['Record not found'], 'ops_total': 0, 'bl_total': 0, 'can_full_close': False}
+        return {'eligible': False, 'missing': ['Record not found'], 'ops_total': 0,
+                'bl_total': 0, 'shortclose_total': 0, 'can_full_close': False}
 
     if not header['vessel_name']:
         missing.append('Vessel Name (select a VCN to populate)')
     if not header['nor_tendered']:
         missing.append('NOR Tendered (header field)')
 
+    # BL total: per-op target = live source-parcel quantities, fallback op snapshot
+    cur.execute('SELECT parcel_ids, quantity AS op_qty FROM ldud_parcel_ops WHERE ldud_id=%s', [ldud_id])
+    ops = [dict(r) for r in cur.fetchall()]
+    src_qty = {}
+    all_ids = sorted({pid for o in ops for pid in _parse_ids(o['parcel_ids'])})
+    if all_ids:
+        tbl = _parcel_table_for_ldud(cur, ldud_id)
+        cur.execute(f'SELECT id, quantity FROM {tbl} WHERE id = ANY(%s)', [all_ids])
+        for r in cur.fetchall():
+            try:
+                src_qty[r['id']] = float(str(r['quantity']).replace(',', '')) if r['quantity'] is not None else 0.0
+            except (ValueError, TypeError):
+                src_qty[r['id']] = 0.0
+    bl_total = 0.0
+    for o in ops:
+        ids = _parse_ids(o['parcel_ids'])
+        try:
+            fallback = float(str(o['op_qty']).replace(',', '')) if o['op_qty'] is not None else 0.0
+        except (ValueError, TypeError):
+            fallback = 0.0
+        bl_total += sum(src_qty.get(i, 0.0) for i in ids) or fallback
+
+    # Actual handled (LUEU01) — short-close is a write-off, NOT actual quantity
+    cur.execute('''SELECT
+            COALESCE(SUM(CASE WHEN COALESCE(lg.is_shortclose, FALSE) THEN 0 ELSE lg.quantity END), 0) AS actual,
+            COALESCE(SUM(CASE WHEN COALESCE(lg.is_shortclose, FALSE) THEN lg.quantity ELSE 0 END), 0) AS sc
+        FROM lueu_parcel_log lg
+        JOIN ldud_parcel_ops po ON po.id = lg.parcel_op_id
+        WHERE po.ldud_id = %s AND lg.is_deleted IS NOT TRUE''', [ldud_id])
+    q = cur.fetchone()
     conn.close()
+
+    ops_total = round(float(q['actual'] or 0), 3)
+    shortclose_total = round(float(q['sc'] or 0), 3)
+    bl_total = round(bl_total, 3)
     eligible = len(missing) == 0
+    # Displayed actual excludes short-close, but the write-off still counts
+    # toward completion — otherwise a short-closed vessel could never Full Close.
     return {
         'eligible': eligible,
         'missing': missing,
-        'ops_total': 0,
-        'bl_total': 0,
-        'can_full_close': eligible,
+        'ops_total': ops_total,
+        'bl_total': bl_total,
+        'shortclose_total': shortclose_total,
+        'can_full_close': eligible and abs((ops_total + shortclose_total) - bl_total) < 0.005,
     }
 
 

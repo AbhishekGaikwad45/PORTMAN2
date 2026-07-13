@@ -55,7 +55,7 @@ def get_started_parcels(vcn_id):
     cur.execute('''
         SELECT po.id AS parcel_op_id, po.parcel_ids, po.cargo_name, po.terminal_name,
                po.quantity AS op_qty, po.start_dt, po.end_dt, po.expected_start,
-               po.expected_flow_rate, l.alongside_datetime
+               po.expected_flow_rate, l.alongside_datetime, l.doc_status AS ldud_status
         FROM ldud_parcel_ops po
         JOIN ldud_header l ON l.id = po.ldud_id
         WHERE l.vcn_id = %s
@@ -151,11 +151,44 @@ def get_started_parcels(vcn_id):
             'expected_start': p['expected_start'],
             'expected_flow_rate': _num(p['expected_flow_rate']),
             'alongside_datetime': p['alongside_datetime'],
+            'ldud_status': p['ldud_status'],
             'start_dt': p['start_dt'],
             'end_dt': p['end_dt'],
             'status': 'Completed' if p['end_dt'] else 'In Progress',
         })
     return out
+
+
+def ops_locked(parcel_op_ids):
+    """True if any parcel op belongs to a fully Closed LDUD — LUEU01 entry is
+    then locked. (Partial Close is a billing cut-off; ops may continue.)"""
+    ids = [int(i) for i in parcel_op_ids if i]
+    if not ids:
+        return False
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT 1 FROM ldud_parcel_ops po
+                   JOIN ldud_header l ON l.id = po.ldud_id
+                   WHERE po.id = ANY(%s) AND l.doc_status = 'Closed' LIMIT 1''', [ids])
+    locked = cur.fetchone() is not None
+    conn.close()
+    return locked
+
+
+def logs_locked(log_ids):
+    """True if any logbook row belongs to a fully Closed LDUD."""
+    ids = [int(i) for i in log_ids if i]
+    if not ids:
+        return False
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT 1 FROM lueu_parcel_log lg
+                   JOIN ldud_parcel_ops po ON po.id = lg.parcel_op_id
+                   JOIN ldud_header l ON l.id = po.ldud_id
+                   WHERE lg.id = ANY(%s) AND l.doc_status = 'Closed' LIMIT 1''', [ids])
+    locked = cur.fetchone() is not None
+    conn.close()
+    return locked
 
 
 def set_expected_start(parcel_op_id, expected_start, expected_flow_rate=None):

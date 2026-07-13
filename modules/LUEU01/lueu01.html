@@ -48,6 +48,7 @@
   const parcelEnd = {};      // parcel_op_id -> end_dt
   const parcelEquip = {};    // parcel_op_id -> equipment chosen on the VCN parcel (comma list)
   const parcelAlongside = {}; // parcel_op_id -> LDUD Along Side datetime (start can't precede it)
+  const parcelLocked = {};   // parcel_op_id -> true when the LDUD is fully Closed (entry locked)
   function _toDate(v) { if (!v) return null; const d = new Date(String(v).replace(' ', 'T')); return isNaN(d) ? null : d; }
   let _suppress = false;     // guard against re-entrant cellEdited during clamping
 
@@ -301,17 +302,21 @@
       parcelEquip[p.parcel_op_id] = p.equipment_names || '';
       parcelAlongside[p.parcel_op_id] = p.alongside_datetime || '';
     });
-    const dis = canEdit ? '' : 'disabled';
     listEl.innerHTML = parcels.map(p => {
+      // Fully Closed in LDUD01 → all LUEU01 entry for the vessel is locked
+      const locked = p.ldud_status === 'Closed';
+      parcelLocked[p.parcel_op_id] = locked;
+      const dis = (canEdit && !locked) ? '' : 'disabled';
       const pct = p.target_qty > 0 ? Math.min(100, Math.round(p.logged_qty / p.target_qty * 100)) : 0;
       const open = selected.expanded.includes(p.parcel_op_id);
       const statusColor = p.status === 'Completed' ? '#15803d' : '#c2410c';
       const term = p.terminal_name ? ` · ${p.terminal_name}` : '';
       const pipe = p.pipeline_name ? ` · <span style="color:#475569;">${p.pipeline_name}</span>` : '';
+      const lockBadge = locked ? '<span style="font-size:11px;font-weight:600;color:#b91c1c;background:#fee2e2;border-radius:8px;padding:1px 8px;margin-left:6px;">🔒 LDUD Closed — locked</span>' : '';
       return `<div class="parcel-card">
         <div class="parcel-head" onclick="toggleParcel(${p.parcel_op_id})">
           <div><b>${p.parcel_no}</b> — ${p.cargo_name}${term}${pipe}
-            <span id="status-${p.parcel_op_id}" style="font-size:11px;font-weight:600;color:${statusColor};margin-left:6px;">● ${p.status}</span>
+            <span id="status-${p.parcel_op_id}" style="font-size:11px;font-weight:600;color:${statusColor};margin-left:6px;">● ${p.status}</span>${lockBadge}
             <span id="metrics-${p.parcel_op_id}" style="margin-left:10px;">${metricsHTML(p.avg_rate, p.op_hours, p.remaining_qty, p.start_dt, p.target_qty)}</span></div>
           <div class="progress-pill">${p.logged_qty} / ${p.target_qty} ${p.uom} (${pct}%)</div>
         </div>
@@ -324,7 +329,7 @@
             <label style="color:#64748b;">End: <input type="text" id="end-${p.parcel_op_id}" value="${_dbToDisplay(p.end_dt || '')}" disabled style="background:#f1f5f9;font-family:monospace;width:150px;" title="Set automatically when the parcel quantity is completed"></label>
             <span style="font-size:11px;color:#94a3b8;">(auto on completion)</span>
           </div>
-          ${canEdit ? `<div style="margin:4px 0;">
+          ${(canEdit && !locked) ? `<div style="margin:4px 0;">
             <button class="lueu-btn" onclick="addLogRow(${p.parcel_op_id}, '${berth.replace(/'/g, "\\'")}')">+ Add</button>
             <button class="lueu-btn secondary" onclick="saveLog(${p.parcel_op_id})">Save</button>
             ${p.is_shortclosed
@@ -368,39 +373,41 @@
     return `<span style="color:${rem < 0 ? '#dc2626' : '#1f2937'}">${rem}</span>`;
   };
 
-  function logColumns() {
+  function logColumns(pid) {
+    const ed = canEdit && !parcelLocked[pid];       // LDUD Closed → read-only grid
+    const canDel = canDelete && !parcelLocked[pid];
     return [
       // value stays ISO (yyyy-mm-dd) for chaining/validation; display is DD-MM-YYYY
-      {title: "Date", field: "entry_date", editor: canEdit ? "date" : false, width: 96,
+      {title: "Date", field: "entry_date", editor: ed ? "date" : false, width: 96,
         formatter: function(cell) {
           const m = String(cell.getValue() || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
           return m ? `${m[3]}-${m[2]}-${m[1]}` : (cell.getValue() || '');
         }},
-      {title: "From", field: "from_time", editor: canEdit ? "input" : false, width: 60, cellEdited: validateTimeCell},
-      {title: "To", field: "to_time", editor: canEdit ? "input" : false, width: 60, cellEdited: validateTimeCell},
-      {title: "Last Hr", field: "quantity", editor: canEdit ? "number" : false, hozAlign: "right", width: 70,
+      {title: "From", field: "from_time", editor: ed ? "input" : false, width: 60, cellEdited: validateTimeCell},
+      {title: "To", field: "to_time", editor: ed ? "input" : false, width: 60, cellEdited: validateTimeCell},
+      {title: "Last Hr", field: "quantity", editor: ed ? "number" : false, hozAlign: "right", width: 70,
         editorParams: {min: 0, step: 0.01}, cellEdited: clampQty},
       {title: "Total", field: "_total", hozAlign: "right", width: 70, formatter: _totalFmt},
       {title: "Rem", field: "_remaining", hozAlign: "right", width: 72, formatter: _remFmt},
-      {title: "Press", field: "pressure", editor: canEdit ? "number" : false, hozAlign: "right", width: 58,
+      {title: "Press", field: "pressure", editor: ed ? "number" : false, hozAlign: "right", width: 58,
         editorParams: {step: 0.01}},
-      {title: "UOM", field: "quantity_uom", editor: canEdit ? "list" : false, editorParams: list(masters.uom.names), width: 56},
+      {title: "UOM", field: "quantity_uom", editor: ed ? "list" : false, editorParams: list(masters.uom.names), width: 56},
       {title: "Medium", field: "medium", width: 90,
-        editor: canEdit ? "list" : false, editorParams: {values: ['Equipment', 'Direct Pipe']}, cellEdited: mediumEdited},
+        editor: ed ? "list" : false, editorParams: {values: ['Equipment', 'Direct Pipe']}, cellEdited: mediumEdited},
       {title: "Equipment", field: "equipment_name", width: 100,
-        editor: canEdit ? "list" : false, editorParams: list(masters.equipment),
-        editable: function(cell) { return canEdit && cell.getRow().getData().medium === 'Equipment'; },
+        editor: ed ? "list" : false, editorParams: list(masters.equipment),
+        editable: function(cell) { return ed && cell.getRow().getData().medium === 'Equipment'; },
         formatter: function(cell) {
           return cell.getRow().getData().medium === 'Equipment'
             ? (cell.getValue() || '') : '<span style="color:#cbd5e1">—</span>';
         }},
-      {title: "Delay", field: "delay_name", editor: canEdit ? "list" : false, editorParams: list(masters.delays), width: 100},
-      {title: "Shift", field: "shift", editor: canEdit ? "list" : false, editorParams: {values: ['A', 'B', 'C']}, width: 50},
-      {title: "Operator", field: "operator_name", editor: canEdit ? "list" : false, editorParams: list(masters.operators), width: 88},
-      {title: "Incharge", field: "shift_incharge", editor: canEdit ? "list" : false, editorParams: list(masters.incharge), width: 88},
-      {title: "Berth", field: "berth_name", editor: canEdit ? "list" : false, editorParams: list(masters.berths), width: 88},
-      {title: "Remarks", field: "remarks", editor: canEdit ? "input" : false, width: 100},
-      canDelete ? {title: "", width: 32, headerSort: false, hozAlign: "center",
+      {title: "Delay", field: "delay_name", editor: ed ? "list" : false, editorParams: list(masters.delays), width: 100},
+      {title: "Shift", field: "shift", editor: ed ? "list" : false, editorParams: {values: ['A', 'B', 'C']}, width: 50},
+      {title: "Operator", field: "operator_name", editor: ed ? "list" : false, editorParams: list(masters.operators), width: 88},
+      {title: "Incharge", field: "shift_incharge", editor: ed ? "list" : false, editorParams: list(masters.incharge), width: 88},
+      {title: "Berth", field: "berth_name", editor: ed ? "list" : false, editorParams: list(masters.berths), width: 88},
+      {title: "Remarks", field: "remarks", editor: ed ? "input" : false, width: 100},
+      canDel ? {title: "", width: 32, headerSort: false, hozAlign: "center",
         // delete only from the bottom — X shows on the last row only
         formatter: (cell) => {
           const rows = cell.getTable().getRows();
@@ -420,7 +427,7 @@
       layout: "fitData", height: 220,
       ajaxURL: `/api/module/LUEU01/log/${pid}`,
       columnDefaults: {headerSort: false},
-      columns: logColumns(),
+      columns: logColumns(pid),
       rowFormatter: function(row) {
         if (row.getData().is_shortclose) {
           row.getElement().style.background = '#fef3c7';
