@@ -714,13 +714,22 @@
 
             function complete() {
                 if (resolved) return;
-                resolved = true;
                 var dbVal = _displayToDb(input.value);
+                // Don't wipe on an incomplete entry (e.g. date typed, time not yet):
+                // keep the prior cell value. A truly empty box still clears the cell.
+                if (!dbVal && input.value.trim()) { resolved = true; cancel(); return; }
+                resolved = true;
                 success(dbVal);
             }
 
             onRendered(function() { input.focus(); input.select(); input.style.height = "100%"; });
-            input.addEventListener("blur", function() { complete(); });
+            input.addEventListener("blur", function() {
+                // Switching browser tab/window to check the time blurs the field mid-entry.
+                // If the value is still incomplete AND focus left the window, keep the editor
+                // open so the user can return and finish. A complete value commits as normal.
+                if (!_displayToDb(input.value) && input.value.trim() && !document.hasFocus()) return;
+                complete();
+            });
             input.addEventListener("keydown", function(e) {
                 if (e.key === "Enter") complete();
                 if (e.key === "Escape") { resolved = true; cancel(); }
@@ -746,13 +755,22 @@
 
             function complete() {
                 if (resolved) return;
-                resolved = true;
                 var dbVal = _displayDateToDb(input.value);
+                // Don't wipe on an incomplete entry — keep the prior cell value.
+                // A truly empty box still clears the cell.
+                if (!dbVal && input.value.trim()) { resolved = true; cancel(); return; }
+                resolved = true;
                 success(dbVal);
             }
 
             onRendered(function() { input.focus(); input.select(); input.style.height = "100%"; });
-            input.addEventListener("blur", function() { complete(); });
+            input.addEventListener("blur", function() {
+                // Switching browser tab/window mid-entry blurs the field. If the value is
+                // still incomplete AND focus left the window, keep the editor open so the
+                // user can return and finish. A complete value commits as normal.
+                if (!_displayDateToDb(input.value) && input.value.trim() && !document.hasFocus()) return;
+                complete();
+            });
             input.addEventListener("keydown", function(e) {
                 if (e.key === "Enter") complete();
                 if (e.key === "Escape") { resolved = true; cancel(); }

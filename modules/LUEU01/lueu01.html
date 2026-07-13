@@ -98,6 +98,9 @@
   // Parcel start/end are entered here in LUEU01 (persisted on the LDUD parcel-op).
   async function saveParcelTimes(pid) {
     const startEl = document.getElementById(`start-${pid}`), endEl = document.getElementById(`end-${pid}`);
+    // Switching tabs to check the time fires onchange mid-entry; don't overwrite the
+    // stored value with an empty one when the field holds a half-typed datetime.
+    if (startEl.value.trim() && !_displayToDb(startEl.value)) { return; }
     const s = _displayToDb(startEl.value), e = _displayToDb(endEl.value);
     // start must be on/after the LDUD Along Side time
     const sDt = _toDate(s), alongDt = _toDate(parcelAlongside[pid]);
