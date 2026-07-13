@@ -1,0 +1,1 @@
+from . import report1  # noqa: F401  (registers routes on shared bp)
