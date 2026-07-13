@@ -6,20 +6,58 @@ Design notes (updated):
 - Row structure now follows the fixed Appendix-3 template: a CATEGORY
   (broad group, e.g. "POL") with one or more CARGO_TYPE sub-rows
   (e.g. "CRUDE", "PRODUCT", "LPG"), matching mis_vessel_master.category
-  and mis_vessel_master.cargo_type respectively.
+  and mis_vessel_master.cargo respectively.
 - The template order/labels are hardcoded (CATEGORY_STRUCTURE below) so the
   report always prints in the same standard Appendix-3 row order, exactly
   like the physical form, even for rows that currently have zero data.
 - Matching between the DB text and the template is done on a normalised
   key (upper-case, punctuation/whitespace stripped) so things like
   "Fert. Raw Mat. - Dry" / "FERT RAW MAT DRY" still line up.
+
+- *** CARGO CLASSIFICATION (CARGO_ALIAS) ***
+  mis_vessel_master.category / .cargo are free-typed text and are NOT
+  reliable on their own: the same real cargo shows up tagged under
+  different `category` values depending on who entered it (e.g. "Acetic
+  Acid" appears under category='Chemical' AND category='Other Liquid';
+  "Phosphoric Acid" appears under category='Ph.Acid', a typo that never
+  matches the template's "FERT. RAW MAT. - LIQUID" row; "CBFS"/"FO"
+  appear under both 'POL' and 'POL Black').
+
+  So classification here is driven primarily by the CARGO TEXT itself
+  (normalised) via the CARGO_ALIAS table below, cross-referenced against
+  the vessel_cargo lookup table + known trade abbreviations (CDSBO, IPA,
+  VAM, SM, MEK, A.Acid, etc). This is what correctly:
+    - rolls CBFS / FO into POL -> PRODUCT (instead of their own lines)
+    - routes all Chemical-family cargo (Acetic Acid, Acetone, IPA,
+      Methanol, MEK, Nitric Acid, Phenol, Styrene Monomer, Toluene,
+      VAM, MDC, N-Butanol, ...) into a new OTHER LIQUID -> CHEMICAL
+      sub-row, regardless of what `category` text they were entered
+      under
+    - routes Phosphoric Acid into FERT. RAW MAT. - LIQUID -> PH. ACID
+    - routes edible-oil abbreviations (CDSBO, CPO, CSFO, CSBO, RBD Palm
+      Olein, ...) into EDIBLE OIL, even when entered under
+      category='Other Liquid'
+
+  A handful of DB rows combine two different buckets in a single cargo
+  string (e.g. "Phosphoric Acid/ A. Acid" = Farm-Liquid + Chemical,
+  "Base Oil/A. Acid" = Other-Liquid + Chemical, "Edible Oil + Lube Oil"
+  = Edible-Oil + Other-Liquid). Splitting the quantity between buckets
+  would be a guess, so these are NOT silently merged into either side —
+  they're routed to a dedicated "UNCLASSIFIED - NEEDS REVIEW" row (still
+  counted in Grand Total) and listed individually in
+  `debug.unclassified_ambiguous_rows` so they can be fixed at the
+  source / manually re-coded.
+
+  Cargo text that doesn't match CARGO_ALIAS at all falls back to the
+  original category/cargo-template matching (and, failing that, gets
+  auto-appended as a new row) — so brand-new cargo not yet catalogued
+  here still surfaces instead of being dropped.
+
 - Anything in the data that does NOT match the template (a brand-new
   cargo_type under a known category, or an entirely new category) is
   NOT dropped — it's appended automatically: as an extra sub-row under
   its matching category if the category is known, otherwise as a new
-  top-level (flat) row at the end, just before Grand Total. This keeps
-  the "new categories automatically appear" behaviour from before while
-  still giving you the fixed official row order for everything expected.
+  top-level (flat) row at the end, just before Grand Total.
 - Unloaded / Loaded is derived from mis_vessel_master.import_export:
     'Import' -> Unloaded
     'Export' -> Loaded
@@ -86,7 +124,7 @@ CATEGORY_STRUCTURE = [
     ("OTHER ORE",                  None),
     ("FERTILIZERS FINISHED",       None),
     ("FERT. RAW MAT. - DRY",       ["ROCK PHOSPHATE", "SULPHUR"]),
-    ("FERT. RAW MAT. - LIQUID",    ["PH. ACID"]),
+    ("FERT. RAW MAT. - LIQUID",    ["PH. ACID" ]),
     ("FOOD GRAINS",                ["RICE", "WHEAT", "OTHER"]),
     ("COAL",                       ["THERMAL", "COKING", "OTHER"]),
     ("IRON & STEEL",               None),
@@ -98,6 +136,93 @@ CATEGORY_STRUCTURE = [
     ("AUTOMOBILES",                None),
     ("OTHERS",                     None),
 ]
+
+UNCLASSIFIED_LABEL = "UNCLASSIFIED - NEEDS REVIEW (combined cargo)"
+
+# ---------------------------------------------------------------------
+# Cargo-text classification table. Keys are matched case/punctuation-
+# insensitively (via _norm) against mis_vessel_master.cargo. Values are
+# (category_label, sub_label) where sub_label may be None for flat
+# (no-breakdown) categories, or None (the whole value) for cargo strings
+# that combine two different buckets and need manual review — see the
+# module docstring above.
+#
+# Sourced from the vessel_cargo lookup table (cargo_category /
+# cargo_sub_category_2) plus known trade abbreviations found in
+# mis_vessel_master.cargo that don't literally appear in vessel_cargo.
+# ---------------------------------------------------------------------
+CARGO_ALIAS = {
+    # ---- CHEMICAL, merged into the flat OTHER LIQUID total (no separate
+    # sub-row) ----
+    "Acetic Acid": ("OTHER LIQUID", None),
+    "Chemical": ("OTHER LIQUID", None),
+    "Chemicals": ("OTHER LIQUID", None),
+    "A. acid": ("OTHER LIQUID", None),
+    "A. acid/VAM": ("OTHER LIQUID", None),
+    "A.Acid": ("OTHER LIQUID", None),
+    "Aacid": ("OTHER LIQUID", None),
+    "ACETONE/Phenol": ("OTHER LIQUID", None),
+    "IPA": ("OTHER LIQUID", None),
+    "IPA/A.Acid/SM": ("OTHER LIQUID", None),
+    "ISOPROPYL ALCOHOL": ("OTHER LIQUID", None),
+    "MDC": ("OTHER LIQUID", None),
+    "MEK": ("OTHER LIQUID", None),
+    "Methelene Choloride": ("OTHER LIQUID", None),
+    "N Butonal/Tolune": ("OTHER LIQUID", None),
+    "Nitric Acid": ("OTHER LIQUID", None),
+    "Phenol/Aceton/VAM": ("OTHER LIQUID", None),
+    "SM": ("OTHER LIQUID", None),
+    "SM/IPA/Acetone": ("OTHER LIQUID", None),
+    "SM/Meoh": ("OTHER LIQUID", None),
+    "Strene Monomer": ("OTHER LIQUID", None),
+    "VAM": ("OTHER LIQUID", None),
+    "VAM/Aacid": ("OTHER LIQUID", None),
+
+    # ---- OTHER LIQUID (base oil / lube oil - same flat total) ----
+    "Base oil": ("OTHER LIQUID", None),
+    "Base Oil": ("OTHER LIQUID", None),
+    "Base Oil- 600/150": ("OTHER LIQUID", None),
+    "Base Oil 150/600": ("OTHER LIQUID", None),
+    "BASE OIL KIXX LUBO 150N / 600 N/ 6CST / 4CST": ("OTHER LIQUID", None),
+    "BASE OIL KIXX LUBO 150N/BASE OIL KIXX LUBO 600N": ("OTHER LIQUID", None),
+    "SHELL 500N/150N": ("OTHER LIQUID", None),
+    "Lube oil": ("OTHER LIQUID", None),
+    "Lube Oil": ("OTHER LIQUID", None),
+
+    # ---- EDIBLE OIL (flat category, no sub-row) ----
+    "CDSBO": ("EDIBLE OIL", None),
+    "CPO": ("EDIBLE OIL", None),
+    "CSFO": ("EDIBLE OIL", None),
+    "CSFO/CSBO": ("EDIBLE OIL", None),
+    "Edible oil": ("EDIBLE OIL", None),
+    "Edible Oil": ("EDIBLE OIL", None),
+    "EDIBLE OIL": ("EDIBLE OIL", None),
+    "RBD PALM OLEIN": ("EDIBLE OIL", None),
+    "SUNFLOWER OIL": ("EDIBLE OIL", None),
+    "CPKO/CPO": ("EDIBLE OIL", None),
+    "CPO/CPKO": ("EDIBLE OIL", None),
+    "CPO/RBDPO": ("EDIBLE OIL", None),
+    "CSBO": ("EDIBLE OIL", None),
+
+    # ---- FERT. RAW MAT. - LIQUID -> PH. ACID ----
+    "Phosphoric Acid": ("FERT. RAW MAT. - LIQUID", "PH. ACID"),
+
+    # ---- POL -> PRODUCT (confirmed: CBFS and FO both roll up here) ----
+    "CBFS": ("POL", "PRODUCT"),
+    "FO": ("POL", "PRODUCT"),
+
+    # Both halves of this one now land in the same flat OTHER LIQUID
+    # total, so it's no longer ambiguous - merges cleanly.
+    "Base Oil/A. Acid": ("OTHER LIQUID", None),
+
+    # ---- Still genuinely ambiguous: a single row's cargo text combines
+    # two DIFFERENT buckets, so the quantity can't be safely split
+    # between them. Where a specific home was requested, routed there
+    # instead of the generic UNCLASSIFIED_LABEL top-level row; still
+    # logged in debug.unclassified_ambiguous_rows either way. ----
+    "EDIBLE OIL + Lube Oil": ("OTHER LIQUID", None),
+    "Phosphoric Acid/ A. Acid": ("FERT. RAW MAT. - LIQUID", "PH. ACID"),
+}
 
 
 MONTH_FULL_NAMES = {
@@ -150,6 +275,64 @@ _TEMPLATE_SUBS_NORM = {
     for cat, subs in CATEGORY_STRUCTURE
 }
 
+# Normalised version of CARGO_ALIAS, built once at import time.
+CARGO_ALIAS_NORM = {_norm(k): v for k, v in CARGO_ALIAS.items()}
+
+# Cargo strings that combine two different buckets in one row. Logged in
+# debug.unclassified_ambiguous_rows for visibility even when CARGO_ALIAS
+# now routes them somewhere specific (rather than UNCLASSIFIED_LABEL) —
+# the underlying data-entry problem (combined cargo, unsplit quantity)
+# is still worth surfacing.
+AMBIGUOUS_CARGO_KEYS_NORM = {
+    _norm(k) for k, v in CARGO_ALIAS.items()
+    if v is None
+}
+
+def _apply_cargo_alias(df: pd.DataFrame) -> pd.DataFrame:
+    ambiguous_rows = []
+
+    def resolve(row):
+        cargo = str(row["cargo_type"]).strip()
+
+        # Only Lube Oil goes to OTHER LIQUID
+        if cargo.upper() == "LUBE OIL":
+            return "OTHER LIQUID", _norm("OTHER LIQUID"), ""
+
+        key = _norm(cargo)
+
+        if key not in CARGO_ALIAS_NORM:
+            return row["category"], row["category_norm"], row["cargo_norm"]
+
+        target = CARGO_ALIAS_NORM[key]
+
+        if target is None:
+            ambiguous_rows.append({
+                "fin_year": row["fin_year"],
+                "month": row["month_abbrev"],
+                "category": row["category"],
+                "cargo": row["cargo_type"],
+                "quantity": row["quantity"],
+                "routed_to": "UNCLASSIFIED_LABEL",
+            })
+            return UNCLASSIFIED_LABEL, _norm(UNCLASSIFIED_LABEL), ""
+
+        cat_label, sub_label = target
+
+        return (
+            cat_label,
+            _norm(cat_label),
+            _norm(sub_label) if sub_label else ""
+        )
+
+    resolved = df.apply(resolve, axis=1, result_type="expand")
+
+    df["category"] = resolved[0]
+    df["category_norm"] = resolved[1]
+    df["cargo_norm"] = resolved[2]
+
+    df.attrs["unclassified_ambiguous_rows"] = ambiguous_rows
+
+    return df
 
 def load_data() -> pd.DataFrame:
     conn = get_db()
@@ -199,10 +382,47 @@ def load_data() -> pd.DataFrame:
             f"Found instead: {', '.join(unrecognized) if unrecognized else '(none)'}"
         )
 
+    # Raw normalised text (fallback path for cargo not covered by CARGO_ALIAS)
     df["category_norm"] = df["category"].apply(_norm)
     df["cargo_norm"] = df["cargo_type"].apply(_norm)
 
+    # Reclassify by cargo text where we have a known mapping.
+    df = _apply_cargo_alias(df)
+
+    print("\n===== EDIBLE OIL FY 2025-26 UPTO JUN =====")
+
+    tmp = df[
+        (df["category"] == "EDIBLE OIL") &
+        (df["fin_year"] == "2025-26") &
+        (df["fy_month_idx"] <= MONTH_NAMES.index("Jun"))
+    ]
+
+    print(
+        tmp.groupby("cargo_type")["quantity"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+
+    print("\nTOTAL =", tmp["quantity"].sum())
+
+        # ===== OTHER LIQUID FY 2025-26 UPTO JUN =====
+    tmp = df[
+        (df["category"] == "OTHER LIQUID") &
+        (df["fin_year"] == "2025-26") &
+        (df["fy_month_idx"] <= MONTH_NAMES.index("Jun"))
+    ]
+
+    print("\n===== OTHER LIQUID FY 2025-26 UPTO JUN =====")
+    print(tmp.groupby("cargo_type")["quantity"].sum().sort_values(ascending=False))
+    print("TOTAL =", tmp["quantity"].sum())
+
     df.attrs["unrecognized_import_export"] = unrecognized
+
+    return df[[
+        "fin_year", "month_abbrev", "fy_month_idx",
+        "category", "category_norm", "cargo_type", "cargo_norm",
+        "flow", "quantity",
+    ]]
 
     return df[[
         "fin_year", "month_abbrev", "fy_month_idx",
@@ -284,6 +504,8 @@ def build_row_plan(df: pd.DataFrame):
             })
 
     # brand-new categories not present in the template at all
+    # (this is also where UNCLASSIFIED_LABEL rows land, since it's
+    # intentionally not part of CATEGORY_STRUCTURE)
     known_cat_norms = set(_TEMPLATE_CAT_NORM.keys())
     extra_cats = sorted(set(observed_by_cat.keys()) - known_cat_norms)
     for cat_norm in extra_cats:
@@ -392,6 +614,7 @@ def compute_report(df: pd.DataFrame, month: str):
         "totals": totals,
         "debug": {
             "unrecognized_import_export": df.attrs.get("unrecognized_import_export", []),
+            "unclassified_ambiguous_rows": df.attrs.get("unclassified_ambiguous_rows", []),
             "years_all": all_years,
             "years_with_data_for_month": years_with_data,
         },

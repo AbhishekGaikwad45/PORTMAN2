@@ -453,8 +453,26 @@ def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
 def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths, fin_year=None):
 
     if label == "YEAR":
+        # Existing financial year values
         tons = _jjltpl_fy_bulk_tons(cur, fin_year)
         vessel_count = _jjltpl_fy_bulk_vessel_count(cur, fin_year)
+
+        # Current month values
+        month_tons = _jjltpl_month_bulk_tons(cur, period_start, period_end, berths)
+        month_vessels = _jjltpl_bulk_vessel_count(
+            cur,
+            period_start,
+            period_end,
+            berths
+        )
+
+        # Add month values to existing year values
+        tons[MEDIUM_DRY_BULK] += month_tons[MEDIUM_DRY_BULK]
+        tons[MEDIUM_BREAK_BULK] += month_tons[MEDIUM_BREAK_BULK]
+        tons[MEDIUM_LIQUID_BULK] += month_tons[MEDIUM_LIQUID_BULK]
+        tons["bulk_total"] += month_tons["bulk_total"]
+
+        vessel_count += month_vessels
     elif label == "MONTH":
         tons = _jjltpl_month_bulk_tons(cur, period_start, period_end, berths)
         vessel_count = _jjltpl_bulk_vessel_count(
