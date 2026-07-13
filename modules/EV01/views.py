@@ -138,7 +138,8 @@ def move_to_vcn(ev_id):
         'loa':               ev.get('loa'),
         'draft':             ev.get('draft'),
         'vessel_agent_name': ev.get('agents'),
-        'cargo_type':        ev.get('cargo_name'),
+        # cargo_type deliberately NOT seeded from the parsed EV01 PDF — the
+        # header syncs from real parcel cargo names once entered in VCN01
         'nor_tendered':      ev.get('nor'),
         'berth_name':        ev.get('berth_name'),
         'doc_date':          str(ev.get('eta').date()) if ev.get('eta') else None,
