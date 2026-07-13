@@ -53,23 +53,30 @@ def get_berths(cur=None):
     return berths
 
 
-def get_expected_waiting_vessels():
+def get_expected_waiting_vessels(window_start, window_end):
     """Section C data — queried directly from expected_vessels (EV01 table).
     Excludes vessels already moved to VCN or closed to another terminal,
-    and excludes vessels that already have a berth assigned (those show
-    up in Section A/B instead)."""
+    vessels that already have a berth assigned (those show up in Section A/B
+    instead), and vessels that already have a VCN record created for them.
+    Only vessels whose ETA falls within the selected date's window are shown."""
     conn = get_db()
     cur = get_cursor(conn)
     try:
         cur.execute("""
-            SELECT terminal_name, vessel_name, via_number, loa, draft,
-                agents, tanks, consignees, cargo_name, mla, quantity,
-                eta, ata, lpc, doc, nor, berth_name
-            FROM expected_vessels
-            WHERE (doc_status IS NULL OR doc_status NOT IN ('Moved to VCN', 'Closed - Other Terminal'))
-              AND (berth_name IS NULL OR TRIM(berth_name) = '')
-            ORDER BY eta ASC NULLS LAST, id DESC
-        """)
+            SELECT ev.terminal_name, ev.vessel_name, ev.via_number, ev.loa, ev.draft,
+                ev.agents, ev.tanks, ev.consignees, ev.cargo_name, ev.mla, ev.quantity,
+                ev.eta, ev.ata, ev.lpc, ev.doc, ev.nor, ev.berth_name
+            FROM expected_vessels ev
+            WHERE (ev.doc_status IS NULL OR ev.doc_status NOT IN ('Moved to VCN', 'Closed - Other Terminal'))
+              AND (ev.berth_name IS NULL OR TRIM(ev.berth_name) = '')
+              AND NOT EXISTS (
+                  SELECT 1 FROM vcn_header h WHERE h.vessel_name = ev.vessel_name
+              )
+              AND ev.eta IS NOT NULL
+              AND (NULLIF(ev.eta::text, '')::timestamp) >= %s
+              AND (NULLIF(ev.eta::text, '')::timestamp) < %s
+            ORDER BY ev.eta ASC NULLS LAST, ev.id DESC
+        """, [window_start, window_end])
         rows = [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
@@ -302,10 +309,51 @@ def _base_row(h):
 
 
 
+# def get_berthed_vessels(window_start, window_end, berths):
+#     conn = get_db()
+#     cur = get_cursor(conn)
+#     cur.execute('''
+#         SELECT DISTINCT h.id AS vcn_id, l.id AS ldud_id, h.via_number, h.vessel_name,
+#                h.loa, h.draft, h.vessel_agent_name, h.cargo_type, h.berth_name,
+#                h.operation_type,
+#                v.imo_num, v.nationality,
+#                l.alongside_datetime,
+#                (SELECT ec.unload_terminal FROM vcn_export_cargo_declaration ec
+#                  WHERE ec.vcn_id = h.id LIMIT 1) AS exp_terminal,
+#                (SELECT ec.pipeline_name FROM vcn_export_cargo_declaration ec
+#                  WHERE ec.vcn_id = h.id LIMIT 1) AS exp_pipeline,
+#                (SELECT cn.unload_terminal FROM vcn_consigners cn
+#                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_terminal,
+#                (SELECT cn.pipeline_name FROM vcn_consigners cn
+#                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline
+#         FROM ldud_parcel_ops po
+#         JOIN ldud_header l ON l.id = po.ldud_id
+#         JOIN vcn_header h ON h.id = l.vcn_id
+#         LEFT JOIN vessels v ON v.vessel_name = h.vessel_name
+#         WHERE h.berth_name = ANY(%s)
+#           AND po.start_dt IS NOT NULL
+#           AND po.end_dt IS NULL
+#         ORDER BY h.berth_name
+#     ''', [berths])
+#     headers = [dict(r) for r in cur.fetchall()]
+
+#     out = []
+#     for h in headers:
+#         row = _base_row(h)
+#         row['alongside'] = _fmt_dt(h['alongside_datetime'])
+#         row['vessel_agent'] = h['vessel_agent_name']
+#         row['terminal'] = h['exp_terminal'] if h['operation_type'] == 'Export' else h['imp_terminal']
+#         row['pipeline'] = h['exp_pipeline'] if h['operation_type'] == 'Export' else h['imp_pipeline']
+#         row.update(_enrich_vessel(cur, h['vcn_id'], h['ldud_id'], window_start, window_end))
+#         out.append(row)
+#     conn.close()
+#     return out
+
+
 def get_berthed_vessels(window_start, window_end, berths):
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('''
+    cur.execute(f'''
         SELECT DISTINCT h.id AS vcn_id, l.id AS ldud_id, h.via_number, h.vessel_name,
                h.loa, h.draft, h.vessel_agent_name, h.cargo_type, h.berth_name,
                h.operation_type,
@@ -319,13 +367,12 @@ def get_berthed_vessels(window_start, window_end, berths):
                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_terminal,
                (SELECT cn.pipeline_name FROM vcn_consigners cn
                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline
-        FROM ldud_parcel_ops po
-        JOIN ldud_header l ON l.id = po.ldud_id
+        FROM ldud_header l
         JOIN vcn_header h ON h.id = l.vcn_id
         LEFT JOIN vessels v ON v.vessel_name = h.vessel_name
         WHERE h.berth_name = ANY(%s)
-          AND po.start_dt IS NOT NULL
-          AND po.end_dt IS NULL
+          AND l.alongside_datetime IS NOT NULL
+          AND (l.{SAIL_COLUMN} IS NULL OR NULLIF(TRIM(l.{SAIL_COLUMN}::text), '') IS NULL)
         ORDER BY h.berth_name
     ''', [berths])
     headers = [dict(r) for r in cur.fetchall()]
@@ -420,7 +467,8 @@ def get_daily_report(plan_date_str):
         'berthed': get_berthed_vessels(window_start, window_end, berths),
         'sailed': get_sailed_vessels(window_start, window_end, berths),
         'berths': berths,
-        'expected': get_expected_waiting_vessels(),
+        
+        'expected': get_expected_waiting_vessels(window_start, window_end),
     }
 
 @bp.route('/api/module/RP02/berthplan/data')
