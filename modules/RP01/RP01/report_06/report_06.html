@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Report-1 - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Report-1</h2>
+    <span class="module-code">RP01</span>
+    <a href="/module/RP01/berth-plan/" style="float:right;font-size:13px;color:#3182ce;">&larr; Back to Reports</a>
+</div>
+
+<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <label style="font-size:12px;font-weight:600;color:#4a5568;">YEAR
+        <select id="yearSel" style="margin-left:6px;padding:5px 8px;border:1px solid #cbd5e0;border-radius:4px;"></select>
+    </label>
+    <label style="font-size:12px;font-weight:600;color:#4a5568;">MONTH
+        <select id="monthSel" style="margin-left:6px;padding:5px 8px;border:1px solid #cbd5e0;border-radius:4px;"></select>
+    </label>
+    <button class="btn" id="loadBtn" style="background:#3182ce;color:#fff;border:none;padding:6px 16px;border-radius:4px;" onclick="loadReport()">Load</button>
+    <button class="btn" style="background:#38a169;color:#fff;border:none;padding:6px 16px;border-radius:4px;margin-left:auto;" onclick="exportExcel()">Export to Excel</button>
+</div>
+
+<div id="reportContainer" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;overflow-x:auto;">
+    <div style="text-align:center;font-weight:700;font-size:15px;margin-bottom:4px;">OVERSEAS-COASTAL CARGO TRAFFIC HANDLED</div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px;">
+        <span><b>PORT :</b> JAWAHARLAL NEHRU PORT AUTHORITY</span>
+        <span id="metaLine"></span>
+    </div>
+    <table id="reportTable" style="width:100%;border-collapse:collapse;font-size:12px;text-align:center;">
+        <thead>
+            <tr>
+                <th rowspan="3" style="border:1px solid #999;padding:6px;background:#f4f6fa;">COMMODITY</th>
+                <th colspan="4" style="border:1px solid #999;padding:4px;background:#ffff99;">OVERSEAS</th>
+                <th rowspan="3" style="border:1px solid #999;padding:4px;background:#d9d9d9;">OVERSEAS Total</th>
+                <th colspan="4" style="border:1px solid #999;padding:4px;background:#ffff99;">COASTAL</th>
+                <th rowspan="3" style="border:1px solid #999;padding:4px;background:#d9d9d9;">COASTAL Total</th>
+                <th rowspan="3" style="border:1px solid #999;padding:4px;background:#e6f0fa;">Grand Total</th>
+            </tr>
+            <tr>
+                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">IMPORT</th>
+                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">EXPORT</th>
+                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">IMPORT</th>
+                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">EXPORT</th>
+            </tr>
+            <tr>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+            </tr>
+        </thead>
+        <tbody id="reportBody"></tbody>
+        <tfoot id="reportFoot"></tfoot>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('RP01_REPORT1', 'Report-1');
+
+    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    function fyYearOptions() {
+        const now = new Date();
+        const curFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const opts = [];
+        for (let y = curFyStart - 3; y <= curFyStart + 1; y++) {
+            opts.push({ value: `${y}-${String(y + 1).slice(2)}`, label: `${y}-${String(y + 1).slice(2)}` });
+        }
+        return opts;
+    }
+
+    function monthOptionsForFY(fyStartYear) {
+        // FY runs Apr(fyStartYear) -> Mar(fyStartYear+1)
+        const opts = [];
+        for (let i = 0; i < 12; i++) {
+            const m = (3 + i) % 12;            // 3 = April (0-indexed)
+            const y = m < 3 ? fyStartYear + 1 : fyStartYear;
+            const mm = String(m + 1).padStart(2, '0');
+            opts.push({ value: `${y}-${mm}`, label: `${MONTH_NAMES[m]}-${y}` });
+        }
+        return opts;
+    }
+
+    function populateSelectors() {
+        const yearSel = document.getElementById('yearSel');
+        const years = fyYearOptions();
+        yearSel.innerHTML = years.map(y => `<option value="${y.value}">${y.label}</option>`).join('');
+        yearSel.value = years[years.length - 2].value;   // default to current FY
+        refreshMonths();
+        yearSel.addEventListener('change', refreshMonths);
+    }
+
+    // FIX: previously this rebuilt <option> tags but never forced monthSel.value,
+    // so after switching FY the select could keep showing (and submitting) a
+    // month string left over from before. We now explicitly set it to the
+    // first month of the newly selected FY every time the year changes.
+    function refreshMonths() {
+        const yearSel = document.getElementById('yearSel');
+        const monthSel = document.getElementById('monthSel');
+        const fyStart = parseInt(yearSel.value.split('-')[0], 10);
+        const months = monthOptionsForFY(fyStart);
+        monthSel.innerHTML = months.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+        monthSel.selectedIndex = 0;
+        monthSel.value = months[0].value;   // e.g. '2027-04' for FY 2027-28
+    }
+
+    // FIX: guard against a click landing while values haven't settled, and
+    // fail loudly instead of silently reusing whatever the API returns for a
+    // malformed/empty month param.
+    async function loadReport() {
+        const year = document.getElementById('yearSel').value;
+        const month = document.getElementById('monthSel').value;   // must be 'YYYY-MM'
+        if (!year || !month || month.split('-').length !== 2) {
+            alert('Please choose a valid Year and Month before loading.');
+            return;
+        }
+
+        const loadBtn = document.getElementById('loadBtn');
+        loadBtn.disabled = true;
+        try {
+            // cache-bust so browsers/proxies never serve a stale response for
+            // a previously-fetched year/month combination
+            const res = await fetch(`/api/module/RP01/report1/data?year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&_=${Date.now()}`);
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+            // Defensive check: make sure the response actually matches what we asked for
+            if (data.month !== month) {
+                console.warn(`Requested month ${month} but API returned ${data.month}`);
+            }
+            renderReport(data);
+        } finally {
+            loadBtn.disabled = false;
+        }
+    }
+
+    function fmt(v) { return (v === null || v === undefined) ? '0.00' : Number(v).toFixed(2); }
+
+    function renderReport(data) {
+        const monthLabel = document.getElementById('monthSel').selectedOptions[0]?.textContent || data.month;
+        document.getElementById('metaLine').innerHTML =
+            `<b>Year :</b> ${data.year} &nbsp;&nbsp; <b>Month:</b> <span style="background:#ffff99;padding:2px 8px;">${monthLabel}</span> &nbsp;&nbsp; (000' Tonnes)`;
+
+        const body = document.getElementById('reportBody');
+        body.innerHTML = data.rows.map(r => `
+            <tr>
+                <td style="border:1px solid #ccc;padding:5px;text-align:left;font-weight:600;">${r.commodity}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_imp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_imp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_exp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_exp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;background:#f4f4f4;font-weight:600;">${fmt(r.ov_total)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_imp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_imp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_exp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_exp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;background:#f4f4f4;font-weight:600;">${fmt(r.co_total)}</td>
+                <td style="border:1px solid #ccc;padding:5px;font-weight:700;">${fmt(r.grand_total)}</td>
+            </tr>
+        `).join('');
+
+        const t = data.totals;
+        document.getElementById('reportFoot').innerHTML = `
+            <tr style="background:#e6f0fa;font-weight:700;">
+                <td style="border:1px solid #ccc;padding:5px;text-align:left;">Grand Total</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_imp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_imp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_exp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_exp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_total)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_imp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_imp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_exp_if)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_exp_ff)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_total)}</td>
+                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.grand_total)}</td>
+            </tr>
+        `;
+    }
+
+    function exportExcel() {
+        const year = document.getElementById('yearSel').value;
+        const month = document.getElementById('monthSel').value;
+        window.location.href = `/api/module/RP01/report1/export/excel?year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}`;
+    }
+
+    populateSelectors();
+    loadReport();
+</script>
+{% endblock %}

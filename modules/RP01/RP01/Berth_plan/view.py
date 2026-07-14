@@ -54,35 +54,73 @@ def get_berths(cur=None):
 
 
 def get_expected_waiting_vessels(window_start, window_end):
-    """Section C data — queried directly from expected_vessels (EV01 table).
-    Excludes vessels already moved to VCN or closed to another terminal,
-    vessels that already have a berth assigned (those show up in Section A/B
-    instead), and vessels that already have a VCN record created for them.
-    Only vessels whose ETA falls within the selected date's window are shown."""
     conn = get_db()
     cur = get_cursor(conn)
     try:
         cur.execute("""
-            SELECT ev.terminal_name, ev.vessel_name, ev.via_number, ev.loa, ev.draft,
-                ev.agents, ev.tanks, ev.consignees, ev.cargo_name, ev.mla, ev.quantity,
-                ev.eta, ev.ata, ev.lpc, ev.doc, ev.nor, ev.berth_name
-            FROM expected_vessels ev
-            WHERE (ev.doc_status IS NULL OR ev.doc_status NOT IN ('Moved to VCN', 'Closed - Other Terminal'))
-              AND (ev.berth_name IS NULL OR TRIM(ev.berth_name) = '')
+            SELECT
+                vh.vessel_name,
+                vh.via_number,
+                vh.loa,
+                vh.draft,
+                vh.vessel_agent_name AS agents,
+                vh.berth_name,
+                vh.doc_date,
+                vh.cargo_type AS cargo_name,
+                parcels.terminal_name,
+                parcels.total_quantity AS cargo_quantity,
+                parcels.equipment_names,
+                parcels.consigner_names,
+                COALESCE(last_draft.actioned_at, vh.doc_date::timestamptz) AS draft_since
+            FROM vcn_header vh
+            LEFT JOIN LATERAL (
+                SELECT
+                    STRING_AGG(DISTINCT NULLIF(TRIM(unload_terminal), ''), ', ') AS terminal_name,
+                    STRING_AGG(DISTINCT NULLIF(TRIM(equipment_names), ''), ', ') AS equipment_names,
+                    STRING_AGG(DISTINCT NULLIF(TRIM(consigner_name), ''), ', ') AS consigner_names,
+                    SUM(NULLIF(quantity, '')::numeric) AS total_quantity
+                FROM (
+                    SELECT unload_terminal, equipment_names, consigner_name, quantity
+                    FROM vcn_consigners WHERE vcn_id = vh.id
+                    UNION ALL
+                    SELECT unload_terminal, equipment_names, consigner_name, quantity
+                    FROM vcn_export_cargo_declaration WHERE vcn_id = vh.id
+                ) p
+            ) AS parcels ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT action, actioned_at
+                FROM approval_log
+                WHERE module_code = 'VCN01'
+                  AND record_id = vh.id
+                  AND actioned_at <= %s
+                ORDER BY actioned_at DESC
+                LIMIT 1
+            ) AS last_action ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT actioned_at
+                FROM approval_log
+                WHERE module_code = 'VCN01'
+                  AND record_id = vh.id
+                  AND action = 'Back to Draft'
+                  AND actioned_at <= %s
+                ORDER BY actioned_at DESC
+                LIMIT 1
+            ) AS last_draft ON TRUE
+            WHERE
+                (last_action.action IS NULL OR last_action.action != 'Approved')
+              AND (NULLIF(vh.doc_date::text, ''))::timestamptz < %s
               AND NOT EXISTS (
-                  SELECT 1 FROM vcn_header h WHERE h.vessel_name = ev.vessel_name
+                  SELECT 1 FROM ldud_header l
+                  WHERE l.vcn_id = vh.id
               )
-              AND ev.eta IS NOT NULL
-              AND (NULLIF(ev.eta::text, '')::timestamp) >= %s
-              AND (NULLIF(ev.eta::text, '')::timestamp) < %s
-            ORDER BY ev.eta ASC NULLS LAST, ev.id DESC
-        """, [window_start, window_end])
+            ORDER BY vh.doc_date ASC NULLS LAST
+        """, [window_end, window_end, window_end])
         rows = [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
 
     def _combine(r):
-        parts = [r.get('agents'), r.get('tanks'), r.get('consignees')]
+        parts = [r.get('agents'), r.get('consigner_names')]
         return ' / '.join(p for p in parts if p)
 
     out = []
@@ -95,17 +133,17 @@ def get_expected_waiting_vessels(window_start, window_end):
             'dft':          r.get('draft'),
             'agt_tnk_cons': _combine(r),
             'cargo':        r.get('cargo_name'),
-            'mla':          r.get('mla'),
-            'quantity':     r.get('quantity'),
-            'eta':          _fmt_dt(r.get('eta')),
-            'ata':          _fmt_dt(r.get('ata')),
-            'lpc':          _fmt_dt(r.get('lpc')),
-            'doc':          _fmt_dt(r.get('doc')),
-            'nor':          _fmt_dt(r.get('nor')),
+            'mla':          r.get('equipment_names'),
+            'quantity':     r.get('cargo_quantity'),
+            'eta':          _fmt_dt(r.get('doc_date')),
+            'ata':          '',
+            'lpc':          '',
+            'doc':          _fmt_dt(r.get('doc_date')),
+            'nor':          '',
             'berth':        r.get('berth_name'),
+            'draft_since':  _fmt_dt(r.get('draft_since')),
         })
     return out
-
 # ══════════════════════════════════════════════════════════════════
 #  Page route
 # ══════════════════════════════════════════════════════════════════
@@ -474,14 +512,13 @@ def get_daily_report(plan_date_str):
     conn.close()
 
     return {
-        'as_on_date': window_start.strftime('%d-%m-%Y'),
-        'as_on_time': window_start.strftime('%H:%M'),
+        'as_on_date': window_end.strftime('%d-%m-%Y'),   # <-- window_end, not window_start
+        'as_on_time': window_end.strftime('%H:%M'),        # <-- window_end, not window_start
         'window_start': window_start.isoformat(),
         'window_end': window_end.isoformat(),
         'berthed': get_berthed_vessels(window_start, window_end, berths),
         'sailed': get_sailed_vessels(window_start, window_end, berths),
         'berths': berths,
-        
         'expected': get_expected_waiting_vessels(window_start, window_end),
     }
 
