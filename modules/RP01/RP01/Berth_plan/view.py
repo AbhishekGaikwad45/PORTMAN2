@@ -498,7 +498,7 @@ def get_sailed_vessels(window_start, window_end, berths):
 
         balance = row.get('balance')
         if not (balance is not None and balance <= 0):
-            continue   # cargo अजून पूर्ण झालेला नाही -> sailed मध्ये नको
+            continue   
 
         out.append(row)
     conn.close()
