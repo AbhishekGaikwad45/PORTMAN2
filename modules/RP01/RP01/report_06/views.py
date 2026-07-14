@@ -1,26 +1,43 @@
 """
 RP01 Report-1 — Overseas/Coastal Cargo Traffic Handled (monthly, by commodity)
 
-CORRECTED ASSUMPTIONS (per your clarification):
-  - vcn_header.vessel_run_type      -> 'Overseas' or 'Coastal'
-  - vcn_header.operation_type       -> 'Import' or 'Export'
-  - vcargo_category (on the cargo declaration row, NOT the vessel master)
-        -> 'IF' = Indian Flag, 'FF' = Foreign Flag
-  - All quantities are stored in TONNES (raw MT). Report displays '000 Tonnes,
-    so every summed quantity is divided by 1000 before display.
-  - vcn_header.doc_date decides which calendar month a VCN belongs to.
+DATA SOURCE — CONFIRMED FROM LIVE SCHEMA INSPECTION (see mis_vessel_master):
+  mis_vessel_master is a separately-maintained MIS summary table, one row
+  per vessel call, already carrying every field this report needs:
 
-If vcargo_category actually lives on a different table (e.g. per-cargo-line
-in vcn_cargo_declaration / vcn_export_cargo_declaration rather than on the
-header), tell me and I'll move the column reference — the logic below reads
-it off the header row (`h.vcargo_category`) because that's what your message
-implied ("vcn_header table contains column ... vcargo_category").
+    overseas_coastal  -> 'Overseas' or 'Costal'  (NOTE: 'Costal' is the
+                          actual spelling stored in this table — a typo
+                          in the source system, matched here as-is)
+    foreign_indian     -> 'I' = Indian Flag, 'F' = Foreign Flag
+    import_export       -> 'Import' or 'Export'
+    quantity            -> numeric, raw MT (divided by 1000 for '000 Tonnes)
+    category            -> cargo category text; mapped below to this
+                            report's 10 commodity buckets
+    month                -> text like 'Jun-26' (Mon-YY), NOT a real date
+                            column — matched by exact string, built from
+                            the requested 'YYYY-MM' filter
+
+  This replaces the earlier join-chain through vcn_header / ldud_header /
+  lueu_parcel_log, which turned out to be the wrong data source: that path
+  is live day-to-day operational logging with incomplete/partial data,
+  while mis_vessel_master is the actual reconciled monthly MIS record this
+  report was always meant to reflect. mis_vessel_master may lag by a
+  month for very recent activity (e.g. the current month's entries are
+  uploaded after month-end) — that's expected, not a bug.
+
+CATEGORY MAPPING (confirm/adjust CATEGORY_MAP below if wrong):
+  POL          -> POL-PRODUCTS
+  POL Black    -> POL-CRUDE
+  Edible Oil   -> EDIBLE OIL
+  Other Liquid -> OTHER LIQUIDS
+  Chemical     -> OTHER LIQUIDS
+  Ph.Acid      -> OTHER LIQUIDS
+  (anything else, including NULL) -> OTHER BULK
+  No current data maps to LPG / FARM LIQUIDS / MOLASSES / CEMENT /
+  CONTAINER — those rows will correctly show 0.00 until such cargo exists.
 """
 
-from datetime import date, timedelta
 from functools import wraps
-from calendar import monthrange
-import re
 
 from flask import request, jsonify, render_template, session, redirect, url_for, send_file
 from io import BytesIO
@@ -38,27 +55,17 @@ COMMODITIES = [
     'EDIBLE OIL', 'MOLASSES', 'CEMENT', 'OTHER BULK', 'CONTAINER',
 ]
 
-_NUM_RE = re.compile(r'-?\d+(?:\.\d+)?')
+CATEGORY_MAP = {
+    'POL': 'POL-PRODUCTS',
+    'POL BLACK': 'POL-CRUDE',
+    'EDIBLE OIL': 'EDIBLE OIL',
+    'OTHER LIQUID': 'OTHER LIQUIDS',
+    'CHEMICAL': 'OTHER LIQUIDS',
+    'PH.ACID': 'OTHER LIQUIDS',
+}
 
-
-def _to_qty(v):
-    """
-    Robust numeric parse for quantity fields that may be real, int, or text
-    like '1,234.50', '1234.5 MT', '' or None. Plain float(str(v).replace(',',''))
-    silently returns 0.0 (via the caught ValueError) for anything with a unit
-    suffix or stray characters — which is the most likely reason the report
-    was showing all-zero rows. This pulls the first numeric token out instead
-    of giving up.
-    """
-    if v is None:
-        return 0.0
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).replace(',', '').strip()
-    if not s:
-        return 0.0
-    m = _NUM_RE.search(s)
-    return float(m.group()) if m else 0.0
+_MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 
 def login_required(f):
@@ -85,19 +92,14 @@ def report1_page():
     return render_template("report_06/report_06.html", permissions=perms)
 
 
-def _month_bounds(month_str):
+def _month_label(month_str):
     """
-    month_str MUST be 'YYYY-MM' (e.g. '2027-04' for Apr-2027).
-    Returns (start_date_inclusive, end_date_exclusive) so the SQL filter is
-    always   doc_date >= start AND doc_date < end
-    which is safe regardless of time-of-day components in doc_date.
+    'YYYY-MM' (e.g. '2026-06') -> 'Mon-YY' (e.g. 'Jun-26') matching the
+    literal text stored in mis_vessel_master.month.
     """
     y, m = month_str.split('-')
     y, m = int(y), int(m)
-    start = date(y, m, 1)
-    last_day = monthrange(y, m)[1]
-    end = date(y, m, last_day) + timedelta(days=1)
-    return start, end
+    return f"{_MONTH_ABBR[m - 1]}-{str(y)[2:]}"
 
 
 def _empty_bucket():
@@ -109,85 +111,53 @@ def _empty_bucket():
 
 def get_report1_data(year_str, month_str, debug=False):
     """
-    year_str  : display-only FY label, e.g. '2027-28'  (NOT used for filtering)
-    month_str : the ACTUAL filter key, 'YYYY-MM', e.g. '2027-04' for Apr-2027
-    debug     : if True, includes a '_debug' block in the return value with
-                raw fetch counts per source table and sample unmatched
-                cargo names, so a genuinely-empty month can be told apart
-                from a join/parsing bug without needing DB access.
+    year_str  : display-only FY label, e.g. '2026-27' (NOT used for filtering)
+    month_str : the ACTUAL filter key, 'YYYY-MM', e.g. '2026-06' for Jun-26
+    debug     : if True, includes a '_debug' block with raw fetch counts and
+                any category values that fell through to OTHER BULK, so an
+                unmapped category can be spotted without needing DB access.
     """
     if not month_str or len(month_str.split('-')) != 2:
         raise ValueError(f"month must be 'YYYY-MM', got: {month_str!r}")
 
-    start, end = _month_bounds(month_str)
+    month_label = _month_label(month_str)
 
     conn = get_db()
     cur = get_cursor(conn)
-
     cur.execute("""
-        SELECT h.id AS vcn_id, h.operation_type, h.vessel_run_type,
-               d.bl_quantity AS quantity, d.cargo_name,
-               vc.cargo_type, vc.cargo_category
-        FROM vcn_header h
-        JOIN vcn_cargo_declaration d ON d.vcn_id = h.id
-        LEFT JOIN vessel_cargo vc ON vc.cargo_name = d.cargo_name
-        WHERE h.doc_date::date >= %s AND h.doc_date::date < %s
-    """, [start, end])
-    lines_import = [dict(r) for r in cur.fetchall()]
-
-    cur.execute("""
-        SELECT h.id AS vcn_id, h.operation_type, h.vessel_run_type,
-               d.quantity AS quantity, d.cargo_name,
-               vc.cargo_type, vc.cargo_category
-        FROM vcn_header h
-        JOIN vcn_export_cargo_declaration d ON d.vcn_id = h.id
-        LEFT JOIN vessel_cargo vc ON vc.cargo_name = d.cargo_name
-        WHERE h.doc_date::date >= %s AND h.doc_date::date < %s
-    """, [start, end])
-    lines_export = [dict(r) for r in cur.fetchall()]
-
-    cur.execute("""
-        SELECT h.id AS vcn_id, h.operation_type, h.vessel_run_type,
-               d.quantity AS quantity, d.cargo_name,
-               vc.cargo_type, vc.cargo_category
-        FROM vcn_header h
-        JOIN vcn_consigners d ON d.vcn_id = h.id
-        LEFT JOIN vessel_cargo vc ON vc.cargo_name = d.cargo_name
-        WHERE h.doc_date::date >= %s AND h.doc_date::date < %s
-    """, [start, end])
-    lines_consigners = [dict(r) for r in cur.fetchall()]
-
+        SELECT overseas_coastal, foreign_indian, import_export, category, quantity
+        FROM mis_vessel_master
+        WHERE month = %s
+    """, [month_label])
+    lines = [dict(r) for r in cur.fetchall()]
     conn.close()
 
-    lines = lines_import + lines_export + lines_consigners
-
     matrix = {c: _empty_bucket() for c in COMMODITIES}
-
     lines_with_qty = 0
-    unmatched_names = set()
+    unmapped_categories = set()
 
     for ln in lines:
-        qty_mt = _to_qty(ln.get('quantity'))
+        qty_mt = float(ln.get('quantity') or 0)
         if qty_mt <= 0:
             continue
         lines_with_qty += 1
         qty_k = qty_mt / 1000.0   # tonnes -> '000 Tonnes
 
-        if not ln.get('cargo_category'):
-            unmatched_names.add(ln.get('cargo_name'))
-
-        commodity = (ln.get('cargo_type') or '').strip().upper()
-        if commodity not in matrix:
+        cat_raw = (ln.get('category') or '').strip().upper()
+        commodity = CATEGORY_MAP.get(cat_raw)
+        if commodity is None:
+            if cat_raw:
+                unmapped_categories.add(ln.get('category'))
             commodity = 'OTHER BULK'
 
-        run_type = (ln.get('vessel_run_type') or '').strip().lower()
-        is_coastal = run_type == 'coastal'
+        oc = (ln.get('overseas_coastal') or '').strip().lower()
+        is_coastal = oc.startswith('cost') or oc.startswith('coast')  # 'Costal' typo-safe
 
-        op = (ln.get('operation_type') or '').strip().lower()
-        is_export = op == 'export'
+        fi = (ln.get('foreign_indian') or '').strip().upper()
+        is_indian = fi == 'I'
 
-        category = (ln.get('cargo_category') or '').strip().upper()
-        is_indian = category == 'IF'
+        ie = (ln.get('import_export') or '').strip().lower()
+        is_export = ie == 'export'
 
         key = ('co' if is_coastal else 'ov') + ('_exp_' if is_export else '_imp_') + ('if' if is_indian else 'ff')
         matrix[commodity][key] += qty_k
@@ -229,13 +199,10 @@ def get_report1_data(year_str, month_str, debug=False):
         'year': year_str,
         'month': month_str,
         **({'_debug': {
-                'lines_fetched': {
-                    'vcn_cargo_declaration': len(lines_import),
-                    'vcn_export_cargo_declaration': len(lines_export),
-                    'vcn_consigners': len(lines_consigners),
-                },
+                'month_label_matched': month_label,
+                'rows_fetched': len(lines),
                 'lines_with_qty_gt_0': lines_with_qty,
-                'unmatched_cargo_names_sample': list(unmatched_names)[:15],
+                'unmapped_categories': list(unmapped_categories),
             }} if debug else {}),
     }
 
@@ -244,7 +211,7 @@ def get_report1_data(year_str, month_str, debug=False):
 @login_required
 def report1_data():
     year = request.args.get('year')
-    month = request.args.get('month')   # MUST be 'YYYY-MM', e.g. 2027-04
+    month = request.args.get('month')   # MUST be 'YYYY-MM', e.g. 2026-06
     debug = request.args.get('debug') == '1'
     if not year or not month:
         return jsonify({'error': 'year and month are required'}), 400
