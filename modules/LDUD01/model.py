@@ -63,7 +63,8 @@ def get_data(page=1, size=20, filters=None):
 
     allowed = {'doc_num','vessel_name','doc_status','doc_date','vcn_doc_num',
                'operation_type','cargo_type'}
-    where_clauses, params = [], []
+    # soft-deleted LDUDs (VCN sent back to Expected) stay hidden
+    where_clauses, params = ['is_deleted IS NOT TRUE'], []
     for f in (filters or []):
         field = f.get('field', '')
         if field not in allowed:

@@ -131,7 +131,8 @@ def delete_header(row_id):
 def send_back_to_expected(vcn_id, username):
     """Undo an accidental EV01→VCN move: recreate the expected_vessels row
     from the VCN header (reverse of EV01 move_to_vcn) and delete the VCN.
-    Refused when the VCN already has an LDUD. Caller checks billed/Approved."""
+    Any LDUD for the VCN is soft-deleted (hidden but recoverable if the
+    vessel comes back later). Caller checks billed/Approved."""
     conn = get_db()
     cur = get_cursor(conn)
     try:
@@ -140,9 +141,13 @@ def send_back_to_expected(vcn_id, username):
         if not h:
             raise ValueError('Record not found')
         h = dict(h)
-        cur.execute('SELECT id FROM ldud_header WHERE vcn_id=%s LIMIT 1', [vcn_id])
-        if cur.fetchone():
-            raise ValueError('This VCN already has an LDUD — it cannot be sent back to Expected Vessels')
+        # Soft-delete the LDUD (keeps its parcel ops / LUEU logbook rows).
+        # vcn_id is detached: this vcn_header row is deleted below and every
+        # LDUD/LUEU listing joins through vcn_id, so hidden rows drop out
+        # everywhere. vcn_doc_num/vessel_name text stays for tracing/restore.
+        cur.execute('''UPDATE ldud_header
+                       SET is_deleted=TRUE, deleted_by=%s, deleted_date=now(), vcn_id=NULL
+                       WHERE vcn_id=%s''', [username, vcn_id])
         cur.execute('''SELECT DISTINCT consigner_name FROM vcn_consigners
                        WHERE vcn_id=%s AND consigner_name IS NOT NULL ORDER BY consigner_name''', [vcn_id])
         consignees = ', '.join(r['consigner_name'] for r in cur.fetchall()) or None

@@ -859,7 +859,7 @@
                 title: "", field: "_send_to_expected", width: 120, headerSort: false, hozAlign: "center",
                 formatter: function(cell) {
                     const data = cell.getRow().getData();
-                    // undo an accidental EV01→VCN move; server also blocks LDUD/billed rows
+                    // undo an accidental EV01→VCN move; soft-deletes any LDUD, server blocks billed rows
                     if (!data.id || data.doc_status === 'Approved') return '';
                     return `<button class="btn-back-draft" onclick="sendToExpected(${data.id})" title="Send back to Expected Vessels (removes this VCN)">↩ Expected</button>`;
                 }
@@ -1598,7 +1598,7 @@
     }
 
     async function sendToExpected(id) {
-        if (!confirm('Send this vessel back to Expected Vessels? This VCN will be removed.')) return;
+        if (!confirm('Send this vessel back to Expected Vessels? This VCN will be removed and any LDUD for it will be archived (hidden).')) return;
         const res = await fetch('/api/module/VCN01/send_to_expected', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({id: id})

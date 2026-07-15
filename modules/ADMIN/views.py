@@ -663,7 +663,7 @@ def get_ldud_vessels():
     cur.execute('''
         SELECT id, doc_num, vessel_name, vcn_doc_num, operation_type, doc_status, created_by
         FROM ldud_header
-        WHERE doc_status IN ('Closed', 'Partial Close')
+        WHERE doc_status IN ('Closed', 'Partial Close') AND is_deleted IS NOT TRUE
         ORDER BY id DESC
     ''')
     rows = cur.fetchall()
