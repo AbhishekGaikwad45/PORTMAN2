@@ -23,4 +23,5 @@ from .report_06 import views as report_06_views
 
 from .Berth_plan import view as berth_plan_view
 from .custom_report import views as custom_report_views
+from .report_08 import report8 as report_08_views
 
