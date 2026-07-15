@@ -125,28 +125,13 @@ const vmTable = new Tabulator('#vmTable', {
     paginationSize: 25,
     ajaxURL: '/api/module/RP01/vessel-master/data',
     placeholder: 'No vessel call data uploaded yet',
-    columns: [
-        {title: 'FY', field: 'fin_year', width: 80, frozen: true},
-        {title: 'Month', field: 'month', width: 80, frozen: true},
-        {title: 'VCN', field: 'vcn_no', width: 80, frozen: true},
-        {title: 'Vessel', field: 'vessel_name', width: 160},
-        {title: 'Berth', field: 'berth_no', width: 70},
-        {title: 'IMO', field: 'imo_no', width: 90},
-        {title: 'Flag', field: 'flag', width: 100},
-        {title: 'Load Port', field: 'port_of_loading', width: 150},
-        {title: 'Cargo', field: 'cargo', width: 140},
-        {title: 'Qty (MT)', field: 'quantity', hozAlign: 'right', width: 100},
-        {title: 'NOR', field: 'nor', width: 130, formatter: datetimeCellFormatter},
-        {title: 'Alongside', field: 'alongside', width: 130, formatter: datetimeCellFormatter},
-        {title: 'Ops Comm.', field: 'ops_commenced', width: 130, formatter: datetimeCellFormatter},
-        {title: 'Cargo Compl.', field: 'cargo_completion', width: 130, formatter: datetimeCellFormatter},
-        {title: 'Cast Off', field: 'cast_off', width: 130, formatter: datetimeCellFormatter},
-        {title: 'Flow (MT/hr)', field: 'flow_rate', hozAlign: 'right', width: 100},
-        {title: 'Stay (d)', field: 'stay_at_berth', hozAlign: 'right', width: 80},
-        {title: 'Working (d)', field: 'working_time', hozAlign: 'right', width: 90},
-        {title: 'Agent', field: 'agent', width: 160},
-        {title: 'Remarks', field: 'remarks', width: 200},
-    ],
+    // every CSV template column, in template order (server-provided)
+    columns: {{ grid_cols | tojson }}.map(([title, field, kind], i) => ({
+        title, field,
+        hozAlign: kind === 'num' ? 'right' : 'left',
+        formatter: kind === 'dt' ? datetimeCellFormatter : undefined,
+        frozen: i < 5,
+    })),
 });
 
 function uploadVm() {

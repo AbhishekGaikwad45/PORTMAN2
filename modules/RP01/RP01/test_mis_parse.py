@@ -5,25 +5,25 @@ MIS_HDR = ','.join(f'"{h}"' for h, *_ in MIS_COLUMNS)
 
 # vessel first row + continuation row (blank vessel cells) + subtotal row (no customer)
 MIS_GOOD = MIS_HDR + '''
-2024-25,Nov-24,Nov-24,Q5928,MT WISDOM STAR,Cargill India,NARENDRA FWD,Edible Oil,Edible Oil,Veg Oil,Crude,,EDIBLE OIL,GBL,"12,000.000",Overseas,Import,252,3024000,100,1200000,24.2,290400,Interocean,10000,,,,Cargill India Pvt. Ltd.
-,,,,,Reliance Consumer,NARENDRA FWD,Edible Oil,Edible Oil,,,,EDIBLE OIL,Suraj,10000.000,Overseas,Import,252,2520000,100,1000000,24.2,242000,,,,,#N/A,Reliance Consumer Products Ltd.
-,,,,,,,,,,,,,,48469.946,,,,12214426,,4846995,,1172973,,30000,,,,
+1,2024-25,Nov-24,Nov-24,Q5928,MT WISDOM STAR,Cargill India,NARENDRA FWD,Edible Oil,Edible Oil,Veg Oil,Crude,,EDIBLE OIL,GBL,"12,000.000",Overseas,Import,252,3024000,100,1200000,24.2,290400,Interocean,10000,,,,Cargill India Pvt. Ltd.
+,,,,,,Reliance Consumer,NARENDRA FWD,Edible Oil,Edible Oil,,,,EDIBLE OIL,Suraj,10000.000,Overseas,Import,252,2520000,100,1000000,24.2,242000,,,,,#N/A,Reliance Consumer Products Ltd.
+,,,,,,,,,,,,,,,48469.946,,,,12214426,,4846995,,1172973,,30000,,,,
 '''
 
 MIS_BAD = MIS_HDR + '''
-2024-25,Nov-24,Nov-24,Q5928,MT SHIP,Cargill,NF,EO,EO,EO,EO,EO,EO,GBL,12x00,Overseas,Import,,,,,,,,,,,,
+1,2024-25,Nov-24,Nov-24,Q5928,MT SHIP,Cargill,NF,EO,EO,EO,EO,EO,EO,GBL,12x00,Overseas,Import,,,,,,,,,,,,
 '''
 
 VM_HDR = ','.join(f'"{h}"' for h, *_ in VM_COLUMNS)
 
 # real row (dash in anchorage time, #DIV/0! junk in a KPI col) + totals row (no vessel name)
 VM_GOOD = VM_HDR + '''
-2024-25,Dec-24,LB-03,Q6133,MT TINY GOLD,Overseas,F,9251559,Liberia,,UAILK,"CHORNOMORSK, UKRAINE",25063,6.5,176,Import,Interocean,"12"" DIA",Suraj,Suraj,Edible Oil,Other,Edible Oil,EDIBLE OIL,25-12-2024 07:48,-,25-12-2024 05:48,25-12-2024 07:48,25-12-2024 08:06,25-12-2024 09:00,27-12-2024 07:42,27-12-2024 11:55,27-12-2024 11:55,,27-12-2024 13:55,"2,431.625",52,Vessel Pumping issue,0.01,0.01,#DIV/0!,2.16,0.04,1.95,0.21,0.21,0,0.1,0.08
-,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,110310.15,,,,,,,,,,,,,
+1,2024-25,Dec-24,LB-03,Q6133,MT TINY GOLD,Overseas,F,9251559,Liberia,,UAILK,"CHORNOMORSK, UKRAINE",25063,6.5,176,Import,Interocean,"12"" DIA",Suraj,Suraj,Edible Oil,Other,Edible Oil,EDIBLE OIL,25-12-2024 07:48,-,25-12-2024 05:48,25-12-2024 07:48,25-12-2024 08:06,25-12-2024 09:00,27-12-2024 07:42,27-12-2024 11:55,27-12-2024 11:55,,27-12-2024 13:55,"2,431.625",52,Vessel Pumping issue,0.01,0.01,#DIV/0!,2.16,0.04,1.95,0.21,0.21,0,0.1,0.08
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,110310.15,,,,,,,,,,,,,
 '''
 
 VM_BAD = VM_HDR + '''
-2024-25,Dec-24,LB-03,,MT SHIP,Overseas,F,1,X,,,,not-num,,,Import,A,,,,,,,,junk-date,,,,,,,,,,,100,,,,,,,,,,,,,
+1,2024-25,Dec-24,LB-03,,MT SHIP,Overseas,F,1,X,,,,not-num,,,Import,A,,,,,,,,junk-date,,,,,,,,,,,100,,,,,,,,,,,,,
 '''
 
 
@@ -32,6 +32,7 @@ def demo():
     assert errors == [], errors
     assert len(rows) == 2, f'subtotal row not skipped: {len(rows)}'
     r1, r2 = rows
+    assert r1['sr_no'] == 1 and r2['sr_no'] is None, 'sr_no parsed, not forward-filled'
     assert r1['quantity'] == 12000.0, 'comma number'
     assert r2['vcn_no'] == 'Q5928' and r2['vessel_name'] == 'MT WISDOM STAR', 'forward-fill'
     assert r2['gangway_amount'] is None, 'gangway must not forward-fill'

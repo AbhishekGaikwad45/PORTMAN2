@@ -127,24 +127,13 @@ const misTable = new Tabulator('#misTable', {
     paginationSize: 25,
     ajaxURL: '/api/module/RP01/mis-history/data',
     placeholder: 'No MIS data uploaded yet',
-    columns: [
-        {title: 'FY', field: 'fin_year', width: 80, frozen: true},
-        {title: 'Month', field: 'month_jnpt', width: 80, frozen: true},
-        {title: 'VCN', field: 'vcn_no', width: 80, frozen: true},
-        {title: 'Vessel', field: 'vessel_name', width: 160},
-        {title: 'Customer', field: 'customer', width: 200},
-        {title: 'Cargo', field: 'cargo_name', width: 140},
-        {title: 'Terminal', field: 'terminal', width: 90},
-        {title: 'Qty (MT)', field: 'quantity', hozAlign: 'right', width: 100},
-        {title: 'Cargo Amt', field: 'cargo_amount', hozAlign: 'right', width: 110},
-        {title: 'Infra Amt', field: 'infra_amount', hozAlign: 'right', width: 100},
-        {title: 'Toll Amt', field: 'toll_amount', hozAlign: 'right', width: 100},
-        {title: 'Gangway', field: 'gangway_amount', hozAlign: 'right', width: 90},
-        {title: 'MLA Amt', field: 'mla_amount', hozAlign: 'right', width: 90},
-        {title: 'Imp/Exp', field: 'import_export', width: 80},
-        {title: 'Importer', field: 'importer', width: 200},
-        {title: 'Remarks', field: 'remarks', width: 160},
-    ],
+    // every CSV template column, in template order (server-provided)
+    columns: {{ grid_cols | tojson }}.map(([title, field, kind], i) => ({
+        title, field,
+        hozAlign: kind === 'num' ? 'right' : 'left',
+        formatter: kind === 'dt' ? datetimeCellFormatter : undefined,
+        frozen: i < 5,
+    })),
 });
 
 function uploadMis() {

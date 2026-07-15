@@ -162,6 +162,13 @@ def _csv_template(columns, filename):
                     headers={'Content-Disposition': f'attachment; filename={filename}'})
 
 
+def _grid_cols(columns, num_cols, dt_cols=frozenset()):
+    """(title, field, kind) per template column — drives the preview grid,
+    so the grid always shows every column the CSV template has."""
+    return [(h, c, 'num' if c in num_cols else 'dt' if c in dt_cols else '')
+            for h, c, _ in columns]
+
+
 def _do_upload(parse_fn, table, db_cols):
     perms = get_perms()
     if not (perms.get('can_add') and perms.get('can_delete')):
@@ -186,6 +193,7 @@ def _do_upload(parse_fn, table, db_cols):
 # (csv header, db column, format hint shown on the template's second row).
 # The hint row's Customer cell stays blank so the parser ignores that row.
 MIS_COLUMNS = [
+    ('Sr No',                 'sr_no',            'number, e.g. 1'),
     ('Fin Year',              'fin_year',         'e.g. 2024-25'),
     ('Month JSW',             'month_jsw',        'MMM-YY e.g. Nov-24'),
     ('Month JNPT',            'month_jnpt',       'MMM-YY e.g. Nov-24'),
@@ -218,7 +226,7 @@ MIS_COLUMNS = [
     ('Importer',              'importer',         'text'),
 ]
 MIS_DB_COLS = [c for _, c, _ in MIS_COLUMNS]
-MIS_NUM = {'quantity', 'cargo_rate', 'cargo_amount', 'infra_rate', 'infra_amount',
+MIS_NUM = {'sr_no', 'quantity', 'cargo_rate', 'cargo_amount', 'infra_rate', 'infra_amount',
            'toll_rate', 'toll_amount', 'gangway_amount', 'mla_rate', 'mla_amount'}
 # Vessel-level cells: filled on the first row of a vessel group in the legacy
 # sheet, blank on continuation rows — inherit from the row above on ingest.
@@ -236,7 +244,8 @@ def mis_history_page():
     perms = get_perms()
     if not perms.get('can_read'):
         return render_template('no_access.html'), 403
-    return render_template('mis_history.html', permissions=perms)
+    return render_template('mis_history.html', permissions=perms,
+                           grid_cols=_grid_cols(MIS_COLUMNS, MIS_NUM))
 
 
 @bp.route('/api/module/RP01/mis-history/template')
@@ -287,13 +296,14 @@ def mis_upload():
 # ──────────────────────────────────────────────────────────────────
 #  Dataset 2: Vessel call master — one row per vessel call, with
 #  berthing timings and turnaround KPIs. Excluded from the legacy
-#  sheet: SN serial, Code/Status, daily-update tracking fields,
+#  sheet: Code/Status, daily-update tracking fields,
 #  Excel concat helper columns.
 # ──────────────────────────────────────────────────────────────────
 
 # The hint row's Vessel Name cell stays blank so the parser ignores that row.
 _DT_HINT = 'DD-MM-YYYY HH:MM'
 VM_COLUMNS = [
+    ('Sr No',                        'sr_no',                'number, e.g. 1'),
     ('Fin Year',                     'fin_year',             'e.g. 2024-25'),
     ('Month',                        'month',                'MMM-YY e.g. Nov-24'),
     ('Berth No',                     'berth_no',             'e.g. LB-03'),
@@ -345,7 +355,7 @@ VM_COLUMNS = [
     ('Outward Movement (days)',      'outward_movement',     'number (days)'),
 ]
 VM_DB_COLS = [c for _, c, _ in VM_COLUMNS]
-VM_NUM = {'grt', 'draft', 'loa', 'quantity', 'flow_rate',
+VM_NUM = {'sr_no', 'grt', 'draft', 'loa', 'quantity', 'flow_rate',
           'pre_berthing_waiting', 'waiting_port', 'waiting_non_port', 'stay_at_berth',
           'arrive_to_comm', 'working_time', 'non_working_total', 'non_working_port',
           'non_working_non_port', 'inward_movement', 'outward_movement'}
@@ -365,7 +375,8 @@ def vm_page():
     perms = get_perms()
     if not perms.get('can_read'):
         return render_template('no_access.html'), 403
-    return render_template('vessel_master.html', permissions=perms)
+    return render_template('vessel_master.html', permissions=perms,
+                           grid_cols=_grid_cols(VM_COLUMNS, VM_NUM, VM_DT))
 
 
 @bp.route('/api/module/RP01/vessel-master/template')
