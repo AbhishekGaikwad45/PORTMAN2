@@ -1,11 +1,20 @@
 """
 Report-1 — Principal Commodity Report
-Flask Blueprint version. Reads directly from mis_vessel_master (Postgres).
+Flask Blueprint version.
+
+Primary source: mis_vessel_master (Postgres).
+Fallback source: for any (fin_year, month) that has ZERO rows in
+mis_vessel_master, figures are pulled instead from the live LUEU01
+logging pipeline (lueu_parcel_log -> ldud_parcel_ops) so the current
+month can show real data even before that month's mis_vessel_master
+upload has been done. mis_vessel_master always wins for any period
+where it actually has rows.
 """
 
 import io
 import traceback
 from functools import wraps
+from datetime import datetime, date
 
 import pandas as pd
 
@@ -29,6 +38,8 @@ def login_required(f):
 
 
 MONTH_NAMES = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+CAL_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 CATEGORY_ORDER = [
     {"key": "POL (Crude, Products and LPG/LNG)", "sub": False},
@@ -57,6 +68,17 @@ CATEGORY_MAP = {
     "Edible Oil": "Other liquids",
     "Chemical": "Other liquids",
     "Ph.Acid": "Fertilizers -Raw Material (PH ACID)",
+}
+
+# Maps free-text ldud_parcel_ops.cargo_name (from the live LUEU01 logging
+# pipeline, used as a fallback source) straight to Report-1's bucket
+# labels. Add entries here as new cargo names show up in that pipeline —
+# anything not listed gets dropped (with a console warning) rather than
+# crashing the report.
+LIVE_CARGO_TO_BUCKET = {
+    "BASE OIL": "Other liquids",
+    "FURNACE OIL": "POL (Crude, Products and LPG/LNG)",
+    # add more as they appear in ldud_parcel_ops.cargo_name
 }
 
 
@@ -91,7 +113,88 @@ def month_str_to_idx(month_str: str) -> int:
         )
 
 
+def _entry_date_to_fy_month(d):
+    """Real calendar date (from lueu_parcel_log.entry_date) -> (fin_year,
+    fy_month_idx), using the same Apr-Mar FY convention as the rest of the
+    report. e.g. 2026-07-12 -> ('2026-27', 3)."""
+    if isinstance(d, date):
+        dt = d
+    else:
+        dt = datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+
+    if dt.month >= 4:
+        fy_start = dt.year
+    else:
+        fy_start = dt.year - 1
+    fin_year = f"{fy_start}-{str(fy_start + 1)[-2:]}"
+
+    mn = CAL_MONTH_ABBR[dt.month - 1]
+    fy_month_idx = MONTH_NAMES.index(mn)
+    return fin_year, fy_month_idx
+
+
+def _classify_live_cargo(cargo_name):
+    key = str(cargo_name or "").strip().upper()
+    return LIVE_CARGO_TO_BUCKET.get(key)
+
+
+def _load_live_pipeline_data():
+    """Fallback source: real-time LUEU01 logging pipeline
+    (lueu_parcel_log -> ldud_parcel_ops). Only used to fill in months that
+    have ZERO rows in mis_vessel_master — see load_data() below."""
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+        cur.execute("""
+            SELECT l.entry_date, po.cargo_name, l.quantity
+            FROM lueu_parcel_log l
+            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.entry_date IS NOT NULL
+              AND l.quantity IS NOT NULL
+        """)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    empty = pd.DataFrame(columns=["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"])
+    if not rows:
+        return empty
+
+    df = pd.DataFrame(rows)
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+
+    fy_list, idx_list = [], []
+    for d in df["entry_date"]:
+        fy, idx = _entry_date_to_fy_month(d)
+        fy_list.append(fy)
+        idx_list.append(idx)
+    df["fin_year"] = fy_list
+    df["fy_month_idx"] = idx_list
+
+    df["cargo_sub_category"] = df["cargo_name"].apply(_classify_live_cargo)
+
+    unmapped = sorted(df.loc[df["cargo_sub_category"].isna(), "cargo_name"].dropna().unique().tolist())
+    if unmapped:
+        print("REPORT1 WARNING: live-pipeline cargo_name values with no bucket mapping, dropped:", unmapped)
+
+    df = df.dropna(subset=["cargo_sub_category"])
+    if df.empty:
+        return empty
+
+    df["quantity_000t"] = df["quantity"] / 1000.0
+
+    return (
+        df.groupby(["fin_year", "fy_month_idx", "cargo_sub_category"], as_index=False)["quantity_000t"]
+        .sum()
+    )
+
+
 def load_data() -> pd.DataFrame:
+    """Primary source: mis_vessel_master. For any (fin_year, month) that has
+    NO rows at all in mis_vessel_master, fall back to the live LUEU01
+    logging pipeline for that period only -- mis_vessel_master always wins
+    where it has data."""
     conn = get_db()
     try:
         cur = get_cursor(conn)
@@ -106,36 +209,54 @@ def load_data() -> pd.DataFrame:
         conn.close()
 
     if not rows:
-        raise ReportDataError("No rows found in mis_vessel_master.")
+        mv_df = pd.DataFrame(columns=["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"])
+    else:
+        mv_df = pd.DataFrame(rows)
 
-    df = pd.DataFrame(rows)
+        missing_cols = [c for c in ("fin_year", "month", "category", "quantity") if c not in mv_df.columns]
+        if missing_cols:
+            raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
 
-    missing_cols = [c for c in ("fin_year", "month", "category", "quantity") if c not in df.columns]
-    if missing_cols:
-        raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
+        mv_df["fin_year"] = mv_df["fin_year"].str.strip()
+        mv_df["category"] = mv_df["category"].astype(str).str.strip()
+        mv_df["quantity"] = pd.to_numeric(mv_df["quantity"], errors="coerce").fillna(0.0)
+        mv_df["fy_month_idx"] = mv_df["month"].apply(month_str_to_idx)
+        mv_df["cargo_sub_category"] = mv_df["category"].map(CATEGORY_MAP)
 
-    df["fin_year"] = df["fin_year"].str.strip()
-    df["category"] = df["category"].astype(str).str.strip()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+        unmapped = sorted(mv_df.loc[mv_df["cargo_sub_category"].isna(), "category"].unique().tolist())
+        if unmapped:
+            print("REPORT1 WARNING: unmapped mis_vessel_master category values dropped:", unmapped)
 
-    df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
+        mv_df = mv_df.dropna(subset=["cargo_sub_category"])
+        mv_df["quantity_000t"] = mv_df["quantity"] / 1000.0
+        mv_df = mv_df[["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"]]
 
-    df["cargo_sub_category"] = df["category"].map(CATEGORY_MAP)
+    # ---- which (fin_year, month) periods does mis_vessel_master actually
+    # cover? Only periods with ZERO rows there fall back to the live pipeline. ----
+    covered_periods = set(zip(mv_df["fin_year"], mv_df["fy_month_idx"]))
 
-    unmapped = sorted(df.loc[df["cargo_sub_category"].isna(), "category"].unique().tolist())
+    live_df = _load_live_pipeline_data()
+    if not live_df.empty:
+        live_df = live_df[
+            ~live_df.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+        ]
 
-    df = df.dropna(subset=["cargo_sub_category"])
+    combined = pd.concat([mv_df, live_df], ignore_index=True)
 
-    if df.empty:
+    if combined.empty:
         raise ReportDataError(
-            "None of the rows matched a known category. "
-            f"Unmapped category values found: {', '.join(unmapped) if unmapped else '(none)'}. "
-            f"Known categories are: {', '.join(CATEGORY_MAP.keys())}"
+            "No usable rows found in mis_vessel_master or the live LUEU01 pipeline."
         )
 
-    df["quantity_000t"] = df["quantity"] / 1000.0
+    # re-aggregate in case both sources ever contributed to the same
+    # (fin_year, fy_month_idx, bucket) -- shouldn't happen given the period
+    # filter above, but keeps totals correct if it ever does
+    combined = (
+        combined.groupby(["fin_year", "fy_month_idx", "cargo_sub_category"], as_index=False)["quantity_000t"]
+        .sum()
+    )
 
-    return df[["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"]]
+    return combined
 
 
 def _get_df_and_years():

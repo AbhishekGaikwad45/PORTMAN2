@@ -363,48 +363,55 @@ function showStatus(msg){
     document.getElementById("status").textContent = msg || "";
 }
 
-function loadMeta(){
+function loadMeta() {
 
     showStatus("Loading...");
 
     fetch("/api/module/RP01/report2/meta")
-    .then(r=>r.json())
-    .then(data=>{
+        .then(r => r.json())
+        .then(data => {
 
-        if(data.error){
-            showStatus(data.error);
-            return;
-        }
+            if (data.error) {
+                showStatus(data.error);
+                return;
+            }
 
-        MONTHS = data.months || [];
+            MONTHS = data.months || [];
 
-        const monthSelect = document.getElementById("monthSelect");
+            const monthSelect = document.getElementById("monthSelect");
+            monthSelect.innerHTML = "";
 
-        monthSelect.innerHTML = "";
+            MONTHS.forEach(m => {
+                monthSelect.innerHTML += `
+                    <option value="${m.abbrev}">
+                        ${m.label}
+                    </option>
+                `;
+            });
 
-        MONTHS.forEach(m=>{
+            // Select current month
+            const monthNames = [
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+            ];
 
-            monthSelect.innerHTML += `
-                <option value="${m.abbrev}">
-                    ${m.label}
-                </option>
-            `;
+            const currentMonth = monthNames[new Date().getMonth()];
 
+            const current = MONTHS.find(m => m.abbrev === currentMonth);
+
+            if (current) {
+                monthSelect.value = current.abbrev;
+            } else if (MONTHS.length) {
+                monthSelect.value = MONTHS[MONTHS.length - 1].abbrev;
+            }
+
+            loadReport();
+
+        })
+        .catch(err => {
+            console.error(err);
+            showStatus("Unable to load month list.");
         });
-
-        if(MONTHS.length){
-            monthSelect.value = MONTHS[MONTHS.length-1].abbrev;
-        }
-
-        loadReport();
-
-    })
-    .catch(err=>{
-
-        console.error(err);
-        showStatus("Unable to load month list.");
-
-    });
 
 }
 
