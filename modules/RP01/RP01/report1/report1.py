@@ -75,11 +75,11 @@ CATEGORY_MAP = {
 # labels. Add entries here as new cargo names show up in that pipeline —
 # anything not listed gets dropped (with a console warning) rather than
 # crashing the report.
-LIVE_CARGO_TO_BUCKET = {
-    "BASE OIL": "Other liquids",
-    "FURNACE OIL": "POL (Crude, Products and LPG/LNG)",
-    # add more as they appear in ldud_parcel_ops.cargo_name
-}
+# LIVE_CARGO_TO_BUCKET = {
+#     "BASE OIL": "Other liquids",
+#     "FURNACE OIL": "POL (Crude, Products and LPG/LNG)",
+#     # add more as they appear in ldud_parcel_ops.cargo_name
+# }
 
 
 class ReportDataError(Exception):
@@ -131,12 +131,76 @@ def _entry_date_to_fy_month(d):
     mn = CAL_MONTH_ABBR[dt.month - 1]
     fy_month_idx = MONTH_NAMES.index(mn)
     return fin_year, fy_month_idx
+    
+     
+CATEGORY_LOOKUP = {
+    # ----------------------------------------------------
+    # POL (Crude, Products and LPG/LNG)
+    # ----------------------------------------------------
+    "POL": "POL (Crude, Products and LPG/LNG)",
+    "POL-BLACK": "POL (Crude, Products and LPG/LNG)",
 
+    # ----------------------------------------------------
+    # Other liquids
+    # ----------------------------------------------------
+    "OTHER LIQUID": "Other liquids",
+    "EDIBLE OIL": "Other liquids",
+
+    # ----------------------------------------------------
+    # Fertilizers -Raw Material (PH ACID)
+    # ----------------------------------------------------
+    "FERTILIZERS": "Fertilizers -Raw Material (PH ACID)",
+
+    # ----------------------------------------------------
+    # Remaining Report-1 Categories
+    # (currently no mapping in vessel_cargo)
+    # ----------------------------------------------------
+    "IRON ORE": "Iron ore incl.Iron ore pallets",
+    "THERMAL COAL": "Thermal and Steam Coal",
+    "STEAM COAL": "Thermal and Steam Coal",
+    "COOKING COAL": "Cooking coal and other coals",
+    "CONTAINER TONNAGE": "Containers- Tonnage",
+    "CONTAINER TEUS": "Containers- TEUs",
+    "MISC": "Other Misc. cargo",
+    "CEMENT": "A. Cement",
+    "BREAK BULK": "B. Break Bulk/General cargo",
+}
 
 def _classify_live_cargo(cargo_name):
-    key = str(cargo_name or "").strip().upper()
-    return LIVE_CARGO_TO_BUCKET.get(key)
+    if not cargo_name:
+        return None
 
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+
+        cur.execute("""
+            SELECT
+                cargo_category,
+                cargo_sub_category
+            FROM vessel_cargo
+            WHERE UPPER(TRIM(cargo_name)) = UPPER(TRIM(%s))
+            LIMIT 1
+        """, (cargo_name,))
+
+        row = cur.fetchone()
+
+        if not row:
+            print(f"WARNING: {cargo_name} not found in vessel_cargo")
+            return None
+
+        category = (row["cargo_category"] or "").strip().upper()
+        sub_category = (row["cargo_sub_category"] or "").strip().upper()
+
+        report_category = CATEGORY_LOOKUP.get(category)
+
+        if not report_category:
+            report_category = CATEGORY_LOOKUP.get(sub_category)
+
+        return report_category
+
+    finally:
+        conn.close()
 
 def _load_live_pipeline_data():
     """Fallback source: real-time LUEU01 logging pipeline
