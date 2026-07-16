@@ -269,15 +269,38 @@ function fmtQty(val) {
     return Number(val).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
+/* ---------- Current fiscal-year / month helpers ----------
+   FY runs Apr..Mar. MONTH_NAMES order (server-side) is
+   Apr=0, May=1, Jun=2, Jul=3, Aug=4, Sep=5, Oct=6, Nov=7, Dec=8, Jan=9, Feb=10, Mar=11.
+   JS Date.getMonth() is Jan=0 .. Dec=11, so we shift by 3. */
+function getCurrentFinYear() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0=Jan..11=Dec
+    const fyStart = (m >= 3) ? y : y - 1; // Apr(3) or later => FY starts this calendar year
+    return `${fyStart}-${String(fyStart + 1).slice(-2)}`;
+}
+
+function getCurrentFyMonthIdx() {
+    const now = new Date();
+    const m = now.getMonth(); // 0=Jan..11=Dec
+    return (m - 3 + 12) % 12; // shift so Apr=0 .. Mar=11
+}
+
 function populateYearSelect() {
     const yearSelect = document.getElementById("yearSelect");
     yearSelect.innerHTML = META.years
         .map(y => `<option value="${y}">${y}</option>`)
         .join("");
 
-    if (META.years.length) {
-        yearSelect.value = META.years[META.years.length - 1];
-    }
+    if (!META.years.length) return;
+
+    const currentFy = getCurrentFinYear();
+    // Prefer today's actual fiscal year if the data has it; otherwise fall
+    // back to the most recent year available.
+    yearSelect.value = META.years.includes(currentFy)
+        ? currentFy
+        : META.years[META.years.length - 1];
 }
 
 function populateMonthSelect() {
@@ -289,10 +312,20 @@ function populateMonthSelect() {
         .map(m => `<option value="${m.idx}">${m.label}</option>`)
         .join("");
 
-    if (months.length) {
-        monthSelect.value = months[months.length - 1].idx;
-    }
+    if (!months.length) return;
+
+    // Only pre-select today's actual month if that year selected IS the
+    // current fiscal year and that month actually has data; otherwise fall
+    // back to the latest month available for the selected year.
+    const isCurrentFy = (year === getCurrentFinYear());
+    const currentIdx = getCurrentFyMonthIdx();
+    const hasCurrentMonth = isCurrentFy && months.some(m => m.idx === currentIdx);
+
+    monthSelect.value = hasCurrentMonth
+        ? currentIdx
+        : months[months.length - 1].idx;
 }
+
 
 function onYearChange() {
     populateMonthSelect();

@@ -45,6 +45,7 @@ from flask import jsonify, request, render_template, send_file, session, redirec
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
+from datetime import datetime, date
 
 from database import get_db, get_cursor
 
@@ -60,6 +61,7 @@ def login_required(f):
     return decorated
 
 
+
 MONTH_NAMES = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
 
 # Add real keywords here the day container calls start being tagged
@@ -72,6 +74,131 @@ class ReportDataError(Exception):
     Caught by the route handlers and turned into a clean JSON error response."""
     pass
 
+CAL_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+ 
+ 
+def _dt_to_fy_month(dt):
+    """A real datetime/date -> (fin_year, fy_month_idx), Apr-Mar FY convention.
+    e.g. 2026-07-12 -> ('2026-27', 3)."""
+    d = dt.date() if isinstance(dt, datetime) else dt
+    fy_start = d.year if d.month >= 4 else d.year - 1
+    fin_year = f"{fy_start}-{str(fy_start + 1)[-2:]}"
+    mn = CAL_MONTH_ABBR[d.month - 1]
+    return fin_year, MONTH_NAMES.index(mn)
+
+
+ 
+ 
+# ── ADD: container check reused against free-text cargo names from the live
+# pipeline (ldud_parcel_ops.cargo_name), same keyword list as _is_container ──
+def _text_has_container_keyword(text) -> bool:
+    t = (text or "").lower()
+    return any(kw in t for kw in CONTAINER_CATEGORY_KEYWORDS)
+
+# ── ADD: fallback source -- live LUEU01 logging pipeline. Returns the same
+# shape as the mis_vessel_master loader (df_rows, df_vessels) so it can be
+# concatenated directly. Only used for (fin_year, fy_month_idx) periods that
+# have ZERO rows in mis_vessel_master -- see load_data() below. ──
+def _load_live_pipeline_data():
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+ 
+        # ---- per-log-entry quantity rows (for Coastal / Overseas / Total Traffic) ----
+        cur.execute("""
+            SELECT l.entry_date, h.id AS vcn_id, h.vessel_run_type, l.quantity
+            FROM lueu_parcel_log l
+            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
+            JOIN ldud_header ld ON ld.id = po.ldud_id
+            JOIN vcn_header h ON h.id = ld.vcn_id
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.entry_date IS NOT NULL
+              AND l.quantity IS NOT NULL
+        """)
+        log_rows = cur.fetchall()
+ 
+        # ---- per-vessel-call rows (for turn-round time, vessel counts, container flag) ----
+        cur.execute("""
+            SELECT h.id AS vcn_id, h.vessel_run_type,
+                   ld.alongside_datetime, ld.cast_off_datetime,
+                   (SELECT STRING_AGG(DISTINCT po2.cargo_name, ', ')
+                      FROM ldud_parcel_ops po2 WHERE po2.ldud_id = ld.id) AS cargo_names
+            FROM ldud_header ld
+            JOIN vcn_header h ON h.id = ld.vcn_id
+            WHERE ld.alongside_datetime IS NOT NULL
+              AND NULLIF(TRIM(ld.alongside_datetime::text), '') IS NOT NULL
+        """)
+        vessel_rows = cur.fetchall()
+    finally:
+        conn.close()
+ 
+    empty_rows = pd.DataFrame(columns=["fin_year", "fy_month_idx", "vcn_no", "quantity_000t", "overseas_coastal_norm"])
+    empty_vessels = pd.DataFrame(columns=[
+        "fin_year", "fy_month_idx", "vcn_no", "alongside_dt", "departure_dt",
+        "is_container", "overseas_coastal_norm", "turnround_days",
+    ])
+ 
+    # ---- build df_rows (quantity) ----
+    if log_rows:
+        ldf = pd.DataFrame(log_rows)
+        ldf["quantity"] = pd.to_numeric(ldf["quantity"], errors="coerce").fillna(0.0)
+        ldf["quantity_000t"] = ldf["quantity"] / 1000.0
+        ldf["overseas_coastal_norm"] = ldf["vessel_run_type"].apply(_norm_overseas_coastal)
+ 
+        fy_list, idx_list = [], []
+        for d in ldf["entry_date"]:
+            dt = d if isinstance(d, date) else datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+            fy, idx = _dt_to_fy_month(dt)
+            fy_list.append(fy)
+            idx_list.append(idx)
+        ldf["fin_year"] = fy_list
+        ldf["fy_month_idx"] = idx_list
+        ldf["vcn_no"] = ldf["vcn_id"].astype(str)
+ 
+        df_rows = ldf[["fin_year", "fy_month_idx", "vcn_no", "quantity_000t", "overseas_coastal_norm"]].copy()
+    else:
+        df_rows = empty_rows
+ 
+    # ---- build df_vessels (turn-round + counts) ----
+    if vessel_rows:
+        vdf = pd.DataFrame(vessel_rows)
+        vdf["alongside_dt"] = vdf["alongside_datetime"].apply(_parse_dt)
+        vdf["cast_off_dt"] = vdf["cast_off_datetime"].apply(_parse_dt)
+        vdf = vdf.dropna(subset=["alongside_dt"])  # need at least alongside to bucket the period
+        if not vdf.empty:
+            vdf["departure_dt"] = vdf["cast_off_dt"]
+            vdf["is_container"] = vdf["cargo_names"].apply(_text_has_container_keyword)
+            vdf["overseas_coastal_norm"] = vdf["vessel_run_type"].apply(_norm_overseas_coastal)
+            vdf["vcn_no"] = vdf["vcn_id"].astype(str)
+ 
+            fy_list, idx_list = [], []
+            for dt in vdf["alongside_dt"]:
+                fy, idx = _dt_to_fy_month(dt)
+                fy_list.append(fy)
+                idx_list.append(idx)
+            vdf["fin_year"] = fy_list
+            vdf["fy_month_idx"] = idx_list
+ 
+            def _turnround_days(r):
+                if r["alongside_dt"] is None or r["departure_dt"] is None:
+                    return None
+                delta = r["departure_dt"] - r["alongside_dt"]
+                days = delta.total_seconds() / 86400.0
+                return days if days >= 0 else None
+ 
+            vdf["turnround_days"] = vdf.apply(_turnround_days, axis=1)
+ 
+            df_vessels = vdf[[
+                "fin_year", "fy_month_idx", "vcn_no", "alongside_dt", "departure_dt",
+                "is_container", "overseas_coastal_norm", "turnround_days",
+            ]].copy()
+        else:
+            df_vessels = empty_vessels
+    else:
+        df_vessels = empty_vessels
+ 
+    return df_rows, df_vessels
 
 def fy_start_year(fin_year: str) -> int:
     return int(fin_year.split("-")[0])
@@ -134,13 +261,16 @@ def _norm_overseas_coastal(v: str) -> str:
 
 def load_data():
     """Returns (df_rows, df_vessels).
-    df_rows:    one row per mis_vessel_master record -- used for quantity
-                sums (Total Traffic / Coastal / Overseas), since a single
-                vessel call can carry several cargo/consignee rows and all
-                of them contribute quantity.
-    df_vessels: one row per DISTINCT vessel call (vcn_no + fin_year +
-                month) -- used for vessel counts and turn-round time, so a
-                vessel with 3 cargo rows is still only counted once.
+    Primary source: mis_vessel_master, exactly as before.
+    Fallback: for any (fin_year, fy_month_idx) period with ZERO rows in
+    mis_vessel_master, figures are pulled instead from the live LUEU01
+    pipeline (vcn_header/ldud_header/lueu_parcel_log) for that period only.
+    mis_vessel_master always wins for periods where it has data.
+ 
+    df_rows:    one row per source record -- used for quantity sums
+                (Total Traffic / Coastal / Overseas).
+    df_vessels: one row per DISTINCT vessel call -- used for vessel counts
+                and turn-round time.
     """
     conn = get_db()
     try:
@@ -155,53 +285,79 @@ def load_data():
         rows = cur.fetchall()
     finally:
         conn.close()
-
+ 
     if not rows:
-        raise ReportDataError("No rows found in mis_vessel_master.")
-
-    df = pd.DataFrame(rows)
-
-    required = ("fin_year", "month", "vcn_no", "vessel_name", "alongside",
-                "cast_off", "sail_cast_off", "category", "overseas_coastal", "quantity")
-    missing_cols = [c for c in required if c not in df.columns]
-    if missing_cols:
-        raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
-
-    df["fin_year"] = df["fin_year"].str.strip()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
-    df["quantity_000t"] = df["quantity"] / 1000.0
-    df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
-    df["overseas_coastal_norm"] = df["overseas_coastal"].apply(_norm_overseas_coastal)
-    df["is_container"] = df["category"].apply(_is_container)
-
-    df_rows = df[[
-        "fin_year", "fy_month_idx", "vcn_no", "quantity_000t", "overseas_coastal_norm"
-    ]].copy()
-
-    # ---- vessel-level dedup (one row per distinct vessel call) ----
-    df["alongside_dt"] = df["alongside"].apply(_parse_dt)
-    df["cast_off_dt"] = df["cast_off"].apply(_parse_dt)
-    df["sail_cast_off_dt"] = df["sail_cast_off"].apply(_parse_dt)
-    df["departure_dt"] = df["cast_off_dt"].combine_first(df["sail_cast_off_dt"])
-
-    grp = df.groupby(["fin_year", "fy_month_idx", "vcn_no"], as_index=False).agg(
-        alongside_dt=("alongside_dt", "min"),
-        departure_dt=("departure_dt", "max"),
-        is_container=("is_container", "any"),
-        overseas_coastal_norm=("overseas_coastal_norm", "first"),
-    )
-
-    def _turnround_days(r):
-        if r["alongside_dt"] is None or r["departure_dt"] is None:
-            return None
-        delta = r["departure_dt"] - r["alongside_dt"]
-        days = delta.total_seconds() / 86400.0
-        return days if days >= 0 else None
-
-    grp["turnround_days"] = grp.apply(_turnround_days, axis=1)
-
-    return df_rows, grp
-
+        mv_df_rows = pd.DataFrame(columns=["fin_year", "fy_month_idx", "vcn_no", "quantity_000t", "overseas_coastal_norm"])
+        mv_df_vessels = pd.DataFrame(columns=[
+            "fin_year", "fy_month_idx", "vcn_no", "alongside_dt", "departure_dt",
+            "is_container", "overseas_coastal_norm", "turnround_days",
+        ])
+    else:
+        df = pd.DataFrame(rows)
+ 
+        required = ("fin_year", "month", "vcn_no", "vessel_name", "alongside",
+                    "cast_off", "sail_cast_off", "category", "overseas_coastal", "quantity")
+        missing_cols = [c for c in required if c not in df.columns]
+        if missing_cols:
+            raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
+ 
+        df["fin_year"] = df["fin_year"].str.strip()
+        df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+        df["quantity_000t"] = df["quantity"] / 1000.0
+        df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
+        df["overseas_coastal_norm"] = df["overseas_coastal"].apply(_norm_overseas_coastal)
+        df["is_container"] = df["category"].apply(_is_container)
+ 
+        mv_df_rows = df[[
+            "fin_year", "fy_month_idx", "vcn_no", "quantity_000t", "overseas_coastal_norm"
+        ]].copy()
+ 
+        df["alongside_dt"] = df["alongside"].apply(_parse_dt)
+        df["cast_off_dt"] = df["cast_off"].apply(_parse_dt)
+        df["sail_cast_off_dt"] = df["sail_cast_off"].apply(_parse_dt)
+        df["departure_dt"] = df["cast_off_dt"].combine_first(df["sail_cast_off_dt"])
+ 
+        mv_df_vessels = df.groupby(["fin_year", "fy_month_idx", "vcn_no"], as_index=False).agg(
+            alongside_dt=("alongside_dt", "min"),
+            departure_dt=("departure_dt", "max"),
+            is_container=("is_container", "any"),
+            overseas_coastal_norm=("overseas_coastal_norm", "first"),
+        )
+ 
+        def _turnround_days(r):
+            if r["alongside_dt"] is None or r["departure_dt"] is None:
+                return None
+            delta = r["departure_dt"] - r["alongside_dt"]
+            days = delta.total_seconds() / 86400.0
+            return days if days >= 0 else None
+ 
+        mv_df_vessels["turnround_days"] = mv_df_vessels.apply(_turnround_days, axis=1)
+ 
+    # ---- which (fin_year, fy_month_idx) periods does mis_vessel_master
+    # actually cover? Only periods with ZERO rows there fall back. ----
+    covered_periods = set(zip(mv_df_rows["fin_year"], mv_df_rows["fy_month_idx"])) | \
+                      set(zip(mv_df_vessels["fin_year"], mv_df_vessels["fy_month_idx"]))
+ 
+    live_df_rows, live_df_vessels = _load_live_pipeline_data()
+ 
+    if not live_df_rows.empty:
+        live_df_rows = live_df_rows[
+            ~live_df_rows.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+        ]
+    if not live_df_vessels.empty:
+        live_df_vessels = live_df_vessels[
+            ~live_df_vessels.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+        ]
+ 
+    df_rows = pd.concat([mv_df_rows, live_df_rows], ignore_index=True)
+    df_vessels = pd.concat([mv_df_vessels, live_df_vessels], ignore_index=True)
+ 
+    if df_rows.empty and df_vessels.empty:
+        raise ReportDataError(
+            "No usable rows found in mis_vessel_master or the live LUEU01 pipeline."
+        )
+ 
+    return df_rows, df_vessels
 
 def _avg(series):
     s = series.dropna()
@@ -311,7 +467,7 @@ def _get_df_and_years():
 
 @bp.route("/module/RP01/report8/")
 @login_required
-def report3_index():
+def report8_index():  
     return render_template("report_08/report8.html")
 
 

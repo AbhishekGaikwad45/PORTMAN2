@@ -5,10 +5,27 @@ Flask Blueprint version. Reads directly from mis_vessel_master (Postgres).
 Mirrors the structure of report1.py so it can be dropped into the same
 module pattern (e.g. modules/RP09/report9/routes.py) and registered the
 same way report1 is.
+
+DATA-SOURCE / FALLBACK NOTES (mirrors report3/report8's pattern):
+- Primary source is mis_vessel_master, exactly as before.
+- For any (fin_year, fy_month_idx) period that has ZERO rows in
+  mis_vessel_master, figures for that period only are pulled instead from
+  the live LUEU01 pipeline (vcn_header / ldud_header / ldud_parcel_ops /
+  lueu_parcel_log). mis_vessel_master always wins for periods where it has
+  data; the live pipeline is purely a gap-filler for periods it hasn't
+  reached yet.
+- In the live pipeline, berth_no and import_export are NOT on
+  mis_vessel_master's schema — they live on vcn_header as
+  vcn_header.berth_name and vcn_header.operation_type respectively.
+  Everything else (quantity, entry_date for period bucketing) comes from
+  lueu_parcel_log, joined down through ldud_parcel_ops / ldud_header to
+  vcn_header, the same join path used in report3's
+  _load_live_pipeline_data().
 """
 
 import io
 import datetime
+from datetime import date
 import traceback
 from functools import wraps
 
@@ -38,15 +55,18 @@ def login_required(f):
 
 
 MONTH_NAMES = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+CAL_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 # ---------------------------------------------------------------------------
 # Berth layout (order matches the sample sheet: individual berths, then the
 # subtotal / grouping rows that roll them up).
 #
-# NOTE: this assumes mis_vessel_master.berth_no holds values exactly like
-# "LB-01", "LB-01[N]", "LB-01[S]", "LB-02", "LB-03", "LB-04",
-# "INN ANCHORAGE". If the actual stored text differs (spacing, casing,
-# abbreviation), tell me the real values and I'll adjust BERTH_ROWS below.
+# NOTE: this assumes mis_vessel_master.berth_no (and, for the live-pipeline
+# fallback, vcn_header.berth_name) holds values exactly like "LB-01",
+# "LB-01[N]", "LB-01[S]", "LB-02", "LB-03", "LB-04", "INN ANCHORAGE". If the
+# actual stored text differs (spacing, casing, abbreviation), tell me the
+# real values and I'll adjust BERTH_ROWS below.
 # ---------------------------------------------------------------------------
 BERTH_ROWS = [
     {"key": "LB-01",            "type": "berth"},
@@ -75,6 +95,39 @@ def fy_start_year(fin_year: str) -> int:
     return int(fin_year.split("-")[0])
 
 
+def _dt_to_fy_month(dt):
+    """A real datetime/date -> (fin_year, fy_month_idx), Apr-Mar FY convention.
+    e.g. 2026-07-12 -> ('2026-27', 3)."""
+    d = dt.date() if isinstance(dt, datetime.datetime) else dt
+    fy_start = d.year if d.month >= 4 else d.year - 1
+    fin_year = f"{fy_start}-{str(fy_start + 1)[-2:]}"
+    mn = CAL_MONTH_ABBR[d.month - 1]
+    return fin_year, MONTH_NAMES.index(mn)
+
+
+def _parse_dt(v):
+    """Parse the live pipeline's entry_date / free-text datetime values.
+    Returns None if blank/unparseable."""
+    if not v:
+        return None
+    if isinstance(v, (datetime.datetime, date)):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return datetime.datetime.strptime(s.replace("T", " ")[:16], "%Y-%m-%d %H:%M")
+    except ValueError:
+        try:
+            return datetime.datetime.strptime(s[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+
+
+def _norm_import_export(v: str) -> str:
+    return (v or "").strip().lower()
+
+
 def month_options_for(fin_year: str):
     start_y = fy_start_year(fin_year)
     opts = []
@@ -96,7 +149,65 @@ def month_str_to_idx(month_str: str) -> int:
         )
 
 
+# ── ADD: fallback source -- live LUEU01 logging pipeline. Returns the same
+# shape as the mis_vessel_master loader (fin_year, fy_month_idx, berth_no,
+# vcn_no, import_export, quantity) so it can be concatenated directly. Only
+# used for (fin_year, fy_month_idx) periods that have ZERO rows in
+# mis_vessel_master -- see load_data() below. berth_no/import_export come
+# from vcn_header.berth_name / vcn_header.operation_type. ──
+def _load_live_pipeline_data() -> pd.DataFrame:
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+        cur.execute("""
+            SELECT l.entry_date, h.id AS vcn_id, h.berth_name, h.operation_type, l.quantity
+            FROM lueu_parcel_log l
+            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
+            JOIN ldud_header ld ON ld.id = po.ldud_id
+            JOIN vcn_header h ON h.id = ld.vcn_id
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.entry_date IS NOT NULL
+              AND l.quantity IS NOT NULL
+        """)
+        log_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    empty = pd.DataFrame(columns=["fin_year", "fy_month_idx", "berth_no", "vcn_no", "import_export", "quantity"])
+    if not log_rows:
+        return empty
+
+    ldf = pd.DataFrame(log_rows)
+    ldf["quantity"] = pd.to_numeric(ldf["quantity"], errors="coerce").fillna(0.0)
+    ldf["berth_no"] = ldf["berth_name"].astype(str).str.strip()
+    ldf["import_export"] = ldf["operation_type"].apply(_norm_import_export)
+    ldf["vcn_no"] = ldf["vcn_id"].astype(str)
+
+    ldf["entry_dt"] = ldf["entry_date"].apply(_parse_dt)
+    ldf = ldf.dropna(subset=["entry_dt"])
+    if ldf.empty:
+        return empty
+
+    fy_list, idx_list = [], []
+    for dt in ldf["entry_dt"]:
+        fy, idx = _dt_to_fy_month(dt)
+        fy_list.append(fy)
+        idx_list.append(idx)
+    ldf["fin_year"] = fy_list
+    ldf["fy_month_idx"] = idx_list
+
+    return ldf[["fin_year", "fy_month_idx", "berth_no", "vcn_no", "import_export", "quantity"]].copy()
+
+
 def load_data() -> pd.DataFrame:
+    """Returns df with columns [fin_year, fy_month_idx, berth_no, vcn_no,
+    import_export, quantity].
+    Primary source: mis_vessel_master, exactly as before.
+    Fallback: for any (fin_year, fy_month_idx) period with ZERO rows in
+    mis_vessel_master, figures are pulled instead from the live LUEU01
+    pipeline for that period only. mis_vessel_master always wins for
+    periods where it has data.
+    """
     conn = get_db()
     try:
         cur = get_cursor(conn)
@@ -111,30 +222,48 @@ def load_data() -> pd.DataFrame:
         conn.close()
 
     if not rows:
-        raise ReportDataError("No rows found in mis_vessel_master.")
+        mv_df = pd.DataFrame(columns=["fin_year", "fy_month_idx", "berth_no", "vcn_no", "import_export", "quantity"])
+    else:
+        df = pd.DataFrame(rows)
 
-    df = pd.DataFrame(rows)
+        missing_cols = [c for c in ("fin_year", "month", "berth_no", "vcn_no", "import_export", "quantity")
+                         if c not in df.columns]
+        if missing_cols:
+            raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
 
-    missing_cols = [c for c in ("fin_year", "month", "berth_no", "vcn_no", "import_export", "quantity")
-                     if c not in df.columns]
-    if missing_cols:
-        raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
+        df["fin_year"] = df["fin_year"].astype(str).str.strip()
+        df["berth_no"] = df["berth_no"].astype(str).str.strip()
+        df["vcn_no"] = df["vcn_no"].astype(str).str.strip()
+        df["import_export"] = df["import_export"].astype(str).str.strip().str.lower()
+        df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+        df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
 
-    df["fin_year"] = df["fin_year"].astype(str).str.strip()
-    df["berth_no"] = df["berth_no"].astype(str).str.strip()
-    df["vcn_no"] = df["vcn_no"].astype(str).str.strip()
-    df["import_export"] = df["import_export"].astype(str).str.strip().str.lower()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+        mv_df = df[["fin_year", "fy_month_idx", "berth_no", "vcn_no", "import_export", "quantity"]].copy()
 
-    df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
+    # ---- which (fin_year, fy_month_idx) periods does mis_vessel_master
+    # actually cover? Only periods with ZERO rows there fall back. ----
+    covered_periods = set(zip(mv_df["fin_year"], mv_df["fy_month_idx"]))
 
-    unmapped = sorted(set(df["berth_no"].unique().tolist()) - set(ALL_BERTH_NAMES))
+    live_df = _load_live_pipeline_data()
+    if not live_df.empty:
+        live_df = live_df[
+            ~live_df.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+        ]
+
+    df_all = pd.concat([mv_df, live_df], ignore_index=True)
+
+    if df_all.empty:
+        raise ReportDataError(
+            "No usable rows found in mis_vessel_master or the live LUEU01 pipeline."
+        )
+
+    unmapped = sorted(set(df_all["berth_no"].unique().tolist()) - set(ALL_BERTH_NAMES))
     if unmapped:
         # Not fatal — just means some berths in the DB aren't part of this
         # report's layout (e.g. other terminals). We simply ignore them.
-        print("REPORT2: berth_no values not in BERTH_ROWS layout (ignored):", unmapped)
+        print("REPORT9: berth_no values not in BERTH_ROWS layout (ignored):", unmapped)
 
-    return df[["fin_year", "fy_month_idx", "berth_no", "vcn_no", "import_export", "quantity"]]
+    return df_all
 
 
 def _get_df_and_years():

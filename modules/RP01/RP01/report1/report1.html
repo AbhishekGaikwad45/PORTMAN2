@@ -313,12 +313,23 @@ function formatTotal(val) {
 
 function populateYearSelect() {
     const yearSelect = document.getElementById("yearSelect");
+
     yearSelect.innerHTML = META.years
         .map(y => `<option value="${y}">${y}</option>`)
         .join("");
 
-    // default to the latest year
-    if (META.years.length) {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1;
+
+    const currentFY =
+        month >= 4
+            ? `${year}-${String(year + 1).slice(-2)}`
+            : `${year - 1}-${String(year).slice(-2)}`;
+
+    if (META.years.includes(currentFY)) {
+        yearSelect.value = currentFY;
+    } else if (META.years.length) {
         yearSelect.value = META.years[META.years.length - 1];
     }
 }
@@ -332,8 +343,23 @@ function populateMonthSelect() {
         .map(m => `<option value="${m.idx}">${m.label}</option>`)
         .join("");
 
-    // default to the latest available month for that year
-    if (months.length) {
+    const today = new Date();
+
+    const monthNames = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+
+    // Example: "Jul-26"
+    const currentLabel =
+        `${monthNames[today.getMonth()]}-${String(today.getFullYear()).slice(-2)}`;
+
+    const currentMonth = months.find(m => m.label === currentLabel);
+
+    if (currentMonth) {
+        monthSelect.value = currentMonth.idx;
+    } else if (months.length) {
+        // If current month is not available, select the latest available month
         monthSelect.value = months[months.length - 1].idx;
     }
 }
