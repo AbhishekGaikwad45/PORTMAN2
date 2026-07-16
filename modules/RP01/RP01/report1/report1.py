@@ -75,11 +75,72 @@ CATEGORY_MAP = {
 # labels. Add entries here as new cargo names show up in that pipeline —
 # anything not listed gets dropped (with a console warning) rather than
 # crashing the report.
-# LIVE_CARGO_TO_BUCKET = {
-#     "BASE OIL": "Other liquids",
-#     "FURNACE OIL": "POL (Crude, Products and LPG/LNG)",
-#     # add more as they appear in ldud_parcel_ops.cargo_name
-# }
+LIVE_CARGO_TO_BUCKET = {
+
+    # =========================
+    # POL (Crude, Products and LPG/LNG)
+    # =========================
+    "FURNACE OIL": "POL (Crude, Products and LPG/LNG)",
+    "CARBAN BLACK FEED STOCK": "POL (Crude, Products and LPG/LNG)",
+
+    # =========================
+    # Other liquids
+    # =========================
+    "(SQ100HS)": "Other liquids",
+    "ACETIC ACID": "Other liquids",
+    "ACETONE": "Other liquids",
+    "ARAMCO ALTRA 4 (SS100H)": "Other liquids",
+    "ARAMCO ALTRA 6 (SS150H)": "Other liquids",
+    "BASE OIL": "Other liquids",
+    "BASE OIL 4CST": "Other liquids",
+    "BASE OIL 6CST": "Other liquids",
+    "BASE OIL ARAMCO PRIMA 150": "Other liquids",
+    "BASE OIL ARAMCO PRIMA 500": "Other liquids",
+    "BASE OIL KIXX LUBO 150N": "Other liquids",
+    "BASE OIL KIXX LUBO 600N": "Other liquids",
+    "BUTYL ACETATE": "Other liquids",
+    "GLYCERINE": "Other liquids",
+    "GTL BASE OIL QHVI 4": "Other liquids",
+    "HVI 120": "Other liquids",
+    "HVI 650": "Other liquids",
+    "ISOPROPYL ALCOHOL": "Other liquids",
+    "LUBE OIL": "Other liquids",
+    "MDC": "Other liquids",
+    "METHANOL": "Other liquids",
+    "METHELENE CHOLORIDE": "Other liquids",
+    "METHYL ETHYL KETONE": "Other liquids",
+    "N BUTANOL": "Other liquids",
+    "N BUTYL ACETATE": "Other liquids",
+    "NBA": "Other liquids",
+    "NITRIC ACID": "Other liquids",
+    "OLEIC ACID": "Other liquids",
+    "PHENOL": "Other liquids",
+    "SHELL 150 N(DAESAN)": "Other liquids",
+    "SHELL 150N": "Other liquids",
+    "SHELL 500N": "Other liquids",
+    "STYRENE MONOMER": "Other liquids",
+    "TOULENE": "Other liquids",
+    "VINYL ACETATE MONOMER": "Other liquids",
+
+    # =========================
+    # Edible Oil (Report-1 groups these under Other liquids)
+    # =========================
+    "CRUDE DEGUMMED SOYABEAN OIL": "Other liquids",
+    "CRUDE PALM KERNEL OIL": "Other liquids",
+    "CRUDE PALM KERNEL OIL- EDIBLE GRADE": "Other liquids",
+    "CRUDE PALM OIL": "Other liquids",
+    "CRUDE PALM OIL - EDIBLE GRADE": "Other liquids",
+    "CRUDE PALM OIL - MB": "Other liquids",
+    "CRUDE SUNFLOWER SEED OIL": "Other liquids",
+    "RBD PALM OLEIN": "Other liquids",
+    "REFINED GLYCERINE": "Other liquids",
+    "SUNFLOWER OIL": "Other liquids",
+
+    # =========================
+    # Fertilizers - Raw Material (PH ACID)
+    # =========================
+    "PHOSPHORIC ACID": "Fertilizers -Raw Material (PH ACID)",
+}
 
 
 class ReportDataError(Exception):
@@ -131,40 +192,7 @@ def _entry_date_to_fy_month(d):
     mn = CAL_MONTH_ABBR[dt.month - 1]
     fy_month_idx = MONTH_NAMES.index(mn)
     return fin_year, fy_month_idx
-    
-     
-CATEGORY_LOOKUP = {
-    # ----------------------------------------------------
-    # POL (Crude, Products and LPG/LNG)
-    # ----------------------------------------------------
-    "POL": "POL (Crude, Products and LPG/LNG)",
-    "POL-BLACK": "POL (Crude, Products and LPG/LNG)",
 
-    # ----------------------------------------------------
-    # Other liquids
-    # ----------------------------------------------------
-    "OTHER LIQUID": "Other liquids",
-    "EDIBLE OIL": "Other liquids",
-
-    # ----------------------------------------------------
-    # Fertilizers -Raw Material (PH ACID)
-    # ----------------------------------------------------
-    "FERTILIZERS": "Fertilizers -Raw Material (PH ACID)",
-
-    # ----------------------------------------------------
-    # Remaining Report-1 Categories
-    # (currently no mapping in vessel_cargo)
-    # ----------------------------------------------------
-    "IRON ORE": "Iron ore incl.Iron ore pallets",
-    "THERMAL COAL": "Thermal and Steam Coal",
-    "STEAM COAL": "Thermal and Steam Coal",
-    "COOKING COAL": "Cooking coal and other coals",
-    "CONTAINER TONNAGE": "Containers- Tonnage",
-    "CONTAINER TEUS": "Containers- TEUs",
-    "MISC": "Other Misc. cargo",
-    "CEMENT": "A. Cement",
-    "BREAK BULK": "B. Break Bulk/General cargo",
-}
 
 def _classify_live_cargo(cargo_name):
     if not cargo_name:
@@ -175,9 +203,7 @@ def _classify_live_cargo(cargo_name):
         cur = get_cursor(conn)
 
         cur.execute("""
-            SELECT
-                cargo_category,
-                cargo_sub_category
+            SELECT cargo_category
             FROM vessel_cargo
             WHERE UPPER(TRIM(cargo_name)) = UPPER(TRIM(%s))
             LIMIT 1
@@ -186,21 +212,24 @@ def _classify_live_cargo(cargo_name):
         row = cur.fetchone()
 
         if not row:
-            print(f"WARNING: {cargo_name} not found in vessel_cargo")
             return None
 
-        category = (row["cargo_category"] or "").strip().upper()
-        sub_category = (row["cargo_sub_category"] or "").strip().upper()
+        category = str(row["cargo_category"]).strip().upper()
 
-        report_category = CATEGORY_LOOKUP.get(category)
+        CATEGORY_LOOKUP = {
+            "POL": "POL (Crude, Products and LPG/LNG)",
+            "POL-BLACK": "POL (Crude, Products and LPG/LNG)",
+            "OTHER LIQUID": "Other liquids",
+            "OTHER LIQUIDS": "Other liquids",
+            "EDIBLE OIL": "Other liquids",
+            "FERTILIZERS": "Fertilizers -Raw Material (PH ACID)",
+        }
 
-        if not report_category:
-            report_category = CATEGORY_LOOKUP.get(sub_category)
-
-        return report_category
+        return CATEGORY_LOOKUP.get(category)
 
     finally:
         conn.close()
+
 
 def _load_live_pipeline_data():
     """Fallback source: real-time LUEU01 logging pipeline
