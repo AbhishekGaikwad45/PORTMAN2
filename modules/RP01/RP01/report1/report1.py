@@ -194,47 +194,37 @@ def _entry_date_to_fy_month(d):
     return fin_year, fy_month_idx
 
 
-def _classify_live_cargo(cargo_name):
-    if not cargo_name:
-        return None
-
+def _load_cargo_category_map():
+    """Loads the full vessel_cargo -> bucket mapping ONE time,
+    instead of running a query per cargo_name (which was the slow part)."""
     conn = get_db()
     try:
         cur = get_cursor(conn)
-
-        cur.execute("""
-            SELECT cargo_category
-            FROM vessel_cargo
-            WHERE UPPER(TRIM(cargo_name)) = UPPER(TRIM(%s))
-            LIMIT 1
-        """, (cargo_name,))
-
-        row = cur.fetchone()
-
-        if not row:
-            return None
-
-        category = str(row["cargo_category"]).strip().upper()
-
-        CATEGORY_LOOKUP = {
-            "POL": "POL (Crude, Products and LPG/LNG)",
-            "POL-BLACK": "POL (Crude, Products and LPG/LNG)",
-            "OTHER LIQUID": "Other liquids",
-            "OTHER LIQUIDS": "Other liquids",
-            "EDIBLE OIL": "Other liquids",
-            "FERTILIZERS": "Fertilizers -Raw Material (PH ACID)",
-        }
-
-        return CATEGORY_LOOKUP.get(category)
-
+        cur.execute("SELECT cargo_name, cargo_category FROM vessel_cargo")
+        rows = cur.fetchall()
     finally:
         conn.close()
 
+    CATEGORY_LOOKUP = {
+        "POL": "POL (Crude, Products and LPG/LNG)",
+        "POL-BLACK": "POL (Crude, Products and LPG/LNG)",
+        "OTHER LIQUID": "Other liquids",
+        "OTHER LIQUIDS": "Other liquids",
+        "EDIBLE OIL": "Other liquids",
+        "FERTILIZERS": "Fertilizers -Raw Material (PH ACID)",
+    }
+
+    mapping = {}
+    for r in rows:
+        name = str(r["cargo_name"]).strip().upper()
+        cat = str(r["cargo_category"]).strip().upper()
+        mapping[name] = CATEGORY_LOOKUP.get(cat)
+    return mapping
 
 def _load_live_pipeline_data():
     """Fallback source: real-time LUEU01 logging pipeline
     (lueu_parcel_log -> ldud_parcel_ops). Only used to fill in months that
-    have ZERO rows in mis_vessel_master — see load_data() below."""
+    have ZERO rows in mis_vessel_master -- see load_data() below."""
     conn = get_db()
     try:
         cur = get_cursor(conn)
@@ -265,7 +255,18 @@ def _load_live_pipeline_data():
     df["fin_year"] = fy_list
     df["fy_month_idx"] = idx_list
 
-    df["cargo_sub_category"] = df["cargo_name"].apply(_classify_live_cargo)
+    cargo_map = _load_cargo_category_map()
+    cargo_upper = df["cargo_name"].astype(str).str.strip().str.upper()
+
+    # First try the exact vessel_cargo mapping
+    df["cargo_sub_category"] = cargo_upper.map(cargo_map)
+
+    # Fallback: if cargo_name contains "PH ACID" or "PHOSPHORIC ACID" anywhere,
+    # force it into the PH ACID fertilizer bucket even if it wasn't in vessel_cargo
+    # or vessel_cargo mapped it to something else / nothing.
+    ph_acid_mask = cargo_upper.str.contains("PH ACID", na=False) | \
+                   cargo_upper.str.contains("PHOSPHORIC ACID", na=False)
+    df.loc[ph_acid_mask, "cargo_sub_category"] = "Fertilizers -Raw Material (PH ACID)"
 
     unmapped = sorted(df.loc[df["cargo_sub_category"].isna(), "cargo_name"].dropna().unique().tolist())
     if unmapped:
