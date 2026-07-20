@@ -1,60 +1,192 @@
 {% extends "base.html" %}
-{% block title %}Report-1 - PORTMAN{% endblock %}
+{% block title %}Report-6 - PORTMAN{% endblock %}
+
+{% block head %}
+<style>
+
+    :root{
+        --rp-blue:#2F6FED;
+        --rp-blue-dark:#1D4FB8;
+        --rp-green:#16A34A;
+        --rp-green-dark:#0F7C38;
+        --rp-ink:#1F2937;
+        --rp-muted:#6B7280;
+        --rp-border:#DDE3EA;
+        --rp-bg:#F6F8FA;
+        --rp-card:#FFFFFF;
+        --rp-highlight:#FDF3D0;
+        --rp-highlight-blue:#E8F0FB;
+    }
+
+    .rp01-wrap *{ box-sizing:border-box; }
+    .rp01-wrap{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+
+    /* ---------- Module header ---------- */
+    .module-header{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        margin-bottom:20px;
+        padding-bottom:16px;
+        border-bottom:1px solid var(--rp-border);
+    }
+    .module-header h2{
+        margin:0;
+        font-size:22px;
+        font-weight:700;
+        color:var(--rp-ink);
+    }
+    .module-header .rp-badge{
+        background:var(--rp-blue);
+        color:#fff;
+        padding:4px 12px;
+        border-radius:20px;
+        font-size:12px;
+        font-weight:700;
+        letter-spacing:0.4px;
+    }
+    .module-header .rp-back{
+        margin-left:auto;
+        font-size:13px;
+        font-weight:500;
+        color:var(--rp-blue);
+        text-decoration:none;
+    }
+    .module-header .rp-back:hover{ text-decoration:underline; }
+
+    /* ---------- Toolbar ---------- */
+    .jjltpl-toolbar{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        flex-wrap:wrap;
+        background:var(--rp-card);
+        border:1px solid var(--rp-border);
+        border-radius:10px;
+        padding:14px 16px;
+        margin-bottom:14px;
+    }
+    .jjltpl-toolbar label{
+        font-size:12px;
+        font-weight:600;
+        color:var(--rp-muted);
+        text-transform:uppercase;
+        letter-spacing:0.4px;
+        margin-right:2px;
+    }
+    .jjltpl-toolbar select{
+        font-size:13px;
+        font-weight:500;
+        color:var(--rp-ink);
+        background:var(--rp-bg);
+        border:1px solid var(--rp-border);
+        border-radius:6px;
+        padding:7px 10px;
+        cursor:pointer;
+        outline:none;
+    }
+    .jjltpl-toolbar select:focus{ border-color:var(--rp-blue); }
+
+    .jjltpl-toolbar button{
+        font-size:13px;
+        font-weight:600;
+        border-radius:6px;
+        padding:8px 16px;
+        border:none;
+        cursor:pointer;
+        color:#fff;
+    }
+    .jjltpl-toolbar button:active{ transform:translateY(1px); }
+
+    .jjltpl-load-btn{ background:var(--rp-blue); }
+    .jjltpl-load-btn:hover{ background:var(--rp-blue-dark); }
+
+    .jjltpl-export-btn{
+        background:var(--rp-green);
+        margin-left:auto;
+    }
+    .jjltpl-export-btn:hover{ background:var(--rp-green-dark); }
+
+    #reportStatus{
+        font-size:13px;
+        color:var(--rp-muted);
+        min-height:18px;
+        margin-bottom:14px;
+    }
+
+    /* ---------- Report card ---------- */
+    .jjltpl-table-wrap{
+        background:var(--rp-card);
+        border:1px solid var(--rp-border);
+        border-radius:10px;
+        overflow:hidden;
+        padding:16px;
+        overflow-x:auto;
+    }
+
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="module-header">
-    <h2>Report-1</h2>
-    <span class="module-code">RP01</span>
-    <a href="/module/RP01/berth-plan/" style="float:right;font-size:13px;color:#3182ce;">&larr; Back to Reports</a>
-</div>
+<div class="rp01-wrap">
 
-<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-    <label style="font-size:12px;font-weight:600;color:#4a5568;">YEAR
-        <select id="yearSel" style="margin-left:6px;padding:5px 8px;border:1px solid #cbd5e0;border-radius:4px;"></select>
-    </label>
-    <label style="font-size:12px;font-weight:600;color:#4a5568;">MONTH
-        <select id="monthSel" style="margin-left:6px;padding:5px 8px;border:1px solid #cbd5e0;border-radius:4px;"></select>
-    </label>
-    <button class="btn" id="loadBtn" style="background:#3182ce;color:#fff;border:none;padding:6px 16px;border-radius:4px;" onclick="loadReport()">Load</button>
-    <button class="btn" style="background:#38a169;color:#fff;border:none;padding:6px 16px;border-radius:4px;margin-left:auto;" onclick="exportExcel()">Export to Excel</button>
-</div>
-
-<div id="reportContainer" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;overflow-x:auto;">
-    <div style="text-align:center;font-weight:700;font-size:15px;margin-bottom:4px;">OVERSEAS-COASTAL CARGO TRAFFIC HANDLED</div>
-    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px;">
-        <span><b>PORT :</b> JAWAHARLAL NEHRU PORT AUTHORITY</span>
-        <span id="metaLine"></span>
+    <div class="module-header">
+        <h2>Report-6</h2>
+        <span class="rp-badge">RP01</span>
+        <a href="/module/RP01/" class="rp-back">&larr; Back to Reports</a>
     </div>
-    <table id="reportTable" style="width:100%;border-collapse:collapse;font-size:12px;text-align:center;">
-        <thead>
-            <tr>
-                <th rowspan="3" style="border:1px solid #999;padding:6px;background:#f4f6fa;">COMMODITY</th>
-                <th colspan="4" style="border:1px solid #999;padding:4px;background:#ffff99;">OVERSEAS</th>
-                <th rowspan="3" style="border:1px solid #999;padding:4px;background:#d9d9d9;">OVERSEAS Total</th>
-                <th colspan="4" style="border:1px solid #999;padding:4px;background:#ffff99;">COASTAL</th>
-                <th rowspan="3" style="border:1px solid #999;padding:4px;background:#d9d9d9;">COASTAL Total</th>
-                <th rowspan="3" style="border:1px solid #999;padding:4px;background:#e6f0fa;">Grand Total</th>
-            </tr>
-            <tr>
-                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">IMPORT</th>
-                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">EXPORT</th>
-                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">IMPORT</th>
-                <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">EXPORT</th>
-            </tr>
-            <tr>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
-                <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
-            </tr>
-        </thead>
-        <tbody id="reportBody"></tbody>
-        <tfoot id="reportFoot"></tfoot>
-    </table>
+
+    <div class="jjltpl-toolbar">
+        <label for="yearSel">Year</label>
+        <select id="yearSel"></select>
+
+        <label for="monthSel">Month</label>
+        <select id="monthSel"></select>
+
+        <button class="jjltpl-load-btn" id="loadBtn" onclick="loadReport()">Load</button>
+        <button class="jjltpl-export-btn" onclick="exportExcel()">Export Excel</button>
+    </div>
+
+    <div id="reportStatus"></div>
+
+    <div id="reportContainer" class="jjltpl-table-wrap">
+        <div style="text-align:center;font-weight:700;font-size:15px;margin-bottom:4px;">OVERSEAS-COASTAL CARGO TRAFFIC HANDLED</div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px;">
+            <span><b>PORT :</b> JAWAHARLAL NEHRU PORT AUTHORITY</span>
+            <span id="metaLine"></span>
+        </div>
+        <table id="reportTable" style="width:100%;border-collapse:collapse;font-size:12px;text-align:center;">
+            <thead>
+                <tr>
+                    <th rowspan="3" style="border:1px solid #999;padding:6px;background:#f4f6fa;">COMMODITY</th>
+                    <th colspan="4" style="border:1px solid #999;padding:4px;background:#ffff99;">OVERSEAS</th>
+                    <th rowspan="3" style="border:1px solid #999;padding:4px;background:#d9d9d9;">OVERSEAS Total</th>
+                    <th colspan="4" style="border:1px solid #999;padding:4px;background:#ffff99;">COASTAL</th>
+                    <th rowspan="3" style="border:1px solid #999;padding:4px;background:#d9d9d9;">COASTAL Total</th>
+                    <th rowspan="3" style="border:1px solid #999;padding:4px;background:#e6f0fa;">Grand Total</th>
+                </tr>
+                <tr>
+                    <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">IMPORT</th>
+                    <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">EXPORT</th>
+                    <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">IMPORT</th>
+                    <th colspan="2" style="border:1px solid #999;padding:4px;background:#ffff99;">EXPORT</th>
+                </tr>
+                <tr>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">IF</th>
+                    <th style="border:1px solid #999;padding:4px;background:#ffff99;">FF</th>
+                </tr>
+            </thead>
+            <tbody id="reportBody"></tbody>
+            <tfoot id="reportFoot"></tfoot>
+        </table>
+    </div>
+
 </div>
 {% endblock %}
 
@@ -99,15 +231,32 @@
     // so after switching FY the select could keep showing (and submitting) a
     // month string left over from before. We now explicitly set it to the
     // first month of the newly selected FY every time the year changes.
-    function refreshMonths() {
-        const yearSel = document.getElementById('yearSel');
-        const monthSel = document.getElementById('monthSel');
-        const fyStart = parseInt(yearSel.value.split('-')[0], 10);
-        const months = monthOptionsForFY(fyStart);
-        monthSel.innerHTML = months.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
-        monthSel.selectedIndex = 0;
-        monthSel.value = months[0].value;   // e.g. '2027-04' for FY 2027-28
+function refreshMonths() {
+
+    const yearSel = document.getElementById("yearSel");
+    const monthSel = document.getElementById("monthSel");
+
+    const fyStart = parseInt(yearSel.value.split("-")[0]);
+
+    const months = monthOptionsForFY(fyStart);
+
+    monthSel.innerHTML = months
+        .map(m => `<option value="${m.value}">${m.label}</option>`)
+        .join("");
+
+    const today = new Date();
+
+    const currentMonth =
+        `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+
+    const exists = months.find(m => m.value === currentMonth);
+
+    if (exists) {
+        monthSel.value = exists.value;
+    } else {
+        monthSel.value = months[0].value;
     }
+}
 
     // FIX: guard against a click landing while values haven't settled, and
     // fail loudly instead of silently reusing whatever the API returns for a
@@ -115,11 +264,13 @@
     async function loadReport() {
         const year = document.getElementById('yearSel').value;
         const month = document.getElementById('monthSel').value;   // must be 'YYYY-MM'
+        const status = document.getElementById('reportStatus');
         if (!year || !month || month.split('-').length !== 2) {
-            alert('Please choose a valid Year and Month before loading.');
+            status.textContent = 'Please choose a valid Year and Month before loading.';
             return;
         }
 
+        status.textContent = 'Loading...';
         const loadBtn = document.getElementById('loadBtn');
         loadBtn.disabled = true;
         try {
@@ -127,60 +278,122 @@
             // a previously-fetched year/month combination
             const res = await fetch(`/api/module/RP01/report1/data?year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&_=${Date.now()}`);
             const data = await res.json();
-            if (data.error) { alert(data.error); return; }
+            if (data.error) { status.textContent = data.error; return; }
             // Defensive check: make sure the response actually matches what we asked for
             if (data.month !== month) {
                 console.warn(`Requested month ${month} but API returned ${data.month}`);
             }
+            status.textContent = '';
             renderReport(data);
+        } catch (err) {
+            status.textContent = 'Failed to load report.';
+            console.error(err);
         } finally {
             loadBtn.disabled = false;
         }
     }
 
-    function fmt(v) { return (v === null || v === undefined) ? '0.00' : Number(v).toFixed(2); }
+    function fmt(v) {
+    if (v === null || v === undefined) return "";
+    return Number(v).toFixed(2);
+}
+
+function cell(v) {
+    const hasValue = Number(v) > 0;
+
+    return `
+        <td style="
+            border:1px solid #ccc;
+            padding:5px;
+            ${hasValue ? "background:#FFF8C6;font-weight:600;" : ""}
+        ">
+            ${fmt(v)}
+        </td>
+    `;
+}
 
     function renderReport(data) {
-        const monthLabel = document.getElementById('monthSel').selectedOptions[0]?.textContent || data.month;
-        document.getElementById('metaLine').innerHTML =
-            `<b>Year :</b> ${data.year} &nbsp;&nbsp; <b>Month:</b> <span style="background:#ffff99;padding:2px 8px;">${monthLabel}</span> &nbsp;&nbsp; (000' Tonnes)`;
 
-        const body = document.getElementById('reportBody');
-        body.innerHTML = data.rows.map(r => `
-            <tr>
-                <td style="border:1px solid #ccc;padding:5px;text-align:left;font-weight:600;">${r.commodity}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_imp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_imp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_exp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.ov_exp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;background:#f4f4f4;font-weight:600;">${fmt(r.ov_total)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_imp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_imp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_exp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(r.co_exp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;background:#f4f4f4;font-weight:600;">${fmt(r.co_total)}</td>
-                <td style="border:1px solid #ccc;padding:5px;font-weight:700;">${fmt(r.grand_total)}</td>
-            </tr>
-        `).join('');
+    const monthLabel =
+        document.getElementById("monthSel").selectedOptions[0]?.textContent || data.month;
 
-        const t = data.totals;
-        document.getElementById('reportFoot').innerHTML = `
-            <tr style="background:#e6f0fa;font-weight:700;">
-                <td style="border:1px solid #ccc;padding:5px;text-align:left;">Grand Total</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_imp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_imp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_exp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_exp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.ov_total)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_imp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_imp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_exp_if)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_exp_ff)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.co_total)}</td>
-                <td style="border:1px solid #ccc;padding:5px;">${fmt(t.grand_total)}</td>
-            </tr>
-        `;
-    }
+    document.getElementById("metaLine").innerHTML =
+        `<b>Year :</b> ${data.year}
+        &nbsp;&nbsp;
+        <b>Month :</b>
+        <span style="background:#FFF59D;padding:2px 8px;border-radius:4px;">
+            ${monthLabel}
+        </span>
+        &nbsp;&nbsp;(000' Tonnes)`;
+
+    const body = document.getElementById("reportBody");
+
+    body.innerHTML = data.rows.map(r => `
+        <tr>
+
+            <td style="border:1px solid #ccc;padding:5px;text-align:left;font-weight:600;">
+                ${r.commodity}
+            </td>
+
+            ${cell(r.ov_imp_if)}
+            ${cell(r.ov_imp_ff)}
+            ${cell(r.ov_exp_if)}
+            ${cell(r.ov_exp_ff)}
+
+            <td style="border:1px solid #ccc;padding:5px;background:#ECECEC;font-weight:700;">
+                ${fmt(r.ov_total)}
+            </td>
+
+            ${cell(r.co_imp_if)}
+            ${cell(r.co_imp_ff)}
+            ${cell(r.co_exp_if)}
+            ${cell(r.co_exp_ff)}
+
+            <td style="border:1px solid #ccc;padding:5px;background:#ECECEC;font-weight:700;">
+                ${fmt(r.co_total)}
+            </td>
+
+            <td style="border:1px solid #ccc;padding:5px;background:#E8F0FB;font-weight:700;">
+                ${fmt(r.grand_total)}
+            </td>
+
+        </tr>
+    `).join("");
+
+    const t = data.totals;
+
+    document.getElementById("reportFoot").innerHTML = `
+        <tr style="background:#E8F0FB;font-weight:700;">
+
+            <td style="border:1px solid #ccc;padding:5px;text-align:left;">
+                Grand Total
+            </td>
+
+            ${cell(t.ov_imp_if)}
+            ${cell(t.ov_imp_ff)}
+            ${cell(t.ov_exp_if)}
+            ${cell(t.ov_exp_ff)}
+
+            <td style="border:1px solid #ccc;padding:5px;background:#ECECEC;">
+                ${fmt(t.ov_total)}
+            </td>
+
+            ${cell(t.co_imp_if)}
+            ${cell(t.co_imp_ff)}
+            ${cell(t.co_exp_if)}
+            ${cell(t.co_exp_ff)}
+
+            <td style="border:1px solid #ccc;padding:5px;background:#ECECEC;">
+                ${fmt(t.co_total)}
+            </td>
+
+            <td style="border:1px solid #ccc;padding:5px;background:#DCEBFF;">
+                ${fmt(t.grand_total)}
+            </td>
+
+        </tr>
+    `;
+}
 
     function exportExcel() {
         const year = document.getElementById('yearSel').value;

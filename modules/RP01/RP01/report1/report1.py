@@ -1,11 +1,20 @@
 """
 Report-1 — Principal Commodity Report
-Flask Blueprint version. Reads directly from mis_vessel_master (Postgres).
+Flask Blueprint version.
+
+Primary source: mis_vessel_master (Postgres).
+Fallback source: for any (fin_year, month) that has ZERO rows in
+mis_vessel_master, figures are pulled instead from the live LUEU01
+logging pipeline (lueu_parcel_log -> ldud_parcel_ops) so the current
+month can show real data even before that month's mis_vessel_master
+upload has been done. mis_vessel_master always wins for any period
+where it actually has rows.
 """
 
 import io
 import traceback
 from functools import wraps
+from datetime import datetime, date
 
 import pandas as pd
 
@@ -29,6 +38,8 @@ def login_required(f):
 
 
 MONTH_NAMES = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+CAL_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 CATEGORY_ORDER = [
     {"key": "POL (Crude, Products and LPG/LNG)", "sub": False},
@@ -57,6 +68,78 @@ CATEGORY_MAP = {
     "Edible Oil": "Other liquids",
     "Chemical": "Other liquids",
     "Ph.Acid": "Fertilizers -Raw Material (PH ACID)",
+}
+
+# Maps free-text ldud_parcel_ops.cargo_name (from the live LUEU01 logging
+# pipeline, used as a fallback source) straight to Report-1's bucket
+# labels. Add entries here as new cargo names show up in that pipeline —
+# anything not listed gets dropped (with a console warning) rather than
+# crashing the report.
+LIVE_CARGO_TO_BUCKET = {
+
+    # =========================
+    # POL (Crude, Products and LPG/LNG)
+    # =========================
+    "FURNACE OIL": "POL (Crude, Products and LPG/LNG)",
+    "CARBAN BLACK FEED STOCK": "POL (Crude, Products and LPG/LNG)",
+
+    # =========================
+    # Other liquids
+    # =========================
+    "(SQ100HS)": "Other liquids",
+    "ACETIC ACID": "Other liquids",
+    "ACETONE": "Other liquids",
+    "ARAMCO ALTRA 4 (SS100H)": "Other liquids",
+    "ARAMCO ALTRA 6 (SS150H)": "Other liquids",
+    "BASE OIL": "Other liquids",
+    "BASE OIL 4CST": "Other liquids",
+    "BASE OIL 6CST": "Other liquids",
+    "BASE OIL ARAMCO PRIMA 150": "Other liquids",
+    "BASE OIL ARAMCO PRIMA 500": "Other liquids",
+    "BASE OIL KIXX LUBO 150N": "Other liquids",
+    "BASE OIL KIXX LUBO 600N": "Other liquids",
+    "BUTYL ACETATE": "Other liquids",
+    "GLYCERINE": "Other liquids",
+    "GTL BASE OIL QHVI 4": "Other liquids",
+    "HVI 120": "Other liquids",
+    "HVI 650": "Other liquids",
+    "ISOPROPYL ALCOHOL": "Other liquids",
+    "LUBE OIL": "Other liquids",
+    "MDC": "Other liquids",
+    "METHANOL": "Other liquids",
+    "METHELENE CHOLORIDE": "Other liquids",
+    "METHYL ETHYL KETONE": "Other liquids",
+    "N BUTANOL": "Other liquids",
+    "N BUTYL ACETATE": "Other liquids",
+    "NBA": "Other liquids",
+    "NITRIC ACID": "Other liquids",
+    "OLEIC ACID": "Other liquids",
+    "PHENOL": "Other liquids",
+    "SHELL 150 N(DAESAN)": "Other liquids",
+    "SHELL 150N": "Other liquids",
+    "SHELL 500N": "Other liquids",
+    "STYRENE MONOMER": "Other liquids",
+    "TOULENE": "Other liquids",
+    "VINYL ACETATE MONOMER": "Other liquids",
+
+    # =========================
+    # Edible Oil (Report-1 groups these under Other liquids)
+    # =========================
+    "CRUDE DEGUMMED SOYABEAN OIL": "Other liquids",
+    "CRUDE PALM KERNEL OIL": "Other liquids",
+    "CRUDE PALM KERNEL OIL- EDIBLE GRADE": "Other liquids",
+    "CRUDE PALM OIL": "Other liquids",
+    "CRUDE PALM OIL - EDIBLE GRADE": "Other liquids",
+    "CRUDE PALM OIL - MB": "Other liquids",
+    "CRUDE SUNFLOWER SEED OIL": "Other liquids",
+    "RBD PALM OLEIN": "Other liquids",
+    "REFINED GLYCERINE": "Other liquids",
+    "SUNFLOWER OIL": "Other liquids",
+
+    # =========================
+    # Fertilizers - Raw Material (PH ACID)
+    # =========================
+    "PHOSPHORIC ACID": "Fertilizers -Raw Material (PH ACID)",
 }
 
 
@@ -91,7 +174,121 @@ def month_str_to_idx(month_str: str) -> int:
         )
 
 
+def _entry_date_to_fy_month(d):
+    """Real calendar date (from lueu_parcel_log.entry_date) -> (fin_year,
+    fy_month_idx), using the same Apr-Mar FY convention as the rest of the
+    report. e.g. 2026-07-12 -> ('2026-27', 3)."""
+    if isinstance(d, date):
+        dt = d
+    else:
+        dt = datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+
+    if dt.month >= 4:
+        fy_start = dt.year
+    else:
+        fy_start = dt.year - 1
+    fin_year = f"{fy_start}-{str(fy_start + 1)[-2:]}"
+
+    mn = CAL_MONTH_ABBR[dt.month - 1]
+    fy_month_idx = MONTH_NAMES.index(mn)
+    return fin_year, fy_month_idx
+
+
+def _load_cargo_category_map():
+    """Loads the full vessel_cargo -> bucket mapping ONE time,
+    instead of running a query per cargo_name (which was the slow part)."""
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+        cur.execute("SELECT cargo_name, cargo_category FROM vessel_cargo")
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    CATEGORY_LOOKUP = {
+        "POL": "POL (Crude, Products and LPG/LNG)",
+        "POL-BLACK": "POL (Crude, Products and LPG/LNG)",
+        "OTHER LIQUID": "Other liquids",
+        "OTHER LIQUIDS": "Other liquids",
+        "EDIBLE OIL": "Other liquids",
+        "FERTILIZERS": "Fertilizers -Raw Material (PH ACID)",
+    }
+
+    mapping = {}
+    for r in rows:
+        name = str(r["cargo_name"]).strip().upper()
+        cat = str(r["cargo_category"]).strip().upper()
+        mapping[name] = CATEGORY_LOOKUP.get(cat)
+    return mapping
+
+def _load_live_pipeline_data():
+    """Fallback source: real-time LUEU01 logging pipeline
+    (lueu_parcel_log -> ldud_parcel_ops). Only used to fill in months that
+    have ZERO rows in mis_vessel_master -- see load_data() below."""
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+        cur.execute("""
+            SELECT l.entry_date, po.cargo_name, l.quantity
+            FROM lueu_parcel_log l
+            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.entry_date IS NOT NULL
+              AND l.quantity IS NOT NULL
+        """)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    empty = pd.DataFrame(columns=["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"])
+    if not rows:
+        return empty
+
+    df = pd.DataFrame(rows)
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+
+    fy_list, idx_list = [], []
+    for d in df["entry_date"]:
+        fy, idx = _entry_date_to_fy_month(d)
+        fy_list.append(fy)
+        idx_list.append(idx)
+    df["fin_year"] = fy_list
+    df["fy_month_idx"] = idx_list
+
+    cargo_map = _load_cargo_category_map()
+    cargo_upper = df["cargo_name"].astype(str).str.strip().str.upper()
+
+    # First try the exact vessel_cargo mapping
+    df["cargo_sub_category"] = cargo_upper.map(cargo_map)
+
+    # Fallback: if cargo_name contains "PH ACID" or "PHOSPHORIC ACID" anywhere,
+    # force it into the PH ACID fertilizer bucket even if it wasn't in vessel_cargo
+    # or vessel_cargo mapped it to something else / nothing.
+    ph_acid_mask = cargo_upper.str.contains("PH ACID", na=False) | \
+                   cargo_upper.str.contains("PHOSPHORIC ACID", na=False)
+    df.loc[ph_acid_mask, "cargo_sub_category"] = "Fertilizers -Raw Material (PH ACID)"
+
+    unmapped = sorted(df.loc[df["cargo_sub_category"].isna(), "cargo_name"].dropna().unique().tolist())
+    if unmapped:
+        print("REPORT1 WARNING: live-pipeline cargo_name values with no bucket mapping, dropped:", unmapped)
+
+    df = df.dropna(subset=["cargo_sub_category"])
+    if df.empty:
+        return empty
+
+    df["quantity_000t"] = df["quantity"] / 1000.0
+
+    return (
+        df.groupby(["fin_year", "fy_month_idx", "cargo_sub_category"], as_index=False)["quantity_000t"]
+        .sum()
+    )
+
+
 def load_data() -> pd.DataFrame:
+    """Primary source: mis_vessel_master. For any (fin_year, month) that has
+    NO rows at all in mis_vessel_master, fall back to the live LUEU01
+    logging pipeline for that period only -- mis_vessel_master always wins
+    where it has data."""
     conn = get_db()
     try:
         cur = get_cursor(conn)
@@ -106,36 +303,54 @@ def load_data() -> pd.DataFrame:
         conn.close()
 
     if not rows:
-        raise ReportDataError("No rows found in mis_vessel_master.")
+        mv_df = pd.DataFrame(columns=["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"])
+    else:
+        mv_df = pd.DataFrame(rows)
 
-    df = pd.DataFrame(rows)
+        missing_cols = [c for c in ("fin_year", "month", "category", "quantity") if c not in mv_df.columns]
+        if missing_cols:
+            raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
 
-    missing_cols = [c for c in ("fin_year", "month", "category", "quantity") if c not in df.columns]
-    if missing_cols:
-        raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
+        mv_df["fin_year"] = mv_df["fin_year"].str.strip()
+        mv_df["category"] = mv_df["category"].astype(str).str.strip()
+        mv_df["quantity"] = pd.to_numeric(mv_df["quantity"], errors="coerce").fillna(0.0)
+        mv_df["fy_month_idx"] = mv_df["month"].apply(month_str_to_idx)
+        mv_df["cargo_sub_category"] = mv_df["category"].map(CATEGORY_MAP)
 
-    df["fin_year"] = df["fin_year"].str.strip()
-    df["category"] = df["category"].astype(str).str.strip()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+        unmapped = sorted(mv_df.loc[mv_df["cargo_sub_category"].isna(), "category"].unique().tolist())
+        if unmapped:
+            print("REPORT1 WARNING: unmapped mis_vessel_master category values dropped:", unmapped)
 
-    df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
+        mv_df = mv_df.dropna(subset=["cargo_sub_category"])
+        mv_df["quantity_000t"] = mv_df["quantity"] / 1000.0
+        mv_df = mv_df[["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"]]
 
-    df["cargo_sub_category"] = df["category"].map(CATEGORY_MAP)
+    # ---- which (fin_year, month) periods does mis_vessel_master actually
+    # cover? Only periods with ZERO rows there fall back to the live pipeline. ----
+    covered_periods = set(zip(mv_df["fin_year"], mv_df["fy_month_idx"]))
 
-    unmapped = sorted(df.loc[df["cargo_sub_category"].isna(), "category"].unique().tolist())
+    live_df = _load_live_pipeline_data()
+    if not live_df.empty:
+        live_df = live_df[
+            ~live_df.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+        ]
 
-    df = df.dropna(subset=["cargo_sub_category"])
+    combined = pd.concat([mv_df, live_df], ignore_index=True)
 
-    if df.empty:
+    if combined.empty:
         raise ReportDataError(
-            "None of the rows matched a known category. "
-            f"Unmapped category values found: {', '.join(unmapped) if unmapped else '(none)'}. "
-            f"Known categories are: {', '.join(CATEGORY_MAP.keys())}"
+            "No usable rows found in mis_vessel_master or the live LUEU01 pipeline."
         )
 
-    df["quantity_000t"] = df["quantity"] / 1000.0
+    # re-aggregate in case both sources ever contributed to the same
+    # (fin_year, fy_month_idx, bucket) -- shouldn't happen given the period
+    # filter above, but keeps totals correct if it ever does
+    combined = (
+        combined.groupby(["fin_year", "fy_month_idx", "cargo_sub_category"], as_index=False)["quantity_000t"]
+        .sum()
+    )
 
-    return df[["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"]]
+    return combined
 
 
 def _get_df_and_years():

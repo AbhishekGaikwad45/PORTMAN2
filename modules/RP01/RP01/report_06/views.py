@@ -1,10 +1,47 @@
 """
 RP01 Report-1 — Overseas/Coastal Cargo Traffic Handled (monthly, by commodity)
 
-DATA SOURCE — CONFIRMED FROM LIVE SCHEMA INSPECTION (see mis_vessel_master):
-  mis_vessel_master is a separately-maintained MIS summary table, one row
-  per vessel call, already carrying every field this report needs:
+DATA SOURCES:
+  1) mis_vessel_master — reconciled monthly MIS table (unchanged, see below).
+     Used for any month that has already been reconciled/uploaded.
 
+  2) LIVE FALLBACK (NEW) — when the requested month has zero rows in
+     mis_vessel_master (typically the current, not-yet-reconciled month),
+     we build the same shape of data live from the operational chain:
+
+         vcn_header (1)
+           -> ldud_header      (via ldud_header.vcn_id = vcn_header.id)
+             -> ldud_parcel_ops  (via ldud_parcel_ops.ldud_id = ldud_header.id)
+               -> lueu_parcel_log  (via lueu_parcel_log.parcel_op_id = ldud_parcel_ops.id)
+
+     Field mapping confirmed against live schema (2026-07):
+       overseas_coastal -> vcn_header.vessel_run_type
+                            'Foreign' -> 'Overseas', 'Costal' -> 'Costal'
+       import_export     -> vcn_header.operation_type ('Import' / 'Export')
+       category           -> vessel_cargo.cargo_category, matched against
+                              vcn_header.cargo_type. Match is NOT always exact
+                              (e.g. cargo_type 'BASE OIL' has no exact row in
+                              vessel_cargo, and some cargo_type values contain
+                              multiple cargoes comma-separated, e.g.
+                              'FO [E], FURNACE OIL'). We therefore try an exact
+                              match first, then a fuzzy LIKE match, and log
+                              anything still unresolved into '_debug.unmapped_categories'
+                              same as the reconciled path -> falls to OTHER BULK.
+       quantity            -> SUM(lueu_parcel_log.quantity), raw MT
+
+     KNOWN GAP — foreign_indian (IF/FF split):
+       No table in the live operational schema captures vessel flag
+       (Indian-registered vs foreign-registered). This is confirmed absent
+       from vcn_header, ldud_header, ldud_parcel_ops, lueu_parcel_log,
+       vcn_consigners, and vessel_cargo as of 2026-07-15.
+       Until this is captured somewhere (or a new column is added), all live
+       rows are defaulted to foreign_indian='I' and the response includes
+       '_debug.foreign_indian_is_placeholder = True' so this is never
+       mistaken for confirmed data. If it turns out this is entered manually
+       somewhere before month-end reconciliation, update _fetch_live_rows()
+       below to source it from there instead of defaulting it.
+
+  mis_vessel_master fields (unchanged):
     overseas_coastal  -> 'Overseas' or 'Costal'  (NOTE: 'Costal' is the
                           actual spelling stored in this table — a typo
                           in the source system, matched here as-is)
@@ -16,14 +53,6 @@ DATA SOURCE — CONFIRMED FROM LIVE SCHEMA INSPECTION (see mis_vessel_master):
     month                -> text like 'Jun-26' (Mon-YY), NOT a real date
                             column — matched by exact string, built from
                             the requested 'YYYY-MM' filter
-
-  This replaces the earlier join-chain through vcn_header / ldud_header /
-  lueu_parcel_log, which turned out to be the wrong data source: that path
-  is live day-to-day operational logging with incomplete/partial data,
-  while mis_vessel_master is the actual reconciled monthly MIS record this
-  report was always meant to reflect. mis_vessel_master may lag by a
-  month for very recent activity (e.g. the current month's entries are
-  uploaded after month-end) — that's expected, not a bug.
 
 CATEGORY MAPPING (confirm/adjust CATEGORY_MAP below if wrong):
   POL          -> POL-PRODUCTS
@@ -109,29 +138,12 @@ def _empty_bucket():
     }
 
 
-def get_report1_data(year_str, month_str, debug=False):
+def _aggregate(lines, debug=False, month_label=None, foreign_indian_placeholder=False):
     """
-    year_str  : display-only FY label, e.g. '2026-27' (NOT used for filtering)
-    month_str : the ACTUAL filter key, 'YYYY-MM', e.g. '2026-06' for Jun-26
-    debug     : if True, includes a '_debug' block with raw fetch counts and
-                any category values that fell through to OTHER BULK, so an
-                unmapped category can be spotted without needing DB access.
+    Shared aggregation logic — takes normalized line dicts with keys:
+      overseas_coastal, foreign_indian, import_export, category, quantity
+    and produces the rows/totals structure used by both data sources.
     """
-    if not month_str or len(month_str.split('-')) != 2:
-        raise ValueError(f"month must be 'YYYY-MM', got: {month_str!r}")
-
-    month_label = _month_label(month_str)
-
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute("""
-        SELECT overseas_coastal, foreign_indian, import_export, category, quantity
-        FROM mis_vessel_master
-        WHERE month = %s
-    """, [month_label])
-    lines = [dict(r) for r in cur.fetchall()]
-    conn.close()
-
     matrix = {c: _empty_bucket() for c in COMMODITIES}
     lines_with_qty = 0
     unmapped_categories = set()
@@ -193,18 +205,135 @@ def get_report1_data(year_str, month_str, debug=False):
         'grand_total': round(gov_total + gco_total, 3),
     }
 
-    return {
+    debug_block = None
+    if debug:
+        debug_block = {
+            'month_label_matched': month_label,
+            'rows_fetched': len(lines),
+            'lines_with_qty_gt_0': lines_with_qty,
+            'unmapped_categories': list(unmapped_categories),
+        }
+        if foreign_indian_placeholder:
+            debug_block['foreign_indian_is_placeholder'] = True
+            debug_block['foreign_indian_note'] = (
+                "Live source has no vessel-flag column; all rows defaulted "
+                "to 'I' until this is confirmed or captured upstream."
+            )
+
+    return rows, totals, debug_block
+
+
+def _fetch_reconciled_rows(month_label):
+    """mis_vessel_master path — unchanged."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        SELECT overseas_coastal, foreign_indian, import_export, category, quantity
+        FROM mis_vessel_master
+        WHERE month = %s
+    """, [month_label])
+    lines = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return lines
+
+
+def _fetch_live_rows(year_str, month_str):
+    """
+    LIVE fallback for the current / not-yet-reconciled month.
+    Reads from vcn_header -> ldud_header -> ldud_parcel_ops -> lueu_parcel_log.
+
+    NOTE: foreign_indian is not available in this chain (see module docstring)
+    and is defaulted to 'I' by the caller via _aggregate's placeholder flag.
+    category is matched against vessel_cargo.cargo_category with an exact
+    match first, falling back to a fuzzy LIKE match.
+    """
+    y, m = month_str.split('-')
+    y, m = int(y), int(m)
+    # month range as text-comparable dates (doc_date is stored as text 'YYYY-MM-DD')
+    start = f"{y:04d}-{m:02d}-01"
+    if m == 12:
+        end = f"{y + 1:04d}-01-01"
+    else:
+        end = f"{y:04d}-{m + 1:02d}-01"
+
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        SELECT
+            vh.vessel_run_type   AS overseas_coastal,
+            vh.operation_type    AS import_export,
+            vh.cargo_type        AS cargo_type_raw,
+            COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
+            SUM(lpl.quantity)    AS quantity
+        FROM vcn_header vh
+        JOIN ldud_header ldh         ON ldh.vcn_id = vh.id
+        JOIN ldud_parcel_ops lpo     ON lpo.ldud_id = ldh.id
+        JOIN lueu_parcel_log lpl     ON lpl.parcel_op_id = lpo.id
+        LEFT JOIN vessel_cargo vc_exact
+               ON UPPER(vc_exact.cargo_name) = UPPER(vh.cargo_type)
+        LEFT JOIN vessel_cargo vc_fuzzy
+               ON vc_exact.id IS NULL
+              AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
+        WHERE vh.doc_date >= %s AND vh.doc_date < %s
+        GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
+                 vc_exact.cargo_category, vc_fuzzy.cargo_category
+    """, [start, end])
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    lines = []
+    for r in rows:
+        lines.append({
+            'overseas_coastal': r.get('overseas_coastal'),
+            'foreign_indian': 'I',   # PLACEHOLDER — see module docstring
+            'import_export': r.get('import_export'),
+            'category': r.get('category') or r.get('cargo_type_raw'),
+            'quantity': r.get('quantity'),
+        })
+    return lines
+
+
+def get_report1_data(year_str, month_str, debug=False):
+    """
+    year_str  : display-only FY label, e.g. '2026-27' (NOT used for filtering)
+    month_str : the ACTUAL filter key, 'YYYY-MM', e.g. '2026-06' for Jun-26
+    debug     : if True, includes a '_debug' block with raw fetch counts and
+                any category values that fell through to OTHER BULK, so an
+                unmapped category can be spotted without needing DB access.
+
+    Tries the reconciled mis_vessel_master table first. If that month has
+    zero rows (not yet uploaded — typically the current/open month), falls
+    back to building the same shape of data live from operational tables.
+    """
+    if not month_str or len(month_str.split('-')) != 2:
+        raise ValueError(f"month must be 'YYYY-MM', got: {month_str!r}")
+
+    month_label = _month_label(month_str)
+
+    lines = _fetch_reconciled_rows(month_label)
+    source = 'reconciled'
+    fi_placeholder = False
+
+    if not lines:
+        lines = _fetch_live_rows(year_str, month_str)
+        source = 'live'
+        fi_placeholder = True
+
+    rows, totals, debug_block = _aggregate(
+        lines, debug=debug, month_label=month_label,
+        foreign_indian_placeholder=fi_placeholder,
+    )
+
+    result = {
         'rows': rows,
         'totals': totals,
         'year': year_str,
         'month': month_str,
-        **({'_debug': {
-                'month_label_matched': month_label,
-                'rows_fetched': len(lines),
-                'lines_with_qty_gt_0': lines_with_qty,
-                'unmapped_categories': list(unmapped_categories),
-            }} if debug else {}),
+        'source': source,   # 'reconciled' or 'live' — surfaced so UI can show a badge
     }
+    if debug_block is not None:
+        result['_debug'] = debug_block
+    return result
 
 
 @bp.route('/api/module/RP01/report1/data')
@@ -254,6 +383,10 @@ def report1_export_excel():
     ws['H3'] = 'Month :'
     ws['I3'] = report['month']
     ws['I3'].fill = yellow
+    if report.get('source') == 'live':
+        ws['H4'] = 'Note :'
+        ws['I4'] = 'PROVISIONAL (live, not yet reconciled)'
+        ws['I4'].font = Font(bold=True, color='CC0000')
 
     r = 5
     ws.cell(r, 1, 'COMMODITY').font = bold

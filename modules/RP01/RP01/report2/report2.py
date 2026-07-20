@@ -72,10 +72,43 @@ Design notes (updated):
   block, matching the physical Appendix-3 form (current FY, then prior
   FY, then the one before that, etc.)
 - Units are Tonnes (not '000 Tonnes), matching the source Appendix-3 sheet.
+
+DATA-SOURCE / FALLBACK NOTES (mirrors report3/report8/report9's pattern):
+- Primary source is mis_vessel_master, exactly as before.
+- For any (fin_year, fy_month_idx) period that has ZERO rows in
+  mis_vessel_master, figures for that period only are pulled instead from
+  the live LUEU01 pipeline (vcn_header / ldud_header / ldud_parcel_ops /
+  lueu_parcel_log). mis_vessel_master always wins for periods where it has
+  data; the live pipeline is purely a gap-filler for periods it hasn't
+  reached yet.
+- Checked directly against the live schema (information_schema.columns for
+  vcn_header/ldud_header/ldud_parcel_ops/lueu_parcel_log): there is NO
+  category-equivalent column anywhere in the live pipeline.
+  vcn_header.cargo_type looked like a candidate but turned out to be
+  cargo-name-level (and sometimes a combined string like
+  "FO [E], FURNACE OIL"), not a broad category like "POL"/"Chemical" —
+  so it is NOT used here.
+- The cargo text for live rows comes from ldud_parcel_ops.cargo_name
+  (confirmed clean single values like "BASE OIL", "FURNACE OIL"), joined
+  through lueu_parcel_log for quantity/entry_date and up to vcn_header
+  for operation_type (flow). This is the same join path as report3's
+  _load_live_pipeline_data() / report9's fallback.
+- Because live rows have no category field to fall back on, classification
+  for live rows is driven ENTIRELY by CARGO_ALIAS. Any live cargo_name that
+  CARGO_ALIAS doesn't recognize is routed to the same
+  "UNCLASSIFIED - NEEDS REVIEW" row used for ambiguous/combined
+  mis_vessel_master cargo strings (still counted in Grand Total, still
+  logged in debug.unclassified_ambiguous_rows) — rather than inventing a
+  brand-new bucket, since that's the report's existing convention for
+  "don't guess, but don't drop it either".
+- "FURNACE OIL" (the spelled-out live cargo_name) has been added to
+  CARGO_ALIAS -> POL/PRODUCT, since "FO" (its abbreviation) was already
+  aliased there.
 """
 
 import io
 import re
+import datetime
 import traceback
 from functools import wraps
 
@@ -102,6 +135,8 @@ def login_required(f):
 
 # FY month order: Apr .. Mar
 MONTH_NAMES = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+CAL_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 FLOW_MAP = {
     "import": "unloaded",
@@ -141,7 +176,8 @@ UNCLASSIFIED_LABEL = "UNCLASSIFIED - NEEDS REVIEW (combined cargo)"
 
 # ---------------------------------------------------------------------
 # Cargo-text classification table. Keys are matched case/punctuation-
-# insensitively (via _norm) against mis_vessel_master.cargo. Values are
+# insensitively (via _norm) against mis_vessel_master.cargo (and, for the
+# live-pipeline fallback rows, ldud_parcel_ops.cargo_name). Values are
 # (category_label, sub_label) where sub_label may be None for flat
 # (no-breakdown) categories, or None (the whole value) for cargo strings
 # that combine two different buckets and need manual review — see the
@@ -210,6 +246,9 @@ CARGO_ALIAS = {
     # ---- POL -> PRODUCT (confirmed: CBFS and FO both roll up here) ----
     "CBFS": ("POL", "PRODUCT"),
     "FO": ("POL", "PRODUCT"),
+    # Spelled-out form of "FO", confirmed live in ldud_parcel_ops.cargo_name
+    # (query against the live DB: DISTINCT cargo_name -> 'FURNACE OIL').
+    "FURNACE OIL": ("POL", "PRODUCT"),
 
     # Both halves of this one now land in the same flat OTHER LIQUID
     # total, so it's no longer ambiguous - merges cleanly.
@@ -262,6 +301,35 @@ def month_str_to_idx(month_str: str) -> int:
         )
 
 
+def _dt_to_fy_month(dt):
+    """A real datetime/date -> (fin_year, fy_month_idx, month_abbrev),
+    Apr-Mar FY convention. e.g. 2026-07-12 -> ('2026-27', 3, 'Jul')."""
+    d = dt.date() if isinstance(dt, datetime.datetime) else dt
+    fy_start = d.year if d.month >= 4 else d.year - 1
+    fin_year = f"{fy_start}-{str(fy_start + 1)[-2:]}"
+    mn = CAL_MONTH_ABBR[d.month - 1]
+    return fin_year, MONTH_NAMES.index(mn), mn
+
+
+def _parse_dt(v):
+    """Parse the live pipeline's entry_date / free-text datetime values.
+    Returns None if blank/unparseable."""
+    if not v:
+        return None
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return datetime.datetime.strptime(s.replace("T", " ")[:16], "%Y-%m-%d %H:%M")
+    except ValueError:
+        try:
+            return datetime.datetime.strptime(s[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+
+
 def _norm(s) -> str:
     """Normalise a label for matching: upper-case, strip everything that
     isn't a letter or digit. 'Fert. Raw Mat. - Dry' -> 'FERTRAWMATDRY'."""
@@ -300,29 +368,46 @@ def _apply_cargo_alias(df: pd.DataFrame) -> pd.DataFrame:
 
         key = _norm(cargo)
 
-        if key not in CARGO_ALIAS_NORM:
+        if key in CARGO_ALIAS_NORM:
+            target = CARGO_ALIAS_NORM[key]
+
+            if target is None:
+                ambiguous_rows.append({
+                    "fin_year": row["fin_year"],
+                    "month": row["month_abbrev"],
+                    "category": row["category"],
+                    "cargo": row["cargo_type"],
+                    "quantity": row["quantity"],
+                    "routed_to": "UNCLASSIFIED_LABEL",
+                })
+                return UNCLASSIFIED_LABEL, _norm(UNCLASSIFIED_LABEL), ""
+
+            cat_label, sub_label = target
+            return (
+                cat_label,
+                _norm(cat_label),
+                _norm(sub_label) if sub_label else ""
+            )
+
+        # Not in CARGO_ALIAS. mis_vessel_master rows carry their own
+        # category text, so fall back to that (existing behaviour). Live
+        # LUEU01-pipeline rows have no category field at all (row["category"]
+        # is "" — see _load_live_pipeline_data) so there's nothing sensible
+        # to fall back to; route those to the same UNCLASSIFIED_LABEL
+        # "needs review" row used for ambiguous/combined cargo, rather than
+        # guessing or silently dropping them.
+        if row["category"]:
             return row["category"], row["category_norm"], row["cargo_norm"]
 
-        target = CARGO_ALIAS_NORM[key]
-
-        if target is None:
-            ambiguous_rows.append({
-                "fin_year": row["fin_year"],
-                "month": row["month_abbrev"],
-                "category": row["category"],
-                "cargo": row["cargo_type"],
-                "quantity": row["quantity"],
-                "routed_to": "UNCLASSIFIED_LABEL",
-            })
-            return UNCLASSIFIED_LABEL, _norm(UNCLASSIFIED_LABEL), ""
-
-        cat_label, sub_label = target
-
-        return (
-            cat_label,
-            _norm(cat_label),
-            _norm(sub_label) if sub_label else ""
-        )
+        ambiguous_rows.append({
+            "fin_year": row["fin_year"],
+            "month": row["month_abbrev"],
+            "category": "(none — live pipeline)",
+            "cargo": row["cargo_type"],
+            "quantity": row["quantity"],
+            "routed_to": "UNCLASSIFIED_LABEL",
+        })
+        return UNCLASSIFIED_LABEL, _norm(UNCLASSIFIED_LABEL), ""
 
     resolved = df.apply(resolve, axis=1, result_type="expand")
 
@@ -334,7 +419,95 @@ def _apply_cargo_alias(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
+# ── ADD: fallback source -- live LUEU01 logging pipeline. Returns the same
+# shape as the mis_vessel_master loader (fin_year, month_abbrev,
+# fy_month_idx, category, cargo_type, import_export/flow, quantity) so it
+# can be concatenated directly, BEFORE cargo-alias classification runs.
+# Only used for (fin_year, fy_month_idx) periods that have ZERO rows in
+# mis_vessel_master -- see load_data() below.
+#
+# Checked directly against the live schema: there is no category-
+# equivalent column anywhere in the live pipeline (vcn_header.cargo_type
+# is cargo-name-level, not broad-category, and sometimes a combined
+# string like "FO [E], FURNACE OIL" — so it is deliberately NOT used
+# here). category is left as "" for these rows; _apply_cargo_alias routes
+# anything CARGO_ALIAS doesn't recognize to UNCLASSIFIED_LABEL instead of
+# falling back to a (nonexistent) category. ──
+def _load_live_pipeline_data() -> pd.DataFrame:
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+        cur.execute("""
+            SELECT l.entry_date, po.cargo_name, v.operation_type, l.quantity
+            FROM lueu_parcel_log l
+            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
+            JOIN ldud_header ld ON ld.id = po.ldud_id
+            JOIN vcn_header v ON v.id = ld.vcn_id
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.entry_date IS NOT NULL
+              AND l.quantity IS NOT NULL
+        """)
+        log_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    empty = pd.DataFrame(columns=[
+        "fin_year", "month_abbrev", "fy_month_idx",
+        "category", "category_norm", "cargo_type", "cargo_norm",
+        "flow", "quantity",
+    ])
+    if not log_rows:
+        return empty
+
+    ldf = pd.DataFrame(log_rows)
+    ldf["quantity"] = pd.to_numeric(ldf["quantity"], errors="coerce").fillna(0.0)
+    ldf["cargo_type"] = ldf["cargo_name"].fillna("").astype(str).str.strip()
+
+    ldf["_flow_raw"] = ldf["operation_type"].fillna("").astype(str).str.strip().str.lower()
+    ldf["flow"] = ldf["_flow_raw"].map(FLOW_MAP)
+    ldf = ldf.dropna(subset=["flow"])
+    if ldf.empty:
+        return empty
+
+    ldf["entry_dt"] = ldf["entry_date"].apply(_parse_dt)
+    ldf = ldf.dropna(subset=["entry_dt"])
+    if ldf.empty:
+        return empty
+
+    fy_list, idx_list, mn_list = [], [], []
+    for dt in ldf["entry_dt"]:
+        fy, idx, mn = _dt_to_fy_month(dt)
+        fy_list.append(fy)
+        idx_list.append(idx)
+        mn_list.append(mn)
+    ldf["fin_year"] = fy_list
+    ldf["fy_month_idx"] = idx_list
+    ldf["month_abbrev"] = mn_list
+
+    # No category-equivalent column in the live schema (confirmed against
+    # information_schema.columns) -- left blank; _apply_cargo_alias routes
+    # anything CARGO_ALIAS doesn't recognize to UNCLASSIFIED_LABEL rather
+    # than falling back to a nonexistent category.
+    ldf["category"] = ""
+    ldf["category_norm"] = ""
+    ldf["cargo_norm"] = ldf["cargo_type"].apply(_norm)
+
+    return ldf[[
+        "fin_year", "month_abbrev", "fy_month_idx",
+        "category", "category_norm", "cargo_type", "cargo_norm",
+        "flow", "quantity",
+    ]].copy()
+
+
 def load_data() -> pd.DataFrame:
+    """Primary source: mis_vessel_master, exactly as before.
+    Fallback: for any (fin_year, fy_month_idx) period with ZERO rows in
+    mis_vessel_master, figures are pulled instead from the live LUEU01
+    pipeline for that period only. mis_vessel_master always wins for
+    periods where it has data. Cargo-alias classification runs once, after
+    the two sources are combined, so live rows get exactly the same
+    CARGO_ALIAS treatment as mis_vessel_master rows."""
     conn = get_db()
     try:
         cur = get_cursor(conn)
@@ -350,79 +523,71 @@ def load_data() -> pd.DataFrame:
         conn.close()
 
     if not rows:
-        raise ReportDataError("No rows found in mis_vessel_master.")
+        mv_df = pd.DataFrame(columns=[
+            "fin_year", "month_abbrev", "fy_month_idx",
+            "category", "category_norm", "cargo_type", "cargo_norm",
+            "flow", "quantity",
+        ])
+        mv_unrecognized = []
+    else:
+        df = pd.DataFrame(rows)
 
-    df = pd.DataFrame(rows)
+        missing_cols = [c for c in ("fin_year", "month", "category", "cargo_type", "import_export", "quantity")
+                        if c not in df.columns]
+        if missing_cols:
+            raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
 
-    missing_cols = [c for c in ("fin_year", "month", "category", "cargo_type", "import_export", "quantity")
-                    if c not in df.columns]
-    if missing_cols:
-        raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
+        df["fin_year"] = df["fin_year"].str.strip()
+        df["category"] = df["category"].astype(str).str.strip()
+        df["cargo_type"] = df["cargo_type"].fillna("").astype(str).str.strip()
+        df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
-    df["fin_year"] = df["fin_year"].str.strip()
-    df["category"] = df["category"].astype(str).str.strip()
-    df["cargo_type"] = df["cargo_type"].fillna("").astype(str).str.strip()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+        df["month_abbrev"] = df["month"].apply(month_abbrev)
+        df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
 
-    df["month_abbrev"] = df["month"].apply(month_abbrev)
-    df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
+        df["_flow_raw"] = df["import_export"].fillna("").str.strip().str.lower()
+        df["flow"] = df["_flow_raw"].map(FLOW_MAP)
 
-    df["_flow_raw"] = df["import_export"].fillna("").str.strip().str.lower()
-    df["flow"] = df["_flow_raw"].map(FLOW_MAP)
+        mv_unrecognized = sorted(
+            df.loc[df["flow"].isna() & (df["_flow_raw"] != ""), "import_export"].unique().tolist()
+        )
 
-    unrecognized = sorted(
-        df.loc[df["flow"].isna() & (df["_flow_raw"] != ""), "import_export"].unique().tolist()
-    )
+        df = df.dropna(subset=["flow"])
 
-    df = df.dropna(subset=["flow"])
+        # Raw normalised text (fallback path for cargo not covered by CARGO_ALIAS)
+        df["category_norm"] = df["category"].apply(_norm)
+        df["cargo_norm"] = df["cargo_type"].apply(_norm)
+
+        mv_df = df[[
+            "fin_year", "month_abbrev", "fy_month_idx",
+            "category", "category_norm", "cargo_type", "cargo_norm",
+            "flow", "quantity",
+        ]].copy()
+
+    # ---- which (fin_year, fy_month_idx) periods does mis_vessel_master
+    # actually cover? Only periods with ZERO rows there fall back. ----
+    covered_periods = set(zip(mv_df["fin_year"], mv_df["fy_month_idx"]))
+
+    live_df = _load_live_pipeline_data()
+    if not live_df.empty:
+        live_df = live_df[
+            ~live_df.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+        ]
+
+    df = pd.concat([mv_df, live_df], ignore_index=True)
 
     if df.empty:
         raise ReportDataError(
-            "No rows had a recognized import_export value ('Import'/'Export'). "
-            f"Found instead: {', '.join(unrecognized) if unrecognized else '(none)'}"
+            "No usable rows found in mis_vessel_master or the live LUEU01 pipeline "
+            "(or none had a recognized import_export/operation_type value)."
         )
 
-    # Raw normalised text (fallback path for cargo not covered by CARGO_ALIAS)
-    df["category_norm"] = df["category"].apply(_norm)
-    df["cargo_norm"] = df["cargo_type"].apply(_norm)
-
-    # Reclassify by cargo text where we have a known mapping.
+    # Reclassify by cargo text where we have a known mapping. Runs once,
+    # after mis_vessel_master + live rows are combined, so both sources go
+    # through identical CARGO_ALIAS logic.
     df = _apply_cargo_alias(df)
 
-    print("\n===== EDIBLE OIL FY 2025-26 UPTO JUN =====")
-
-    tmp = df[
-        (df["category"] == "EDIBLE OIL") &
-        (df["fin_year"] == "2025-26") &
-        (df["fy_month_idx"] <= MONTH_NAMES.index("Jun"))
-    ]
-
-    print(
-        tmp.groupby("cargo_type")["quantity"]
-        .sum()
-        .sort_values(ascending=False)
-    )
-
-    print("\nTOTAL =", tmp["quantity"].sum())
-
-        # ===== OTHER LIQUID FY 2025-26 UPTO JUN =====
-    tmp = df[
-        (df["category"] == "OTHER LIQUID") &
-        (df["fin_year"] == "2025-26") &
-        (df["fy_month_idx"] <= MONTH_NAMES.index("Jun"))
-    ]
-
-    print("\n===== OTHER LIQUID FY 2025-26 UPTO JUN =====")
-    print(tmp.groupby("cargo_type")["quantity"].sum().sort_values(ascending=False))
-    print("TOTAL =", tmp["quantity"].sum())
-
-    df.attrs["unrecognized_import_export"] = unrecognized
-
-    return df[[
-        "fin_year", "month_abbrev", "fy_month_idx",
-        "category", "category_norm", "cargo_type", "cargo_norm",
-        "flow", "quantity",
-    ]]
+    df.attrs["unrecognized_import_export"] = mv_unrecognized
 
     return df[[
         "fin_year", "month_abbrev", "fy_month_idx",

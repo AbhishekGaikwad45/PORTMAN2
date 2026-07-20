@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Report-1 — RP01{% endblock %}
+{% block title %}Report-9 — RP09{% endblock %}
 
 {% block head %}
 <style>
@@ -15,12 +15,14 @@
         --rp-border:#DDE3EA;
         --rp-bg:#F6F8FA;
         --rp-card:#FFFFFF;
-        --rp-highlight:#FDF3D0;
+        --rp-highlight-yellow:#FDF3D0;
         --rp-highlight-blue:#E8F0FB;
+        --rp-subtotal-bg:#F2F4F7;
+        --rp-total-bg:#DCE6F7;
     }
 
-    .rp01-wrap *{ box-sizing:border-box; }
-    .rp01-wrap{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+    .rp09-wrap *{ box-sizing:border-box; }
+    .rp09-wrap{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
 
     /* ---------- Module header ---------- */
     .module-header{
@@ -127,108 +129,75 @@
         padding:18px 20px 14px;
         border-bottom:1px solid var(--rp-border);
         background:var(--rp-bg);
+        text-align:center;
     }
-
-    .report-info{
-        width:100%;
-        border-collapse:collapse;
-        margin-bottom:4px;
-    }
-    .report-info td{
-        padding:3px 6px;
-        border:none;
-        font-size:14px;
-        color:var(--rp-ink);
-    }
-    .report-info .label{
-        text-align:left;
-        font-weight:600;
-        color:var(--rp-muted);
-        white-space:nowrap;
-        width:1%;
-    }
-    .report-info td:last-child{
-        text-align:left;
+    .report-header h3{
+        margin:0;
+        font-size:15px;
         font-weight:700;
         color:var(--rp-ink);
-        padding-left:10px;
-    }
-
-    .unit-text{
-        text-align:right;
-        font-size:12px;
-        font-weight:600;
-        letter-spacing:0.4px;
-        color:var(--rp-muted);
         text-transform:uppercase;
+        letter-spacing:0.3px;
     }
 
     /* ---------- Table ---------- */
-    .traffic-report-table{
+    .vsls-report-table{
         width:100%;
         border-collapse:collapse;
     }
 
-    .traffic-report-table th,
-    .traffic-report-table td{
+    .vsls-report-table th,
+    .vsls-report-table td{
         border:1px solid var(--rp-border);
     }
 
-    .traffic-report-table thead th{
+    .vsls-report-table thead th{
         background:var(--rp-bg);
         color:var(--rp-ink);
         font-weight:700;
-        font-size:13px;
+        font-size:12.5px;
         text-align:center;
-        padding:10px 14px;
+        padding:8px 10px;
     }
 
-    .traffic-report-table tbody td{
-        padding:8px 14px;
-        font-size:13.5px;
+    .vsls-report-table thead th.period-month{
+        background:var(--rp-highlight-yellow);
+    }
+
+    .vsls-report-table tbody td{
+        padding:7px 12px;
+        font-size:13px;
         color:var(--rp-ink);
-    }
-
-    .traffic-report-table td:first-child{
-        text-align:center;
-        color:var(--rp-muted);
-        font-size:13px;
-    }
-
-    .traffic-report-table td:nth-child(2){
-        text-align:left;
-    }
-
-    .traffic-report-table td:nth-child(3),
-    .traffic-report-table td:nth-child(4){
         text-align:right;
-        font-weight:500;
         font-variant-numeric:tabular-nums;
     }
 
-    .highlight-row td{
-        background:var(--rp-highlight);
-        font-weight:600;
+    .vsls-report-table td.berth-label{
+        text-align:left;
+        font-weight:500;
     }
 
-    .total-row td{
+    .vsls-report-table tr.subtotal-row td{
+        background:var(--rp-subtotal-bg);
         font-weight:700;
-        font-size:14px;
-        color:var(--rp-ink);
+    }
+
+    .vsls-report-table tr.total-row td{
+        background:var(--rp-total-bg);
+        font-weight:700;
+        font-size:13.5px;
         border-top:2px solid var(--rp-blue);
-        background:var(--rp-highlight-blue);
-        padding:12px 14px;
     }
 
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="rp01-wrap">
+<div class="rp09-wrap">
 
     <div class="module-header">
-        <h2>Report-1</h2>
-        <span class="rp-badge">RP01</span>
+        <h2>Report-9</h2>
+        <span class="rp-badge">RP09</span>
         <a href="/module/RP01/" class="rp-back">&larr; Back to Reports</a>
     </div>
 
@@ -239,8 +208,8 @@
         <label for="monthSelect">Month</label>
         <select id="monthSelect"></select>
 
-        <button class="jjltpl-load-btn" onclick="loadReport1()">Load</button>
-        <button class="jjltpl-export-btn" onclick="exportReport1()">Export to Excel</button>
+        <button class="jjltpl-load-btn" onclick="loadReport2()">Load</button>
+        <button class="jjltpl-export-btn" onclick="exportReport2()">Export to Excel</button>
     </div>
 
     <div id="reportStatus"></div>
@@ -248,45 +217,36 @@
     <div class="jjltpl-table-wrap">
 
         <div class="report-header">
-            <table class="report-info">
-                <tr>
-                    <td class="label">Name of the Port :</td>
-                    <td id="portName">JNPA</td>
-                </tr>
-                <tr>
-                    <td class="label">Year :</td>
-                    <td id="financialYear"></td>
-                </tr>
-                <tr>
-                    <td class="label">Period : For the month of</td>
-                    <td id="reportMonth"></td>
-                </tr>
-            </table>
-            <div class="unit-text">('000 Tonnes)</div>
+            <h3>Traffic / Vessels Handled at BPCL-BT/Anchorage</h3>
         </div>
 
-        <table class="traffic-report-table">
+        <table class="vsls-report-table">
 
             <thead>
                 <tr>
-                    <th style="width:8%">Sr. No.</th>
-                    <th style="width:46%">Principle Commodity</th>
-                    <th style="width:23%">For the Month</th>
-                    <th style="width:23%">Up to Month</th>
+                    <th rowspan="3" style="width:20%">BERTHS</th>
+                    <th id="monthHeaderCell" class="period-month" colspan="4"></th>
+                    <th id="yearHeaderCell" colspan="4"></th>
+                </tr>
+                <tr>
+                    <th class="period-month" rowspan="2">Vsls</th>
+                    <th class="period-month" colspan="3">Quantity</th>
+                    <th rowspan="2">Vsls</th>
+                    <th colspan="3">Quantity</th>
+                </tr>
+                <tr>
+                    <th class="period-month">Import</th>
+                    <th class="period-month">Export</th>
+                    <th class="period-month">Total</th>
+                    <th>Import</th>
+                    <th>Export</th>
+                    <th>Total</th>
                 </tr>
             </thead>
 
-            <tbody id="commodityBody">
+            <tbody id="berthBody">
 
             </tbody>
-
-            <tfoot>
-                <tr class="total-row">
-                    <td colspan="2">Total</td>
-                    <td id="monthTotal"></td>
-                    <td id="uptoTotal"></td>
-                </tr>
-            </tfoot>
 
         </table>
 
@@ -297,41 +257,50 @@
 
 {% block scripts %}
 <script>
-let META = { years: [], months: {}, port_name: "" };
+let META = { years: [], months: {} };
 
-function formatNumber(val) {
-    if (val === null || val === undefined || val === "")
-        return "";
-    return Number(val).toFixed(6);
+function fmtInt(val) {
+    if (val === null || val === undefined || val === "") return "";
+    return Number(val).toLocaleString();
 }
 
-function formatTotal(val) {
-    if (val === null || val === undefined || val === "")
-        return "";
-    return Number(val).toFixed(6);
+function fmtQty(val) {
+    if (val === null || val === undefined || val === "") return "";
+    return Number(val).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
+/* ---------- Current fiscal-year / month helpers ----------
+   FY runs Apr..Mar. MONTH_NAMES order (server-side) is
+   Apr=0, May=1, Jun=2, Jul=3, Aug=4, Sep=5, Oct=6, Nov=7, Dec=8, Jan=9, Feb=10, Mar=11.
+   JS Date.getMonth() is Jan=0 .. Dec=11, so we shift by 3. */
+function getCurrentFinYear() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0=Jan..11=Dec
+    const fyStart = (m >= 3) ? y : y - 1; // Apr(3) or later => FY starts this calendar year
+    return `${fyStart}-${String(fyStart + 1).slice(-2)}`;
+}
+
+function getCurrentFyMonthIdx() {
+    const now = new Date();
+    const m = now.getMonth(); // 0=Jan..11=Dec
+    return (m - 3 + 12) % 12; // shift so Apr=0 .. Mar=11
 }
 
 function populateYearSelect() {
     const yearSelect = document.getElementById("yearSelect");
-
     yearSelect.innerHTML = META.years
         .map(y => `<option value="${y}">${y}</option>`)
         .join("");
 
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth() + 1;
+    if (!META.years.length) return;
 
-    const currentFY =
-        month >= 4
-            ? `${year}-${String(year + 1).slice(-2)}`
-            : `${year - 1}-${String(year).slice(-2)}`;
-
-    if (META.years.includes(currentFY)) {
-        yearSelect.value = currentFY;
-    } else if (META.years.length) {
-        yearSelect.value = META.years[META.years.length - 1];
-    }
+    const currentFy = getCurrentFinYear();
+    // Prefer today's actual fiscal year if the data has it; otherwise fall
+    // back to the most recent year available.
+    yearSelect.value = META.years.includes(currentFy)
+        ? currentFy
+        : META.years[META.years.length - 1];
 }
 
 function populateMonthSelect() {
@@ -343,26 +312,20 @@ function populateMonthSelect() {
         .map(m => `<option value="${m.idx}">${m.label}</option>`)
         .join("");
 
-    const today = new Date();
+    if (!months.length) return;
 
-    const monthNames = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    ];
+    // Only pre-select today's actual month if that year selected IS the
+    // current fiscal year and that month actually has data; otherwise fall
+    // back to the latest month available for the selected year.
+    const isCurrentFy = (year === getCurrentFinYear());
+    const currentIdx = getCurrentFyMonthIdx();
+    const hasCurrentMonth = isCurrentFy && months.some(m => m.idx === currentIdx);
 
-    // Example: "Jul-26"
-    const currentLabel =
-        `${monthNames[today.getMonth()]}-${String(today.getFullYear()).slice(-2)}`;
-
-    const currentMonth = months.find(m => m.label === currentLabel);
-
-    if (currentMonth) {
-        monthSelect.value = currentMonth.idx;
-    } else if (months.length) {
-        // If current month is not available, select the latest available month
-        monthSelect.value = months[months.length - 1].idx;
-    }
+    monthSelect.value = hasCurrentMonth
+        ? currentIdx
+        : months[months.length - 1].idx;
 }
+
 
 function onYearChange() {
     populateMonthSelect();
@@ -372,7 +335,7 @@ function loadMetaThenReport() {
     const status = document.getElementById("reportStatus");
     status.textContent = "Loading...";
 
-    fetch(`/api/module/RP01/report1/meta`)
+    fetch(`/api/module/RP01/report9/meta`)
         .then(r => r.json().then(j => ({ ok: r.ok, j })))
         .then(({ ok, j }) => {
             if (!ok) {
@@ -385,7 +348,7 @@ function loadMetaThenReport() {
             populateYearSelect();
             populateMonthSelect();
             status.textContent = "";
-            loadReport1();
+            loadReport2();
         })
         .catch(err => {
             status.textContent = "Failed to load year/month options.";
@@ -393,7 +356,7 @@ function loadMetaThenReport() {
         });
 }
 
-function loadReport1() {
+function loadReport2() {
     const fin_year = document.getElementById("yearSelect").value;
     const month_idx = document.getElementById("monthSelect").value;
     const status = document.getElementById("reportStatus");
@@ -405,7 +368,7 @@ function loadReport1() {
 
     status.textContent = "";
 
-    fetch(`/api/module/RP01/report1/report?fin_year=${fin_year}&month_idx=${month_idx}`)
+    fetch(`/api/module/RP01/report9/report?fin_year=${fin_year}&month_idx=${month_idx}`)
         .then(r => r.json().then(j => ({ ok: r.ok, j })))
         .then(({ ok, j }) => {
             if (!ok) {
@@ -413,25 +376,30 @@ function loadReport1() {
                 return;
             }
 
-            /* Header */
-            document.getElementById("portName").textContent = j.port_name || "JNPA";
-            document.getElementById("financialYear").textContent = j.fin_year || "";
-            document.getElementById("reportMonth").textContent = j.month_label || "";
+            /* Header labels over the two period column-groups */
+            document.getElementById("monthHeaderCell").textContent = j.month_label || "";
+            document.getElementById("yearHeaderCell").textContent = j.fin_year || "";
 
-            /* Commodity Table */
-            document.getElementById("commodityBody").innerHTML =
-                (j.rows || []).map(r => `
-                    <tr class="${r.highlight ? 'highlight-row' : ''}">
-                        <td>${r.sr === null || r.sr === undefined ? '' : r.sr}</td>
-                        <td class="text-start">${r.sub ? '&nbsp;&nbsp;&nbsp;&nbsp;' + r.label : r.label}</td>
-                        <td class="text-end">${formatNumber(r.for_month)}</td>
-                        <td class="text-end">${formatNumber(r.upto_month)}</td>
-                    </tr>
-                `).join("");
-
-            /* Totals */
-            document.getElementById("monthTotal").textContent = formatTotal(j.total_for_month);
-            document.getElementById("uptoTotal").textContent = formatTotal(j.total_upto_month);
+            /* Body rows */
+            document.getElementById("berthBody").innerHTML =
+                (j.rows || []).map(r => {
+                    const rowClass = r.type === "total" ? "total-row"
+                                    : r.type === "subtotal" ? "subtotal-row"
+                                    : "";
+                    return `
+                        <tr class="${rowClass}">
+                            <td class="berth-label">${r.label}</td>
+                            <td>${fmtInt(r.month.vsls)}</td>
+                            <td>${fmtQty(r.month.import)}</td>
+                            <td>${fmtQty(r.month.export)}</td>
+                            <td>${fmtQty(r.month.total)}</td>
+                            <td>${fmtInt(r.upto.vsls)}</td>
+                            <td>${fmtQty(r.upto.import)}</td>
+                            <td>${fmtQty(r.upto.export)}</td>
+                            <td>${fmtQty(r.upto.total)}</td>
+                        </tr>
+                    `;
+                }).join("");
         })
         .catch(err => {
             status.textContent = "Failed to load report.";
@@ -439,7 +407,7 @@ function loadReport1() {
         });
 }
 
-function exportReport1() {
+function exportReport2() {
     const fin_year = document.getElementById("yearSelect").value;
     const month_idx = document.getElementById("monthSelect").value;
 
@@ -449,7 +417,7 @@ function exportReport1() {
     }
 
     window.location.href =
-        `/api/module/RP01/report1/export?fin_year=${fin_year}&month_idx=${month_idx}`;
+        `/api/module/RP01/report9/export?fin_year=${fin_year}&month_idx=${month_idx}`;
 }
 
 loadMetaThenReport();

@@ -1,0 +1,394 @@
+{% extends "base.html" %}
+
+{% block title %} Report08 — RP01{% endblock %}
+
+{% block head %}
+<style>
+
+    .rp03-wrap{
+        --rp-blue:#2F6FED;
+        --rp-blue-dark:#1D4FB8;
+        --rp-green:#16A34A;
+        --rp-green-dark:#0F7C38;
+        --rp-ink:#1F2937;
+        --rp-muted:#6B7280;
+        --rp-border:#DDE3EA;
+        --rp-bg:#F6F8FA;
+        --rp-card:#FFFFFF;
+        --rp-highlight:#FDF3D0;
+        --rp-na:#9CA3AF;
+        --rp-red:#CC0000;
+    }
+
+    .rp03-wrap *{ box-sizing:border-box; }
+    .rp03-wrap{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+
+    /* ---------- Module header ---------- */
+    .module-header{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        margin-bottom:20px;
+        padding-bottom:16px;
+        border-bottom:1px solid var(--rp-border);
+    }
+    .module-header h2{
+        margin:0;
+        font-size:22px;
+        font-weight:700;
+        color:var(--rp-ink);
+    }
+    .module-header .rp-badge{
+        background:var(--rp-blue);
+        color:#fff;
+        padding:4px 12px;
+        border-radius:20px;
+        font-size:12px;
+        font-weight:700;
+        letter-spacing:0.4px;
+    }
+    .module-header .rp-back{
+        margin-left:auto;
+        font-size:13px;
+        font-weight:500;
+        color:var(--rp-blue);
+        text-decoration:none;
+    }
+    .module-header .rp-back:hover{ text-decoration:underline; }
+
+    /* ---------- Toolbar ---------- */
+    .jjltpl-toolbar{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        flex-wrap:wrap;
+        background:var(--rp-card);
+        border:1px solid var(--rp-border);
+        border-radius:10px;
+        padding:14px 16px;
+        margin-bottom:14px;
+    }
+    .jjltpl-toolbar label{
+        font-size:12px;
+        font-weight:600;
+        color:var(--rp-muted);
+        text-transform:uppercase;
+        letter-spacing:0.4px;
+        margin-right:2px;
+    }
+    .jjltpl-toolbar select{
+        font-size:13px;
+        font-weight:500;
+        color:var(--rp-ink);
+        background:var(--rp-bg);
+        border:1px solid var(--rp-border);
+        border-radius:6px;
+        padding:7px 10px;
+        cursor:pointer;
+        outline:none;
+    }
+    .jjltpl-toolbar select:focus{ border-color:var(--rp-blue); }
+
+    .jjltpl-toolbar button{
+        font-size:13px;
+        font-weight:600;
+        border-radius:6px;
+        padding:8px 16px;
+        border:none;
+        cursor:pointer;
+        color:#fff;
+    }
+    .jjltpl-toolbar button:active{ transform:translateY(1px); }
+
+    .jjltpl-load-btn{ background:var(--rp-blue); }
+    .jjltpl-load-btn:hover{ background:var(--rp-blue-dark); }
+
+    .jjltpl-export-btn{
+        background:var(--rp-green);
+        margin-left:auto;
+    }
+    .jjltpl-export-btn:hover{ background:var(--rp-green-dark); }
+
+    #reportStatus3{ font-size:13px; color:var(--rp-muted); min-height:18px; margin-bottom:14px; }
+
+    .rp03-table-wrap{
+        background:var(--rp-card); border:1px solid var(--rp-border);
+        border-radius:10px; overflow:hidden;
+    }
+    .rp03-header{
+        padding:18px 20px 14px; border-bottom:1px solid var(--rp-border); background:var(--rp-bg);
+    }
+    .rp03-title{ font-weight:700; font-size:14px; color:var(--rp-ink); margin-bottom:6px; }
+    .rp03-month-line{ font-size:13px; color:var(--rp-muted); }
+    .rp03-month-line span{
+        background:var(--rp-highlight); font-weight:700; color:var(--rp-ink);
+        padding:2px 8px; border-radius:4px;
+    }
+
+    .pmo-table{ width:100%; border-collapse:collapse; }
+    .pmo-table th, .pmo-table td{ border:1px solid var(--rp-border); }
+    .pmo-table thead th{
+        background:var(--rp-bg); color:var(--rp-ink); font-weight:700;
+        font-size:12.5px; text-align:center; padding:8px 10px;
+    }
+    .pmo-table tbody td{ padding:8px 12px; font-size:13px; color:var(--rp-ink); }
+    .pmo-table td.sl{ text-align:center; color:var(--rp-muted); width:6%; }
+    .pmo-table td.item{ text-align:left; }
+    .pmo-table td.item.sub{ padding-left:28px; color:var(--rp-muted); font-style:italic; }
+    .pmo-table td.unit{ text-align:center; color:var(--rp-muted); width:10%; }
+    .pmo-table td.val{ text-align:right; font-variant-numeric:tabular-nums; }
+    .pmo-table td.na{ text-align:center; color:var(--rp-na); font-style:italic; }
+    .highlight-cell{ background:var(--rp-highlight); font-weight:600; }
+
+    /* rows 1,2,4,5: Container / Other-than-Container split is computed
+       but not independently meaningful yet -- shown de-emphasized in red,
+       never highlighted yellow, so it's not mistaken for a verified total */
+    .split-na{ color:var(--rp-red); font-weight:500; background:transparent !important; }
+    .hl-red{ color:var(--rp-red); }
+    .item-subnote{ font-size:11.5px; color:var(--rp-muted); font-style:italic; }
+
+    .pmo-table tr.percentage-row td{ color:var(--rp-muted); font-style:italic; text-align:center; }
+
+    .prov-badge{
+        display:inline-block; font-size:10px; font-weight:700; color:#CC0000;
+        border:1px solid #CC0000; border-radius:3px; padding:1px 5px; margin-left:6px;
+        vertical-align:middle;
+    }
+    #provNote{ font-size:12px; color:#CC0000; margin-top:8px; display:none; }
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp03-wrap">
+
+    <div class="module-header">
+        <h2>Report-8</h2>
+        <span class="rp-badge">RP01</span>
+        <a href="/module/RP01/" class="rp-back">&larr; Back to Reports</a>
+    </div>
+
+    <div class="jjltpl-toolbar">
+        <label for="yearSelect3">Year</label>
+        <select id="yearSelect3" onchange="onYearChange3()"></select>
+
+        <label for="monthSelect3">Month</label>
+        <select id="monthSelect3"></select>
+
+        <button class="jjltpl-load-btn" id="loadBtn3" onclick="loadReport3()">Load</button>
+        <button class="jjltpl-export-btn" onclick="exportReport3()">Export to Excel</button>
+    </div>
+
+    <div id="reportStatus3"></div>
+
+    <div class="rp03-table-wrap">
+
+        <div class="rp03-header">
+            <div class="rp03-title">MONTHLY INFORMATION FOR PMO/NITI AYOG ON TURN-ROUND TIME, COASTAL CARGO,
+                RAIL TONNAGE &amp; DWELL TIME OF CONTAINERS AND DRY BULK.</div>
+            <div class="rp03-month-line">MONTH: <span id="monthLabel3"></span></div>
+        </div>
+
+        <table class="pmo-table">
+            <thead>
+                <tr>
+                    <th rowspan="2">SL. NO.</th>
+                    <th rowspan="2">ITEMS</th>
+                    <th rowspan="2">UNIT</th>
+                    <th colspan="4">Details during</th>
+                </tr>
+                <tr>
+                    <th id="thThisMonth">This Year<br>Month</th>
+                    <th id="thLastMonth">Last Year<br>Month</th>
+                    <th id="thThisUpto">This Year<br>Upto Month</th>
+                    <th id="thLastUpto">Last Year<br>Upto Month</th>
+                </tr>
+            </thead>
+            <tbody id="pmoBody"></tbody>
+        </table>
+
+        <div id="provNote">* This column includes provisional (not yet reconciled) figures for the current/open month.</div>
+
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let META3 = { years: [], months: {} };
+
+function fmtVal(v) {
+    if (v === null || v === undefined) return "";
+    return Number(v).toFixed(2);
+}
+function currentFinYear3() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // Jan = 0
+
+    const fyStart = month >= 3 ? year : year - 1;
+    return `${fyStart}-${String(fyStart + 1).slice(2)}`;
+}
+
+function populateYearSelect3() {
+    const sel = document.getElementById("yearSelect3");
+
+    sel.innerHTML = META3.years
+        .map(y => `<option value="${y}">${y}</option>`)
+        .join("");
+
+    const currentFY = currentFinYear3();
+
+    if (META3.years.includes(currentFY)) {
+        sel.value = currentFY;
+    } else if (META3.years.length) {
+        sel.value = META3.years[META3.years.length - 1];
+    }
+}
+
+
+function populateMonthSelect3() {
+    const sel = document.getElementById("monthSelect3");
+    const year = document.getElementById("yearSelect3").value;
+    const months = META3.months[year] || [];
+
+    sel.innerHTML = months
+        .map(m => `<option value="${m.idx}">${m.label}</option>`)
+        .join("");
+
+    if (!months.length) return;
+
+    if (year === currentFinYear3()) {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+
+        // Apr = 0 ... Mar = 11
+        const currentFYMonthIndex =
+            currentMonth >= 3 ? currentMonth - 3 : currentMonth + 9;
+
+        const exists = months.find(
+            m => Number(m.idx) === currentFYMonthIndex
+        );
+
+        sel.value = exists
+            ? currentFYMonthIndex
+            : months[months.length - 1].idx;
+    } else {
+        sel.value = months[months.length - 1].idx;
+    }
+}
+function onYearChange3() { populateMonthSelect3(); }
+
+function loadMetaThenReport3() {
+    const status = document.getElementById("reportStatus3");
+    status.textContent = "Loading...";
+    fetch(`/api/module/RP01/report8/meta`)
+        .then(r => r.json().then(j => ({ ok: r.ok, j })))
+        .then(({ ok, j }) => {
+            if (!ok) { status.textContent = j.error || "Failed to load year/month options."; return; }
+            META3 = j;
+            populateYearSelect3();
+            populateMonthSelect3();
+            status.textContent = "";
+            loadReport3();
+        })
+        .catch(err => { status.textContent = "Failed to load year/month options."; console.error(err); });
+}
+
+function renderRow(r) {
+    // Trailing "& Percentage" summary row -- matches the reference template's bottom line
+    if (r.is_percentage_row) {
+        return `
+            <tr class="percentage-row">
+                <td class="sl"></td>
+                <td class="item"></td>
+                <td class="unit">${r.unit}</td>
+                <td class="val">-</td>
+                <td class="val">-</td>
+                <td class="val">-</td>
+                <td class="val">-</td>
+            </tr>`;
+    }
+
+    const itemClass = r.sub ? "item sub" : "item";
+    const slVal = (r.sr === null || r.sr === undefined) ? "" : r.sr;
+    const label = r.label_html || r.label;
+
+    if (!r.available) {
+        return `
+            <tr>
+                <td class="sl">${slVal}</td>
+                <td class="${itemClass}">${label}</td>
+                <td class="unit">${r.unit}</td>
+                <td class="na">N/A</td>
+                <td class="na">N/A</td>
+                <td class="na">N/A</td>
+                <td class="na">N/A</td>
+            </tr>`;
+    }
+
+    // split_unavailable rows (Container / Other-than-Container breakdown):
+    // shown in red, never yellow-highlighted, since the split itself isn't
+    // independently meaningful yet -- only the combined totals are.
+    const cells = [r.this_month, r.last_month, r.this_upto, r.last_upto].map(v => {
+        if (r.hide_value) {
+            return `<td class="val"></td>`;
+        }
+        let cls = "val";
+        if (r.split_unavailable) {
+            cls += " split-na";
+        } else if (v) {
+            cls += " highlight-cell";
+        }
+        return `<td class="${cls}">${fmtVal(v)}</td>`;
+    }).join("");
+
+    return `
+        <tr>
+            <td class="sl">${slVal}</td>
+            <td class="${itemClass}">${label}</td>
+            <td class="unit">${r.unit}</td>
+            ${cells}
+        </tr>`;
+}
+
+function loadReport3() {
+    const fin_year = document.getElementById("yearSelect3").value;
+    const month_idx = document.getElementById("monthSelect3").value;
+    const status = document.getElementById("reportStatus3");
+
+    if (!fin_year || month_idx === "") { status.textContent = "Select a year and month first."; return; }
+    status.textContent = "";
+
+    fetch(`/api/module/RP01/report8/report?fin_year=${fin_year}&month_idx=${month_idx}`)
+        .then(r => r.json().then(j => ({ ok: r.ok, j })))
+        .then(({ ok, j }) => {
+            if (!ok) { status.textContent = j.error || "Failed to load report."; return; }
+            document.getElementById("monthLabel3").textContent = j.month_label || "";
+            document.getElementById("pmoBody").innerHTML = (j.rows || []).map(renderRow).join("");
+
+            const prov = j.provisional || {};
+            const badge = ' <span class="prov-badge">PROVISIONAL</span>';
+            document.getElementById("thThisMonth").innerHTML = "This Year<br>Month" + (prov.this_month ? badge : "");
+            document.getElementById("thLastMonth").innerHTML = "Last Year<br>Month" + (prov.last_month ? badge : "");
+            document.getElementById("thThisUpto").innerHTML = "This Year<br>Upto Month" + (prov.this_upto ? badge : "");
+            document.getElementById("thLastUpto").innerHTML = "Last Year<br>Upto Month" + (prov.last_upto ? badge : "");
+            document.getElementById("provNote").style.display = Object.values(prov).some(Boolean) ? "block" : "none";
+        })
+        .catch(err => { status.textContent = "Failed to load report."; console.error(err); });
+}
+
+function exportReport3() {
+    const fin_year = document.getElementById("yearSelect3").value;
+    const month_idx = document.getElementById("monthSelect3").value;
+    if (!fin_year || month_idx === "") {
+        document.getElementById("reportStatus3").textContent = "Select a year and month first.";
+        return;
+    }
+    window.location.href = `/api/module/RP01/report8/export?fin_year=${fin_year}&month_idx=${month_idx}`;
+}
+
+loadMetaThenReport3();
+</script>
+{% endblock %}

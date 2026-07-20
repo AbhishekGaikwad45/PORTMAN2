@@ -71,7 +71,7 @@ def get_expected_waiting_vessels(window_start, window_end):
                 parcels.total_quantity AS cargo_quantity,
                 parcels.equipment_names,
                 parcels.consigner_names,
-                COALESCE(last_draft.actioned_at, vh.doc_date::timestamptz) AS draft_since
+                ldud.nor_tendered
             FROM vcn_header vh
             LEFT JOIN LATERAL (
                 SELECT
@@ -81,40 +81,41 @@ def get_expected_waiting_vessels(window_start, window_end):
                     SUM(NULLIF(quantity, '')::numeric) AS total_quantity
                 FROM (
                     SELECT unload_terminal, equipment_names, consigner_name, quantity
-                    FROM vcn_consigners WHERE vcn_id = vh.id
+                    FROM vcn_consigners
+                    WHERE vcn_id = vh.id
+
                     UNION ALL
+
                     SELECT unload_terminal, equipment_names, consigner_name, quantity
-                    FROM vcn_export_cargo_declaration WHERE vcn_id = vh.id
+                    FROM vcn_export_cargo_declaration
+                    WHERE vcn_id = vh.id
                 ) p
             ) AS parcels ON TRUE
+
             LEFT JOIN LATERAL (
-                SELECT action, actioned_at
-                FROM approval_log
-                WHERE module_code = 'VCN01'
-                  AND record_id = vh.id
-                  AND actioned_at <= %s
-                ORDER BY actioned_at DESC
+                SELECT nor_tendered
+                FROM ldud_header l
+                WHERE l.vcn_id = vh.id
+                ORDER BY l.id DESC
                 LIMIT 1
-            ) AS last_action ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT actioned_at
-                FROM approval_log
-                WHERE module_code = 'VCN01'
-                  AND record_id = vh.id
-                  AND action = 'Back to Draft'
-                  AND actioned_at <= %s
-                ORDER BY actioned_at DESC
-                LIMIT 1
-            ) AS last_draft ON TRUE
+            ) AS ldud ON TRUE
+
             WHERE
-                (last_action.action IS NULL OR last_action.action != 'Approved')
-              AND (NULLIF(vh.doc_date::text, ''))::timestamptz < %s
+                EXISTS (
+                    SELECT 1
+                    FROM ldud_header l
+                    WHERE l.vcn_id = vh.id
+                )
               AND NOT EXISTS (
-                  SELECT 1 FROM ldud_header l
+                  SELECT 1
+                  FROM ldud_header l
                   WHERE l.vcn_id = vh.id
+                    AND l.alongside_datetime IS NOT NULL
+                    AND NULLIF(TRIM(l.alongside_datetime::text), '') IS NOT NULL
               )
             ORDER BY vh.doc_date ASC NULLS LAST
-        """, [window_end, window_end, window_end])
+        """)
+
         rows = [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
@@ -139,10 +140,10 @@ def get_expected_waiting_vessels(window_start, window_end):
             'ata':          '',
             'lpc':          '',
             'doc':          _fmt_dt(r.get('doc_date')),
-            'nor':          '',
+            'nor':          _fmt_dt(r.get('nor_tendered')),
             'berth':        r.get('berth_name'),
-            'draft_since':  _fmt_dt(r.get('draft_since')),
         })
+
     return out
 # ══════════════════════════════════════════════════════════════════
 #  Page route
