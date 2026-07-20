@@ -25,21 +25,27 @@ def save_data(data):
     cur = get_cursor(conn)
     row_id = data.get('id')
     name = data.get('name', '')
+    description = data.get('description', '')
     to_sof = data.get('to_sof', '')
     dtype = data.get('type', '')
-    type_2 = data.get('type_2', '')
-    type_3 = data.get('type_3', '')
-    type_4 = data.get('type_4', '')
+    delay_type = data.get('delay_type', '')
+    particular = data.get('particular', '')
+    responsibility = data.get('responsibility', '')
 
     if row_id:
         cur.execute(
-            f"UPDATE {TABLE} SET name=%s, to_sof=%s, type=%s, type_2=%s, type_3=%s, type_4=%s WHERE id=%s",
-            [name, to_sof, dtype, type_2, type_3, type_4, row_id],
+            f"""UPDATE {TABLE}
+                SET name=%s, description=%s, to_sof=%s, type=%s,
+                    delay_type=%s, particular=%s, responsibility=%s
+                WHERE id=%s""",
+            [name, description, to_sof, dtype, delay_type, particular, responsibility, row_id],
         )
     else:
         cur.execute(
-            f"INSERT INTO {TABLE} (name, to_sof, type, type_2, type_3, type_4) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-            [name, to_sof, dtype, type_2, type_3, type_4],
+            f"""INSERT INTO {TABLE}
+                (name, description, to_sof, type, delay_type, particular, responsibility)
+                VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            [name, description, to_sof, dtype, delay_type, particular, responsibility],
         )
         row_id = cur.fetchone()['id']
 
@@ -55,10 +61,13 @@ def bulk_insert(rows):
         if not row.get('name'):
             continue
         cur.execute(
-            f"INSERT INTO {TABLE} (name, to_sof, type, type_2, type_3, type_4) VALUES (%s, %s, %s, %s, %s, %s)",
+            f"""INSERT INTO {TABLE}
+                (name, description, to_sof, type, delay_type, particular, responsibility)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)""",
             [
-                row.get('name', ''), row.get('to_sof', ''), row.get('type', ''),
-                row.get('type_2', ''), row.get('type_3', ''), row.get('type_4', ''),
+                row.get('name', ''), row.get('description', ''), row.get('to_sof', ''),
+                row.get('type', ''), row.get('delay_type', ''), row.get('particular', ''),
+                row.get('responsibility', ''),
             ],
         )
         inserted += 1

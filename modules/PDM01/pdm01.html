@@ -34,13 +34,14 @@
             columns: [
                 {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
                 {title: "Delay Name", field: "name", editor: canEdit ? "input" : false, widthGrow: 2},
+                {title: "Description", field: "description", editor: canEdit ? "textarea" : false, widthGrow: 2},
                 {title: "To SOF", field: "to_sof", editor: canEdit ? "list" : false, width: 100,
                     editorParams: {values: {"Yes": "Yes", "No": "No"}, allowEmpty: true}},
                 {title: "Type", field: "type", editor: canEdit ? "list" : false, width: 120,
                     editorParams: {values: {"Port": "Port", "Non Port": "Non Port"}, allowEmpty: true}},
-                {title: "Type 2", field: "type_2", editor: canEdit ? "input" : false, width: 120},
-                {title: "Type 3", field: "type_3", editor: canEdit ? "input" : false, width: 120},
-                {title: "Type 4", field: "type_4", editor: canEdit ? "input" : false, width: 120}
+                {title: "Delay Type", field: "delay_type", editor: canEdit ? "input" : false, width: 130},
+                {title: "Particular", field: "particular", editor: canEdit ? "input" : false, width: 130},
+                {title: "Responsibility", field: "responsibility", editor: canEdit ? "input" : false, width: 150}
             ],
             pagination: true,
             paginationMode: "remote",
