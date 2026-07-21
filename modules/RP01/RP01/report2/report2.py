@@ -512,12 +512,25 @@ def load_data() -> pd.DataFrame:
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT fin_year, month, category, cargo AS cargo_type, import_export, quantity
-            FROM mis_vessel_master
-            WHERE fin_year IS NOT NULL
-              AND month IS NOT NULL
-              AND category IS NOT NULL
-        """)
+    SELECT
+        fin_year,
+        month,
+        category,
+        cargo AS cargo_type,
+        import_export,
+        quantity
+    FROM mis_vessel_master
+    WHERE fin_year IS NOT NULL
+      AND month IS NOT NULL
+      AND category IS NOT NULL
+      AND (
+            fin_year < '2026-27'
+         OR (
+                fin_year = '2026-27'
+            AND SPLIT_PART(month, '-', 1) IN ('Apr', 'May', 'Jun')
+         )
+      )
+""")
         rows = cur.fetchall()
     finally:
         conn.close()
