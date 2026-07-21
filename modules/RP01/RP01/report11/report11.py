@@ -42,6 +42,8 @@ from flask import jsonify, request, render_template, send_file, session, redirec
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
+import re
+from datetime import datetime, timedelta
 
 from database import get_db, get_cursor
 
@@ -78,8 +80,152 @@ def month_options_for(fin_year: str):
         yy = start_y if idx < 9 else start_y + 1
         opts.append({"idx": idx, "label": f"{mn}-{str(yy % 100).zfill(2)}"})
     return opts
+def _days_between(t1, t2):
+    """Days (float) from t1 -> t2. 0 if either is missing or negative."""
+    if t1 is None or t2 is None:
+        return 0.0
+    delta = (t2 - t1).total_seconds() / 86400.0
+    return delta if delta > 0 else 0.0
+def _classify_delay_reason(delay_name):
+    """Matches a lueu_parcel_log.delay_name string against the same
+    REASONS_PORT / REASONS_NON_PORT legends used in the Excel export.
+    Returns 'port', 'non_port', or None if it can't tell / blank."""
+    name = str(delay_name or "").strip().upper()
+    if not name:
+        return None
+
+    port_keywords = (
+        "BERTH", "TUG", "PILOT", "EQUIPMENT", "BREAKDOWN", "WORKER",
+        "STRIKE", "STOPPAGE", "POWER FAILURE", "LABOUR HOLIDAY",
+        "NIGHT NAVIGATION", "DRAFT RESTRICTION",
+    )
+    non_port_keywords = (
+        "SHIP", "SHIPPER", "AGENT", "CARGO", "DEPARTURE", "WEATHER",
+        "STORAGE", "TIDAL", "DOCUMENT", "POWER FAILURE GRID", "SCHEDULE",
+    )
+
+    if any(k in name for k in port_keywords):
+        return "port"
+    if any(k in name for k in non_port_keywords):
+        return "non_port"
+    return None
 
 
+def _fetch_live_idle_by_parcel_op(cur, parcel_op_ids):
+    """Sums idle/delay hours (as day-fractions) from lueu_parcel_log per
+    parcel_op_id, split into port / non-port buckets by delay_name."""
+    idle = {}  # parcel_op_id -> {"port": days, "non_port": days}
+    if not parcel_op_ids:
+        return idle
+
+    cur.execute("""
+        SELECT parcel_op_id, entry_date, from_time, to_time, delay_name
+        FROM lueu_parcel_log
+        WHERE COALESCE(is_deleted, FALSE) = FALSE
+          AND parcel_op_id = ANY(%s)
+          AND delay_name IS NOT NULL
+          AND delay_name <> ''
+    """, (list(parcel_op_ids),))
+
+    for r in cur.fetchall():
+        bucket = _classify_delay_reason(r["delay_name"])
+        if bucket is None:
+            continue
+        try:
+            entry_date = str(r["entry_date"]).strip()
+            ft = datetime.strptime(f"{entry_date} {r['from_time']}", "%Y-%m-%d %H:%M")
+            tt = datetime.strptime(f"{entry_date} {r['to_time']}", "%Y-%m-%d %H:%M")
+            if tt <= ft:
+                tt += timedelta(days=1)  # spans midnight
+            days = (tt - ft).total_seconds() / 86400.0
+        except (ValueError, TypeError):
+            continue
+
+        pid = r["parcel_op_id"]
+        idle.setdefault(pid, {"port": 0.0, "non_port": 0.0})
+        idle[pid][bucket] += days
+
+    return idle
+
+
+def _fetch_live_rows(cur):
+    """Current-month vessel-call rows built from LDUD/VCN, in the same
+    shape as the mis_vessel_master rows, for months not yet migrated
+    into mis_vessel_master."""
+    cur.execute("""
+        SELECT
+            po.id AS parcel_op_id,
+            to_char(current_date, 'YYYY') || '-' ||
+                right(to_char(current_date + interval '1 year', 'YYYY'), 2) AS fin_year,
+            to_char(current_date, 'Mon-YY') AS month,
+            vh.berth_name AS berth_no,
+            vh.operation_type AS import_export,
+            po.cargo_name AS cargo,
+            po.quantity AS quantity,
+            lh.nor_tendered AS nor_tendered,
+            lh.nor_accepted AS nor_accepted,
+            lh.alongside_datetime AS alongside_datetime,
+            lh.cast_off_datetime AS cast_off_datetime,
+            lh.pilot_pickup_time AS pilot_pickup_time,
+            lh.pilot_board_departure AS pilot_board_departure
+        FROM ldud_parcel_ops po
+        JOIN ldud_header lh ON lh.id = po.ldud_id
+        JOIN vcn_header vh ON vh.id = lh.vcn_id
+        WHERE to_char(current_date, 'Mon-YY') = to_char(current_date, 'Mon-YY')
+    """)
+    raw = cur.fetchall()
+    if not raw:
+        return []
+
+    parcel_op_ids = [r["parcel_op_id"] for r in raw]
+    idle = _fetch_live_idle_by_parcel_op(cur, parcel_op_ids)
+
+    rows = []
+    for r in raw:
+        nor_tendered = _parse_ts(r["nor_tendered"])
+        nor_accepted = _parse_ts(r["nor_accepted"])
+        alongside = _parse_ts(r["alongside_datetime"])
+        cast_off = _parse_ts(r["cast_off_datetime"])
+        pilot_pickup = _parse_ts(r["pilot_pickup_time"])
+        pilot_departure = _parse_ts(r["pilot_board_departure"])
+
+        waiting_non_port = _days_between(nor_tendered, nor_accepted)
+        waiting_port = _days_between(nor_accepted, alongside)
+        stay_at_berth = _days_between(alongside, cast_off)
+        inward_movement = _days_between(pilot_pickup, alongside)
+        outward_movement = _days_between(pilot_departure, cast_off)
+
+        idle_bucket = idle.get(r["parcel_op_id"], {"port": 0.0, "non_port": 0.0})
+
+        rows.append({
+            "fin_year": r["fin_year"],
+            "month": r["month"],
+            "berth_no": r["berth_no"],
+            "import_export": r["import_export"],
+            "cargo": r["cargo"],
+            "quantity": r["quantity"],
+            "pre_berthing_waiting": waiting_port + waiting_non_port,
+            "waiting_port": waiting_port,
+            "waiting_non_port": waiting_non_port,
+            "stay_at_berth": stay_at_berth,
+            "inward_movement": inward_movement,
+            "outward_movement": outward_movement,
+            "non_working_port": idle_bucket["port"],
+            "non_working_non_port": idle_bucket["non_port"],
+        })
+    return rows
+def _parse_ts(val):
+    """LDUD header fields are free-text ISO-ish datetimes ('2026-07-12T14:40')
+    or blank. Returns a datetime or None."""
+    if not val or not str(val).strip():
+        return None
+    val = str(val).strip()
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(val, fmt)
+        except ValueError:
+            continue
+    return None
 def month_str_to_idx(month_str: str) -> int:
     abbrev = str(month_str).split("-")[0].strip()
     try:
@@ -165,7 +311,24 @@ def load_data() -> pd.DataFrame:
             WHERE fin_year IS NOT NULL
               AND month IS NOT NULL
         """)
-        rows = cur.fetchall()
+        mis_rows = cur.fetchall()
+
+        # ------------------------------------------------------------
+        # Only pull live LDUD/LUEU data if the current month isn't
+        # already present in mis_vessel_master. Never discard mis_rows.
+        # ------------------------------------------------------------
+        current_month = pd.Timestamp.today().strftime("%b-%y")
+        mis_current = [r for r in mis_rows if str(r["month"]).strip() == current_month]
+
+        live_rows = []
+        if not mis_current:
+            print("REPORT11: Current month not found in mis_vessel_master")
+            print("REPORT11: Loading live LDUD/LUEU data...")
+            live_rows = _fetch_live_rows(cur)
+        else:
+            print("REPORT11: Current month already present in mis_vessel_master — skipping live load")
+
+        rows = list(mis_rows) + list(live_rows)
     finally:
         conn.close()
 

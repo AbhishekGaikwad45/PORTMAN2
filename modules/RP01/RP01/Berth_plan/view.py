@@ -52,13 +52,14 @@ def get_berths(cur=None):
         conn.close()
     return berths
 
-
 def get_expected_waiting_vessels(window_start, window_end):
     conn = get_db()
     cur = get_cursor(conn)
+
     try:
         cur.execute("""
             SELECT
+                vh.id,
                 vh.vessel_name,
                 vh.via_number,
                 vh.loa,
@@ -67,12 +68,16 @@ def get_expected_waiting_vessels(window_start, window_end):
                 vh.berth_name,
                 vh.doc_date,
                 vh.cargo_type AS cargo_name,
+
                 parcels.terminal_name,
                 parcels.total_quantity AS cargo_quantity,
                 parcels.equipment_names,
                 parcels.consigner_names,
-                ldud.nor_tendered
+
+                ldud.alongside_datetime
+
             FROM vcn_header vh
+
             LEFT JOIN LATERAL (
                 SELECT
                     STRING_AGG(DISTINCT NULLIF(TRIM(unload_terminal), ''), ', ') AS terminal_name,
@@ -80,71 +85,165 @@ def get_expected_waiting_vessels(window_start, window_end):
                     STRING_AGG(DISTINCT NULLIF(TRIM(consigner_name), ''), ', ') AS consigner_names,
                     SUM(NULLIF(quantity, '')::numeric) AS total_quantity
                 FROM (
-                    SELECT unload_terminal, equipment_names, consigner_name, quantity
+                    SELECT
+                        unload_terminal,
+                        equipment_names,
+                        consigner_name,
+                        quantity
                     FROM vcn_consigners
                     WHERE vcn_id = vh.id
 
                     UNION ALL
 
-                    SELECT unload_terminal, equipment_names, consigner_name, quantity
+                    SELECT
+                        unload_terminal,
+                        equipment_names,
+                        consigner_name,
+                        quantity
                     FROM vcn_export_cargo_declaration
                     WHERE vcn_id = vh.id
                 ) p
-            ) AS parcels ON TRUE
+            ) parcels ON TRUE
 
             LEFT JOIN LATERAL (
-                SELECT nor_tendered
-                FROM ldud_header l
-                WHERE l.vcn_id = vh.id
-                ORDER BY l.id DESC
+                SELECT
+                    alongside_datetime
+                FROM ldud_header
+                WHERE vcn_id = vh.id
+                ORDER BY id DESC
                 LIMIT 1
-            ) AS ldud ON TRUE
+            ) ldud ON TRUE
 
             WHERE
-                EXISTS (
-                    SELECT 1
-                    FROM ldud_header l
-                    WHERE l.vcn_id = vh.id
-                )
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM ldud_header l
-                  WHERE l.vcn_id = vh.id
-                    AND l.alongside_datetime IS NOT NULL
-                    AND NULLIF(TRIM(l.alongside_datetime::text), '') IS NOT NULL
-              )
+                ldud.alongside_datetime IS NULL
+                OR NULLIF(TRIM(ldud.alongside_datetime::text), '') IS NULL
+
             ORDER BY vh.doc_date ASC NULLS LAST
         """)
 
         rows = [dict(r) for r in cur.fetchall()]
+
     finally:
         conn.close()
 
     def _combine(r):
-        parts = [r.get('agents'), r.get('consigner_names')]
-        return ' / '.join(p for p in parts if p)
+        parts = [r.get("agents"), r.get("consigner_names")]
+        return " / ".join(p for p in parts if p)
 
     out = []
+
     for r in rows:
         out.append({
-            'terminal':     r.get('terminal_name'),
-            'vessel_name':  r.get('vessel_name'),
-            'via_no':       r.get('via_number'),
-            'loa':          r.get('loa'),
-            'dft':          r.get('draft'),
-            'agt_tnk_cons': _combine(r),
-            'cargo':        r.get('cargo_name'),
-            'mla':          r.get('equipment_names'),
-            'quantity':     r.get('cargo_quantity'),
-            'eta':          _fmt_dt(r.get('doc_date')),
-            'ata':          '',
-            'lpc':          '',
-            'doc':          _fmt_dt(r.get('doc_date')),
-            'nor':          _fmt_dt(r.get('nor_tendered')),
-            'berth':        r.get('berth_name'),
+            "terminal":     r.get("terminal_name"),
+            "vessel_name":  r.get("vessel_name"),
+            "via_no":       r.get("via_number"),
+            "loa":          r.get("loa"),
+            "dft":          r.get("draft"),
+            "agt_tnk_cons": _combine(r),
+            "cargo":        r.get("cargo_name"),
+            "mla":          r.get("equipment_names"),
+            "quantity":     r.get("cargo_quantity"),
+            "eta":          _fmt_dt(r.get("doc_date")),
+            "ata":          "",
+            "lpc":          "",
+            "doc":          _fmt_dt(r.get("doc_date")),
+            "berth":        r.get("berth_name"),
         })
 
     return out
+
+# def get_expected_waiting_vessels(window_start, window_end):
+#     conn = get_db()
+#     cur = get_cursor(conn)
+#     try:
+#         cur.execute("""
+#             SELECT
+#                 vh.vessel_name,
+#                 vh.via_number,
+#                 vh.loa,
+#                 vh.draft,
+#                 vh.vessel_agent_name AS agents,
+#                 vh.berth_name,
+#                 vh.doc_date,
+#                 vh.cargo_type AS cargo_name,
+#                 parcels.terminal_name,
+#                 parcels.total_quantity AS cargo_quantity,
+#                 parcels.equipment_names,
+#                 parcels.consigner_names,
+#                 ldud.nor_tendered
+#             FROM vcn_header vh
+#             LEFT JOIN LATERAL (
+#                 SELECT
+#                     STRING_AGG(DISTINCT NULLIF(TRIM(unload_terminal), ''), ', ') AS terminal_name,
+#                     STRING_AGG(DISTINCT NULLIF(TRIM(equipment_names), ''), ', ') AS equipment_names,
+#                     STRING_AGG(DISTINCT NULLIF(TRIM(consigner_name), ''), ', ') AS consigner_names,
+#                     SUM(NULLIF(quantity, '')::numeric) AS total_quantity
+#                 FROM (
+#                     SELECT unload_terminal, equipment_names, consigner_name, quantity
+#                     FROM vcn_consigners
+#                     WHERE vcn_id = vh.id
+
+#                     UNION ALL
+
+#                     SELECT unload_terminal, equipment_names, consigner_name, quantity
+#                     FROM vcn_export_cargo_declaration
+#                     WHERE vcn_id = vh.id
+#                 ) p
+#             ) AS parcels ON TRUE
+
+#             LEFT JOIN LATERAL (
+#                 SELECT nor_tendered
+#                 FROM ldud_header l
+#                 WHERE l.vcn_id = vh.id
+#                 ORDER BY l.id DESC
+#                 LIMIT 1
+#             ) AS ldud ON TRUE
+
+#             WHERE
+#                 EXISTS (
+#                     SELECT 1
+#                     FROM ldud_header l
+#                     WHERE l.vcn_id = vh.id
+#                 )
+#               AND NOT EXISTS (
+#                   SELECT 1
+#                   FROM ldud_header l
+#                   WHERE l.vcn_id = vh.id
+#                     AND l.alongside_datetime IS NOT NULL
+#                     AND NULLIF(TRIM(l.alongside_datetime::text), '') IS NOT NULL
+#               )
+#             ORDER BY vh.doc_date ASC NULLS LAST
+#         """)
+
+#         rows = [dict(r) for r in cur.fetchall()]
+#     finally:
+#         conn.close()
+
+#     def _combine(r):
+#         parts = [r.get('agents'), r.get('consigner_names')]
+#         return ' / '.join(p for p in parts if p)
+
+#     out = []
+#     for r in rows:
+#         out.append({
+#             'terminal':     r.get('terminal_name'),
+#             'vessel_name':  r.get('vessel_name'),
+#             'via_no':       r.get('via_number'),
+#             'loa':          r.get('loa'),
+#             'dft':          r.get('draft'),
+#             'agt_tnk_cons': _combine(r),
+#             'cargo':        r.get('cargo_name'),
+#             'mla':          r.get('equipment_names'),
+#             'quantity':     r.get('cargo_quantity'),
+#             'eta':          _fmt_dt(r.get('doc_date')),
+#             'ata':          '',
+#             'lpc':          '',
+#             'doc':          _fmt_dt(r.get('doc_date')),
+#             'nor':          _fmt_dt(r.get('nor_tendered')),
+#             'berth':        r.get('berth_name'),
+#         })
+
+#     return out
 # ══════════════════════════════════════════════════════════════════
 #  Page route
 # ══════════════════════════════════════════════════════════════════
