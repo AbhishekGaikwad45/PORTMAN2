@@ -328,18 +328,22 @@ def load_data() -> pd.DataFrame:
             WHERE fin_year IS NOT NULL
             AND month IS NOT NULL
         """)
-        rows = cur.fetchall()
-        # --------------------------------------------------
-        # If MIS has no current month data then use live VCN
-        # --------------------------------------------------
+        mis_rows = cur.fetchall()
 
+        # --------------------------------------------------
+        # Check if MIS already has the current month.
+        # If it does NOT, pull the current month from the
+        # live VCN tables and APPEND it to the MIS rows
+        # (do not replace the historical MIS data).
+        # --------------------------------------------------
         current_month = pd.Timestamp.today().strftime("%b-%y")
 
         mis_current = [
-            r for r in rows
+            r for r in mis_rows
             if str(r["month"]).strip() == current_month
         ]
 
+        live_rows = []
         if not mis_current:
 
             print("REPORT12: Current month not found in mis_vessel_master")
@@ -371,7 +375,13 @@ def load_data() -> pd.DataFrame:
                     ON e.vcn_id=h.id
             """)
 
-            rows = cur.fetchall()
+            live_rows = cur.fetchall()
+        else:
+            print("REPORT12: Current month already present in mis_vessel_master — skipping live VCN load")
+
+        # Combine historical MIS rows with live rows (if any). Never
+        # discard mis_rows.
+        rows = list(mis_rows) + list(live_rows)
     finally:
         conn.close()
 
@@ -395,8 +405,6 @@ def load_data() -> pd.DataFrame:
 
     df["fin_year"] = df["fin_year"].str.strip()
     df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
-
-
 
     # Convert quantity to numeric
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
@@ -460,7 +468,6 @@ def load_data() -> pd.DataFrame:
 
     print(f"REPORT12 DEBUG: rows remaining after foreign_indian mapping: {len(df)}")
 
-    
     # No TEU source in the current schema; TEU row is always 0.
     is_teu_row = df["row_key"] == "Container (In TEUs)"
     # Database already stores the values you want to display.
