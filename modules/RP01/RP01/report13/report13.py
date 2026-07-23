@@ -324,10 +324,13 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                 vh.vessel_agent_name AS agent,
                 COALESCE(v.gt, 0) AS grt,
                 COALESCE(v.loa, 0) AS loa,
-                'LIQUID' AS cargo_type,
+
+                COALESCE(vc.cargo_category, '') AS cargo_type,
+
                 pa.cargo_name AS cargo,
                 'JJLTPL' AS terminal,
                 vh.berth_name AS berth,
+
                 to_char(NULLIF(lh.anchored_datetime, '')::timestamp, '{DATETIME_FMT}') AS anchored_time,
                 to_char(NULLIF(lh.pilot_pickup_time, '')::timestamp, '{DATETIME_FMT}') AS pilot_boarded,
                 to_char(NULLIF(lh.alongside_datetime, '')::timestamp, '{DATETIME_FMT}') AS alongside_time,
@@ -335,6 +338,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                 to_char(pa.cargo_completed::timestamp, '{DATETIME_FMT}') AS cargo_completed,
                 to_char(NULLIF(lh.cast_off_datetime, '')::timestamp, '{DATETIME_FMT}') AS cast_off_time,
                 to_char(NULLIF(lh.pilot_disembarked, '')::timestamp, '{DATETIME_FMT}') AS pilot_disembarked,
+
                 COALESCE(pa.quantity, 0) AS quantity
 
             FROM ldud_header lh
@@ -348,6 +352,9 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
 
             LEFT JOIN parcel_agg pa
                 ON pa.ldud_id = lh.id
+
+            LEFT JOIN vessel_cargo vc
+                ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(pa.cargo_name))
 
             WHERE NULLIF(lh.created_date, '') IS NOT NULL
               AND NULLIF(lh.created_date, '')::date >= %(period_start)s
