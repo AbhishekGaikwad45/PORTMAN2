@@ -152,98 +152,7 @@ def get_expected_waiting_vessels(window_start, window_end):
 
     return out
 
-# def get_expected_waiting_vessels(window_start, window_end):
-#     conn = get_db()
-#     cur = get_cursor(conn)
-#     try:
-#         cur.execute("""
-#             SELECT
-#                 vh.vessel_name,
-#                 vh.via_number,
-#                 vh.loa,
-#                 vh.draft,
-#                 vh.vessel_agent_name AS agents,
-#                 vh.berth_name,
-#                 vh.doc_date,
-#                 vh.cargo_type AS cargo_name,
-#                 parcels.terminal_name,
-#                 parcels.total_quantity AS cargo_quantity,
-#                 parcels.equipment_names,
-#                 parcels.consigner_names,
-#                 ldud.nor_tendered
-#             FROM vcn_header vh
-#             LEFT JOIN LATERAL (
-#                 SELECT
-#                     STRING_AGG(DISTINCT NULLIF(TRIM(unload_terminal), ''), ', ') AS terminal_name,
-#                     STRING_AGG(DISTINCT NULLIF(TRIM(equipment_names), ''), ', ') AS equipment_names,
-#                     STRING_AGG(DISTINCT NULLIF(TRIM(consigner_name), ''), ', ') AS consigner_names,
-#                     SUM(NULLIF(quantity, '')::numeric) AS total_quantity
-#                 FROM (
-#                     SELECT unload_terminal, equipment_names, consigner_name, quantity
-#                     FROM vcn_consigners
-#                     WHERE vcn_id = vh.id
 
-#                     UNION ALL
-
-#                     SELECT unload_terminal, equipment_names, consigner_name, quantity
-#                     FROM vcn_export_cargo_declaration
-#                     WHERE vcn_id = vh.id
-#                 ) p
-#             ) AS parcels ON TRUE
-
-#             LEFT JOIN LATERAL (
-#                 SELECT nor_tendered
-#                 FROM ldud_header l
-#                 WHERE l.vcn_id = vh.id
-#                 ORDER BY l.id DESC
-#                 LIMIT 1
-#             ) AS ldud ON TRUE
-
-#             WHERE
-#                 EXISTS (
-#                     SELECT 1
-#                     FROM ldud_header l
-#                     WHERE l.vcn_id = vh.id
-#                 )
-#               AND NOT EXISTS (
-#                   SELECT 1
-#                   FROM ldud_header l
-#                   WHERE l.vcn_id = vh.id
-#                     AND l.alongside_datetime IS NOT NULL
-#                     AND NULLIF(TRIM(l.alongside_datetime::text), '') IS NOT NULL
-#               )
-#             ORDER BY vh.doc_date ASC NULLS LAST
-#         """)
-
-#         rows = [dict(r) for r in cur.fetchall()]
-#     finally:
-#         conn.close()
-
-#     def _combine(r):
-#         parts = [r.get('agents'), r.get('consigner_names')]
-#         return ' / '.join(p for p in parts if p)
-
-#     out = []
-#     for r in rows:
-#         out.append({
-#             'terminal':     r.get('terminal_name'),
-#             'vessel_name':  r.get('vessel_name'),
-#             'via_no':       r.get('via_number'),
-#             'loa':          r.get('loa'),
-#             'dft':          r.get('draft'),
-#             'agt_tnk_cons': _combine(r),
-#             'cargo':        r.get('cargo_name'),
-#             'mla':          r.get('equipment_names'),
-#             'quantity':     r.get('cargo_quantity'),
-#             'eta':          _fmt_dt(r.get('doc_date')),
-#             'ata':          '',
-#             'lpc':          '',
-#             'doc':          _fmt_dt(r.get('doc_date')),
-#             'nor':          _fmt_dt(r.get('nor_tendered')),
-#             'berth':        r.get('berth_name'),
-#         })
-
-#     return out
 # ══════════════════════════════════════════════════════════════════
 #  Page route
 # ══════════════════════════════════════════════════════════════════
@@ -258,11 +167,32 @@ def berth_plan_page():
 
 
 def get_report_window(plan_date_str):
-    """'As on <date> @ 07:00' covers the PRIOR 24 hours:
-    (date-1) 07:00 -> date 07:00."""
-    plan_date = datetime.strptime(plan_date_str, '%Y-%m-%d')
-    window_end = plan_date.replace(hour=7, minute=0, second=0, microsecond=0)
-    window_start = window_end - timedelta(days=1)
+    """
+    Selected date = calendar day.
+
+    Report window:
+        00:00:00 -> 23:59:59
+
+    'As On' time:
+        Today      -> current time (live)
+        Past date  -> 23:59
+    """
+    plan_date = datetime.strptime(plan_date_str, "%Y-%m-%d").date()
+    today = datetime.now().date()
+
+    window_start = datetime.combine(
+        plan_date,
+        datetime.min.time()
+    )
+
+    if plan_date == today:
+        window_end = datetime.now()
+    else:
+        window_end = datetime.combine(
+            plan_date,
+            datetime.max.time().replace(microsecond=0)
+        )
+
     return window_start, window_end
 
 
@@ -339,7 +269,17 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
 
     cur.execute('''SELECT MIN(po.start_dt::timestamp) AS started
                    FROM ldud_parcel_ops po WHERE po.ldud_id=%s''', [ldud_id])
+                    
     ops_commenced = cur.fetchone()['started']
+    cur.execute('''
+        SELECT MAX(po.end_dt::timestamp) AS completed
+        FROM ldud_parcel_ops po
+        WHERE po.ldud_id = %s
+        AND po.end_dt IS NOT NULL
+        AND NULLIF(TRIM(po.end_dt::text), '') IS NOT NULL
+    ''', [ldud_id])
+
+    cargo_completed = cur.fetchone()['completed']
 
     # target_qty comes from the live VCN parcel quantities (via get_started_parcels) —
     # this is a "current truth" number and is NOT date-dependent.
@@ -427,7 +367,8 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     return {
         'consigner': consigner,
         'quantity': target_qty,
-        'ops_commenced': _fmt_dt(ops_commenced),
+    'ops_commenced': _fmt_dt(ops_commenced),          # First parcel start
+    'cargo_completion': _fmt_dt(cargo_completed),     # Last parcel end
         'last_24hr_qty': last_24hr_qty,
         'till_now_qty': round(logged_qty, 3),
         'balance': balance_qty,
@@ -448,6 +389,7 @@ def _base_row(h):
         'berth_name': h.get('berth_name') or '',
         'imo_num': h.get('imo_num') or '',
         'nationality': h.get('nationality') or '',
+        'vessel_run_type': h.get('vessel_run_type') or '',
         'remarks': '',
     }
 
@@ -470,14 +412,17 @@ def get_berthed_vessels(window_start, window_end, berths):
                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline
         FROM ldud_header l
         JOIN vcn_header h ON h.id = l.vcn_id
-        LEFT JOIN vessels v ON UPPER(TRIM(v.vessel_name)) = UPPER(TRIM(h.vessel_name))
+        LEFT JOIN vessels v
+            ON UPPER(REPLACE(TRIM(v.vessel_name), 'MT ', ''))
+            =
+            UPPER(REPLACE(TRIM(h.vessel_name), 'MT ', ''))
         WHERE h.berth_name = ANY(%s)
           AND l.alongside_datetime IS NOT NULL
           AND (NULLIF(l.alongside_datetime::text, ''))::timestamp < %s
           AND (
                 l.{SAIL_COLUMN} IS NULL
                 OR NULLIF(TRIM(l.{SAIL_COLUMN}::text), '') IS NULL
-                OR (NULLIF(l.{SAIL_COLUMN}::text, ''))::timestamp >= %s
+                OR (NULLIF(l.{SAIL_COLUMN}::text, ''))::timestamp > %s
               )
         ORDER BY h.berth_name, l.alongside_datetime DESC
     ''', [berths, window_end, window_start])
@@ -500,63 +445,15 @@ def get_berthed_vessels(window_start, window_end, berths):
         row['terminal'] = h['exp_terminal'] if h['operation_type'] == 'Export' else h['imp_terminal']
         row['pipeline'] = h['exp_pipeline'] if h['operation_type'] == 'Export' else h['imp_pipeline']
         row.update(_enrich_vessel(cur, h['vcn_id'], h['ldud_id'], window_start, window_end))
-        # Only show vessels currently under discharge (balance > 0);
-        # completed vessels and stale duplicates are excluded
-        balance = row.get('balance')
+        # Check whether discharge was completed as of the selected report date
+        balance = row.get("balance")
+
         if balance is not None and float(balance) <= 0:
             continue
+
         out.append(row)
     conn.close()
     return out
-
-# def get_berthed_vessels(window_start, window_end, berths):
-#     conn = get_db()
-#     cur = get_cursor(conn)
-#     cur.execute(f'''
-#         SELECT DISTINCT h.id AS vcn_id, l.id AS ldud_id, h.via_number, h.vessel_name,
-#                h.loa, h.draft, h.vessel_agent_name, h.cargo_type, h.berth_name,
-#                h.operation_type,
-#                v.imo_num, v.nationality,
-#                l.alongside_datetime,
-#                (SELECT ec.unload_terminal FROM vcn_export_cargo_declaration ec
-#                  WHERE ec.vcn_id = h.id LIMIT 1) AS exp_terminal,
-#                (SELECT ec.pipeline_name FROM vcn_export_cargo_declaration ec
-#                  WHERE ec.vcn_id = h.id LIMIT 1) AS exp_pipeline,
-#                (SELECT cn.unload_terminal FROM vcn_consigners cn
-#                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_terminal,
-#                (SELECT cn.pipeline_name FROM vcn_consigners cn
-#                  WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline
-#         FROM ldud_header l
-#         JOIN vcn_header h ON h.id = l.vcn_id
-#         LEFT JOIN vessels v ON UPPER(TRIM(v.vessel_name)) = UPPER(TRIM(h.vessel_name))
-#         WHERE h.berth_name = ANY(%s)
-#           AND l.alongside_datetime IS NOT NULL
-#           AND (NULLIF(l.alongside_datetime::text, ''))::timestamp < %s
-#           AND (
-#                 l.{SAIL_COLUMN} IS NULL
-#                 OR NULLIF(TRIM(l.{SAIL_COLUMN}::text), '') IS NULL
-#                 OR (NULLIF(l.{SAIL_COLUMN}::text, ''))::timestamp >= %s
-#               )
-#         ORDER BY h.berth_name
-#     ''', [berths, window_end, window_start])
-#     headers = [dict(r) for r in cur.fetchall()]
-
-#     out = []
-#     for h in headers:
-#         row = _base_row(h)
-#         row['alongside'] = _fmt_dt(h['alongside_datetime'])
-#         row['vessel_agent'] = h['vessel_agent_name']
-#         row['terminal'] = h['exp_terminal'] if h['operation_type'] == 'Export' else h['imp_terminal']
-#         row['pipeline'] = h['exp_pipeline'] if h['operation_type'] == 'Export' else h['imp_pipeline']
-#         row.update(_enrich_vessel(cur, h['vcn_id'], h['ldud_id'], window_start, window_end))
-#         # Do not show completed vessels in Berthed section
-#         balance = row.get('balance')
-#         if balance is not None and float(balance) <= 0:
-#             continue
-#         out.append(row)
-#     conn.close()
-#     return out
-
 
 
 
@@ -582,7 +479,10 @@ def get_sailed_vessels(window_start, window_end, berths):
                  WHERE po.ldud_id = l.id) AS cargo_completion_dt
         FROM ldud_header l
         JOIN vcn_header h ON h.id = l.vcn_id
-        LEFT JOIN vessels v ON UPPER(TRIM(v.vessel_name)) = UPPER(TRIM(h.vessel_name))
+        LEFT JOIN vessels v
+            ON UPPER(REPLACE(TRIM(v.vessel_name), 'MT ', ''))
+            =
+            UPPER(REPLACE(TRIM(h.vessel_name), 'MT ', ''))
         ORDER BY h.berth_name
     ''')
     headers = [dict(r) for r in cur.fetchall()]
@@ -676,8 +576,14 @@ def _xl_field_value(row, field):
         return f"{loa or ''} / {dft or ''}" if (loa or dft) else ''
     if field == '__via_f_ovs_imo':
         via = row.get('via_no') or ''
-        flag = (row.get('nationality') or '').strip().lower()
-        ovs = 'Domestic' if flag == 'india' else 'Overseas'
+        run_type = (row.get('vessel_run_type') or '').strip().lower()
+
+        if run_type == 'foreign':
+            ovs = 'Overseas'
+        elif run_type == 'coastal':
+            ovs = 'Coastal'
+        else:
+            ovs = ''
         imo = row.get('imo_num') or ''
         return f"{via} / F / {ovs} / {imo}"
     if field == '__agt_tf_pl':

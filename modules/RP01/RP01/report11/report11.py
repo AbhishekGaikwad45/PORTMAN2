@@ -267,6 +267,8 @@ def classify_broad_category(cargo):
     dry_bulk_keywords = (
         "IRON ORE", "COAL", "FERTILIZER", "CEMENT", "SALT", "SUGAR",
         "PULSES", "FOOD GRAIN", "TEA", "COFFEE", "SCRAP",
+        "CLINKER", "LIMESTONE", "DOLOMITE", "HBI", "FINES",
+        "GYPSUM", "BAUXITE", "CLO", "BRBF", "MABU", "VIZAG", "DHAMRA",
     )
     if any(k in cargo for k in dry_bulk_keywords):
         return "DRY BULK"
@@ -705,11 +707,13 @@ def report11_api_export():
         a_row_excel_num = {}
         for sr, (label, unit, fmt) in enumerate(a_rows, start=1):
             values = [a_list[i][label] for i in range(12)]
-
-            if label == "Liquid - Import":
-                print("EXPORT VALUES:", values)
-
             _write_row(ws, row_i, sr, label, unit, values, fmt, thin_border)
+
+            # Constant across all months — averaging (or just showing the constant)
+            # is correct; summing to "24" for a 2-berth terminal is wrong.
+            if label == "No. of berths for % berth occupancy":
+                ws[f"Q{row_i}"] = f"=AVERAGE(E{row_i}:P{row_i})"
+
             a_row_excel_num[label] = row_i
             row_i += 1
 
@@ -765,8 +769,15 @@ def report11_api_export():
         for sr, (label, unit, fmt, formula_fn) in enumerate(b_defs, start=1):
             values = [formula_fn(i) for i in range(12)]
             _write_row(ws, row_i, sr, label, unit, values, fmt, thin_border, is_formula_row=True)
-            ws[f"Q{row_i}"] = f"=SUM(E{row_i}:P{row_i})" if label not in (
-                "Berth Occupancy", "Idle time") else f"=AVERAGE(E{row_i}:P{row_i})"
+
+            # Anything labeled "Avg." (or ratio-type rows) must be averaged across
+            # months for the FY column, never summed — summing 12 monthly averages
+            # produces a meaningless inflated number.
+            if label.startswith("Avg.") or label in ("Berth Occupancy", "Idle time"):
+                ws[f"Q{row_i}"] = f"=AVERAGE(E{row_i}:P{row_i})"
+            else:
+                ws[f"Q{row_i}"] = f"=SUM(E{row_i}:P{row_i})"
+
             b_row_excel_num[label] = row_i
             row_i += 1
 
@@ -782,7 +793,17 @@ def report11_api_export():
             for i in range(12)
         ]
         _write_row(ws, row_i, sr_next, "Ship Output per Day (Tonnes)", "Tonnes", values, "0.000", thin_border, is_formula_row=True)
-        ws[f"Q{row_i}"] = f"=SUM(E{row_i}:P{row_i})"
+
+        # FY total = FY total tonnage ÷ FY average berth stay (both already correct
+        # in their own Q columns) — not a straight SUM of 12 monthly rates.
+        ws[f"Q{row_i}"] = (
+            f"=IFERROR(Q{a_row_excel_num['Dry Bulk traffic - Import']}"
+            f"+Q{a_row_excel_num['Dry Bulk traffic - Export']}"
+            f"+Q{a_row_excel_num['Break Bulk traffic - Import']}"
+            f"+Q{a_row_excel_num['Break Bulk traffic - Export']}"
+            f"+Q{a_row_excel_num['Liquid - Import']}"
+            f"+Q{a_row_excel_num['Liquid - Export']},Q{b_row_excel_num['Avg. Berth stay']}),0)"
+        )
         b_row_excel_num["Ship Output per Day (Tonnes)"] = row_i
         row_i += 1
 
