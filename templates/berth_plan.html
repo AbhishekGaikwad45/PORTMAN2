@@ -12,11 +12,13 @@
         margin-bottom: 16px;
         flex-wrap: wrap;
     }
+
     .bpln-toolbar label {
         font-size: 12px;
         font-weight: 600;
         color: var(--text-secondary);
     }
+
     .bpln-toolbar input {
         font-size: 12px;
         padding: 5px 8px;
@@ -25,6 +27,7 @@
         background: var(--bg-secondary);
         color: var(--text-primary);
     }
+
     #bplnStatus {
         font-size: 12px;
         color: #c62828;
@@ -42,10 +45,20 @@
         font-weight: 600;
         transition: background 0.15s ease, transform 0.1s ease;
     }
-    .bpln-apply-btn:hover { background: #3a78bd; }
-    .bpln-apply-btn:active { transform: scale(0.97); }
 
-    .bpln-download-wrap { position: relative; margin-left: auto; }
+    .bpln-apply-btn:hover {
+        background: #3a78bd;
+    }
+
+    .bpln-apply-btn:active {
+        transform: scale(0.97);
+    }
+
+    .bpln-download-wrap {
+        position: relative;
+        margin-left: auto;
+    }
+
     .bpln-export-btn {
         font-size: 12px;
         padding: 6px 14px;
@@ -57,8 +70,15 @@
         font-weight: 600;
         transition: background 0.15s ease, transform 0.1s ease;
     }
-    .bpln-export-btn:hover { background: #256428; }
-    .bpln-export-btn:active { transform: scale(0.97); }
+
+    .bpln-export-btn:hover {
+        background: #256428;
+    }
+
+    .bpln-export-btn:active {
+        transform: scale(0.97);
+    }
+
     .bpln-download-menu {
         display: none;
         position: absolute;
@@ -67,12 +87,16 @@
         background: #fff;
         border: 1px solid #ccc;
         border-radius: 6px;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
         overflow: hidden;
         z-index: 30;
         min-width: 150px;
     }
-    .bpln-download-menu.open { display: block; }
+
+    .bpln-download-menu.open {
+        display: block;
+    }
+
     .bpln-download-menu button {
         display: block;
         width: 100%;
@@ -83,7 +107,10 @@
         background: #fff;
         cursor: pointer;
     }
-    .bpln-download-menu button:hover { background: #eef3fb; }
+
+    .bpln-download-menu button:hover {
+        background: #eef3fb;
+    }
 
     /* ===== Report sheet — same structure/colors as Daily Performance Report ===== */
     .bpln-sheet {
@@ -103,9 +130,18 @@
         margin-bottom: 10px;
         font-weight: bold;
     }
-    .bpln-as-on-row .lbl { color: #000; }
-    .bpln-as-on-row .val-date { color: #c00000; }
-    .bpln-as-on-row .val-time { color: #0000c8; }
+
+    .bpln-as-on-row .lbl {
+        color: #000;
+    }
+
+    .bpln-as-on-row .val-date {
+        color: #c00000;
+    }
+
+    .bpln-as-on-row .val-time {
+        color: #0000c8;
+    }
 
     h3.bpln-section-title {
         color: #0000c8;
@@ -121,32 +157,39 @@
         margin-bottom: 6px;
         table-layout: fixed;
     }
-    table.bpln-vertical td, table.bpln-vertical th {
+
+    table.bpln-vertical td,
+    table.bpln-vertical th {
         border: 1px solid #444;
         padding: 3px 6px;
         vertical-align: middle;
         overflow: hidden;
         word-wrap: break-word;
     }
+
     table.bpln-vertical th {
         background: #dce6f1;
         font-weight: bold;
         text-align: center;
     }
+
     table.bpln-vertical td.label {
         font-weight: bold;
         color: #000;
         background: #f4f6fa;
         white-space: nowrap;
     }
+
     table.bpln-vertical td.value {
         color: #0000c8;
         font-weight: bold;
         text-align: center;
     }
+
     table.bpln-vertical td.value.planned {
         color: #b8860b;
     }
+
     table.bpln-vertical td.empty-berth {
         color: #cbd5e1;
         font-weight: normal;
@@ -156,55 +199,75 @@
         width: 100%;
         border-collapse: collapse;
     }
-    table.bpln-grid th, table.bpln-grid td {
+
+    table.bpln-grid th,
+    table.bpln-grid td {
         border: 1px solid #444;
         padding: 4px 5px;
         text-align: center;
         font-size: 11.5px;
     }
+
     table.bpln-grid th {
         background: #dce6f1;
         font-weight: bold;
     }
+
     table.bpln-grid tbody tr td {
         height: 22px;
     }
 
-@media print {
-    body * { visibility: hidden; }
-    .bpln-sheet, .bpln-sheet * { visibility: visible; }
-    .bpln-sheet {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 100%;
-        border: none;
-        margin: 0;
-        padding: 10px 15px;
+    @media print {
+        body * {
+            visibility: hidden;
+        }
+
+        .bpln-sheet,
+        .bpln-sheet * {
+            visibility: visible;
+        }
+
+        .bpln-sheet {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            border: none;
+            margin: 0;
+            padding: 10px 15px;
+        }
+
+        .bpln-toolbar,
+        #bplnStatus {
+            display: none !important;
+        }
     }
-    .bpln-toolbar, #bplnStatus { display: none !important; }
-}
-.bpln-title-block {
-    text-align: center;
-    margin-bottom: 10px;
-}
-.bpln-title-block .line1,
-.bpln-title-block .line2 {
-    font-weight: bold;
-    font-size: 13px;
-    text-decoration: underline;
-}
-.bpln-title-block .line3 {
-    font-weight: bold;
-    font-size: 13px;
-}
+
+    .bpln-title-block {
+        text-align: center;
+        margin-bottom: 10px;
+    }
+
+    .bpln-title-block .line1,
+    .bpln-title-block .line2 {
+        font-weight: bold;
+        font-size: 13px;
+        text-decoration: underline;
+    }
+
+    .bpln-title-block .line3 {
+        font-weight: bold;
+        font-size: 13px;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="module-header" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
+<div class="module-header"
+    style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
     <h2 style="margin:0;font-size:20px;color:var(--text-primary);">Berth Plan</h2>
-    <span style="background:#4a90d9;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;">RP02</span>
+    <span
+        style="background:#4a90d9;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;">RP02</span>
     <a href="/module/RP01/" style="margin-left:auto;font-size:12px;color:#4a90d9;">&larr; Back to Reports</a>
 </div>
 
@@ -230,287 +293,306 @@
 <div class="bpln-sheet">
     <div class="bpln-sheet">
 
-    <div class="bpln-title-block">
-        <div class="line1">JSW JNPT LIQUID TERMINAL PRIVATE LIMITED</div>
-        <div class="line2">JAWAHARLAL NEHRU PORT AUTHORITY (BULK TERMINAL)</div>
-        <div class="line3">DAILY PERFORMANCE REPORT</div>
+        <div class="bpln-title-block">
+            <div class="line1">JSW JNPT LIQUID TERMINAL PRIVATE LIMITED</div>
+            <div class="line2">JAWAHARLAL NEHRU PORT AUTHORITY (BULK TERMINAL)</div>
+            <div class="line3">DAILY PERFORMANCE REPORT</div>
+        </div>
+
+        <div class="bpln-as-on-row">
+            <span class="lbl">As on</span>
+            <span class="val-date" id="bplnAsOnDate">-</span>
+            <span class="lbl">@</span>
+            <span class="val-time" id="bplnAsOnTime">-</span>
+        </div>
+
+
+
+        <!-- SECTION A — table body is built dynamically in JS from report.berths -->
+        <h3 class="bpln-section-title">A] VESSEL OPERATION :- BERTHED VESSELS</h3>
+        <table class="bpln-vertical" id="tableA"></table>
+
+        <!-- SECTION B -->
+        <h3 class="bpln-section-title">B] VESSEL OPERATION :- SAILED VESSELS</h3>
+        <table class="bpln-vertical" id="tableB"></table>
+
+        <!-- SECTION C -->
+        <h3 class="bpln-section-title">C] Expected /Waiting Tank Vessels at JJLTPL Berth</h3>
+        <table class="bpln-grid" id="tableC">
+            <thead>
+                <tr>
+                    <th>TERMINAL</th>
+                    <th>VESSEL NAME</th>
+                    <th>VIA NO.</th>
+                    <th>LOA</th>
+                    <th>DFT</th>
+                    <th>AGT/TNK/CONS</th>
+                    <th>CARGO</th>
+                    <th>MLA</th>
+                    <th>QTY.</th>
+                    <th>ETA</th>
+                    <th>ATA</th>
+                    <th>LPC</th>
+                    <th>DOC</th>
+                    <th>NOR</th>
+                    <th>BERTH</th>
+                </tr>
+            </thead>
+            <tbody id="tableCBody"></tbody>
+        </table>
+
     </div>
+    {% endblock %}
 
-    <div class="bpln-as-on-row">
-        <span class="lbl">As on</span>
-        <span class="val-date" id="bplnAsOnDate">-</span>
-        <span class="lbl">@</span>
-        <span class="val-time" id="bplnAsOnTime">-</span>
-    </div>
-    
-
-
-    <!-- SECTION A — table body is built dynamically in JS from report.berths -->
-    <h3 class="bpln-section-title">A] VESSEL OPERATION :- BERTHED VESSELS</h3>
-    <table class="bpln-vertical" id="tableA"></table>
-
-    <!-- SECTION B -->
-    <h3 class="bpln-section-title">B] VESSEL OPERATION :- SAILED VESSELS</h3>
-    <table class="bpln-vertical" id="tableB"></table>
-
-    <!-- SECTION C -->
-    <h3 class="bpln-section-title">C] Expected /Waiting Tank Vessels at JJLTPL Berth</h3>
-    <table class="bpln-grid" id="tableC">
-        <thead>
-            <tr>
-                <th>TERMINAL</th>
-                <th>VESSEL NAME</th>
-                <th>VIA NO.</th>
-                <th>LOA</th>
-                <th>DFT</th>
-                <th>AGT/TNK/CONS</th>
-                <th>CARGO</th>
-                <th>MLA</th>
-                <th>QTY.</th>
-                <th>ETA</th>
-                <th>ATA</th>
-                <th>LPC</th>
-                <th>DOC</th>
-                <th>NOR</th>
-                <th>BERTH</th>
-            </tr>
-        </thead>
-        <tbody id="tableCBody"></tbody>
-    </table>
-
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-function todayStr() {
-    return new Date().toISOString().slice(0, 10);
-}
-
-function formatDateDMY(dateStr) {
-    const [y, m, d] = dateStr.split('-');
-    return `${d}-${m}-${y}`;
-}
-
-const FIELDS_A = [
-    ['VIA/F/OVERSEAS/IMO', '__via_f_ovs_imo'],
-    ['VESSEL NAME', 'vessel_name'],
-    ['LOA/BHC/DFT', '__loa_dft'],
-    ['AGT / TF/PL', '__agt_tf_pl'],
-    ['Consigner', 'consigner'],
-    ['CARGO', 'cargo'],
-    ['QUANTITY', 'quantity'],
-    ['Alongside (Date/Time)', 'alongside'],
-    ['OPS COMMENECED', 'ops_commenced'],
-    ['Last 24 hrs Load/Discharge', 'last_24hr_qty'],
-    ['Till now discharged / Load', 'till_now_qty'],
-    ['BALANCE', 'balance'],
-    ['Expected completion (Date/Time)', 'expected_completion'],
-    ['Present Flow Rate(MT/hr)', 'present_flow_rate'],
-    ['Remarks', 'remarks'],
-];
-
-const FIELDS_B = [
-    ['VIA/F/OVERSEAS/IMO', '__via_f_ovs_imo'],
-    ['VESSEL NAME', 'vessel_name'],
-    ['LOA/BHC/DFT', '__loa_dft'],
-    ['AGT / TF/PL', '__agt_tf_pl'],
-    ['Consigner', 'consigner'],
-    ['CARGO', 'cargo'],
-    ['QUANTITY', 'quantity'],
-    ['Alongside (Date/Time)', 'alongside'],
-    ['OPS COMMENECED', 'ops_commenced'],
-    ['Cargo Completion Time', 'cargo_completion'],
-    ['Sail Cast off time', 'cast_off'],
-    ['Flow Rate (MT/hr)', 'present_flow_rate'],
-];
-
-function fieldValue(row, field) {
-    if (!row) return '';
-    if (field === '__loa_dft') {
-        const loa = row.loa != null ? row.loa : '';
-        const dft = row.draft != null ? row.draft : '';
-        return (loa || dft) ? `${loa} / ${dft}` : '';
-    }
-    if (field === '__via_f_ovs_imo') {
-        const via = row.via_no || '';
-        const flag = (row.nationality || '').trim().toLowerCase();
-        const ovsDom = flag === 'india' ? 'Domestic' : 'Overseas';
-        const imo = row.imo_num || '';
-        return `${via} / F / ${ovsDom} / ${imo}`;
-    }
-    if (field === '__agt_tf_pl') {
-        const agt = row.vessel_agent || row.agent || '';
-        const tf = row.terminal || '';
-        const pl = row.pipeline || '';
-        return `${agt} / ${tf} / ${pl}`;
-    }
-    const v = row[field];
-    return (v === null || v === undefined) ? '' : v;
-}
-
-/* Builds a vertical DETAILS table where:
-   - berth columns come from report.berths (fetched by the backend from
-     port_berth_master) — NOT hardcoded in the HTML/JS.
-   - a berth with no vessel currently there gets one empty column.
-   - a berth with 2+ vessels at the same time gets one column PER VESSEL,
-     with the berth header spanning across them (colspan), so a second
-     vessel at the same berth is never dropped.
-*/
-function buildVerticalTable(tableId, vessels, berths, fields) {
-    const byBerth = {};
-    berths.forEach(b => { byBerth[b] = []; });
-    vessels.forEach(v => {
-        const b = v.berth_name || '(no berth)';
-        if (!byBerth[b]) byBerth[b] = []; // vessel at a berth not in master list — still show it
-        byBerth[b].push(v);
-    });
-
-    const berthCols = Object.keys(byBerth).map(b => ({
-        berth: b,
-        vessels: byBerth[b].length ? byBerth[b] : [null],
-    }));
-
-    const table = document.getElementById(tableId);
-    table.innerHTML = '';
-
-    // ===== Fixed, equal-width columns for every berth =====
-    // total individual vessel-slot columns across all berths (accounts for colspan)
-    const totalSlotCols = berthCols.reduce((sum, col) => sum + col.vessels.length, 0);
-    const LABEL_WIDTH_PCT = 18; // fixed width for the DETAILS column
-    const remainingPct = 100 - LABEL_WIDTH_PCT;
-    const slotWidthPct = totalSlotCols > 0 ? (remainingPct / totalSlotCols) : remainingPct;
-
-    const colgroup = document.createElement('colgroup');
-    const labelCol = document.createElement('col');
-    labelCol.style.width = LABEL_WIDTH_PCT + '%';
-    colgroup.appendChild(labelCol);
-    berthCols.forEach(col => {
-        col.vessels.forEach(() => {
-            const c = document.createElement('col');
-            c.style.width = slotWidthPct + '%';
-            colgroup.appendChild(c);
-        });
-    });
-    table.appendChild(colgroup);
-
-    // header row
-    const headRow = document.createElement('tr');
-    const thDetails = document.createElement('th');
-    thDetails.textContent = 'DETAILS';
-    headRow.appendChild(thDetails);
-    berthCols.forEach(col => {
-        const th = document.createElement('th');
-        th.textContent = col.berth;
-        if (col.vessels.length > 1) th.colSpan = col.vessels.length;
-        headRow.appendChild(th);
-    });
-    table.appendChild(headRow);
-
-    // data rows
-    fields.forEach(([label, field]) => {
-        const tr = document.createElement('tr');
-        const tdLabel = document.createElement('td');
-        tdLabel.className = 'label';
-        tdLabel.textContent = label;
-        tr.appendChild(tdLabel);
-        berthCols.forEach(col => {
-            col.vessels.forEach(v => {
-                const td = document.createElement('td');
-                td.className = 'value' + (v ? '' : ' empty-berth');
-                td.textContent = fieldValue(v, field);
-                if (v && v.is_planned && (field === 'present_flow_rate' || field === 'expected_completion')) {
-                    td.classList.add('planned');
-                    td.title = 'Planned (Expected Start/Rate) — no operating data logged yet';
-                    if (field === 'expected_completion' && td.textContent) td.textContent += ' (Exp)';
-                }
-                tr.appendChild(td);
-            });
-        });
-        table.appendChild(tr);
-    });
-}
-
-function renderGridTable(bodyId, rows) {
-    const tbody = document.getElementById(bodyId);
-    tbody.innerHTML = '';
-    rows.forEach(r => {
-        const tr = document.createElement('tr');
-        const cells = [
-            r.terminal, r.vessel_name, r.via_no, r.loa, r.dft, r.agt_tnk_cons,
-            r.cargo, r.mla, r.quantity, r.eta, r.ata, r.lpc, r.doc, r.nor, r.berth
-        ];
-        cells.forEach(c => {
-            const td = document.createElement('td');
-            td.textContent = (c === null || c === undefined) ? '' : c;
-            tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-    });
-}
-
-/* ===== Download: PDF + Excel ===== */
-function toggleDownloadMenu() {
-    document.getElementById('bplnDownloadMenu').classList.toggle('open');
-}
-document.addEventListener('click', function (e) {
-    const wrap = document.querySelector('.bpln-download-wrap');
-    if (wrap && !wrap.contains(e.target)) {
-        document.getElementById('bplnDownloadMenu').classList.remove('open');
-    }
-});
-
-function downloadPDF() {
-    toggleDownloadMenu();
-    window.print();   // @media print CSS hides toolbar/status, keeps the report sheet layout
-}
-
-function appendTableToSheet(wsData, title, tableId) {
-    wsData.push([title]);
-    document.getElementById(tableId).querySelectorAll('tr').forEach(tr => {
-        const row = [];
-        tr.querySelectorAll('th,td').forEach(cell => row.push(cell.textContent));
-        wsData.push(row);
-    });
-    wsData.push([]);
-}
-
-function downloadExcel() {
-    toggleDownloadMenu();
-    const date = document.getElementById('bplnDate').value || todayStr();
-    window.location.href = `/api/module/RP02/berthplan/export/excel?date=${date}`;
-}
-
-/* ===== Load ===== */
-async function loadBerthPlan() {
-    const date = document.getElementById('bplnDate').value || todayStr();
-    const statusEl = document.getElementById('bplnStatus');
-    statusEl.textContent = 'Loading...';
-
-    try {
-        const abResp = await fetch(`/api/module/RP02/berthplan/data?date=${date}`);
-
-        if (!abResp.ok) {
-            const err = await abResp.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to load berth plan data');
+    {% block scripts %}
+    <script>
+        function todayStr() {
+            return new Date().toISOString().slice(0, 10);
         }
-        const report = await abResp.json();
 
-        document.getElementById('bplnAsOnDate').textContent = report.as_on_date || formatDateDMY(date);
-        document.getElementById('bplnAsOnTime').textContent = report.as_on_time || '07:00 to 07:00 next day'; ;
+        function formatDateDMY(dateStr) {
+            const [y, m, d] = dateStr.split('-');
+            return `${d}-${m}-${y}`;
+        }
 
-        const berths = report.berths || [];   // fetched live from port_berth_master by the backend
-        buildVerticalTable('tableA', report.berthed || [], berths, FIELDS_A);
-        buildVerticalTable('tableB', report.sailed || [], berths, FIELDS_B);
-        renderGridTable('tableCBody', report.expected || []);
+        function formatAsOnWindow(dateStr) {
+            // dateStr is 'YYYY-MM-DD' from the date input
+            const selected = new Date(dateStr + 'T00:00:00');
+            const previous = new Date(selected.getTime() - 86400000); // -1 day
 
-        statusEl.textContent = '';
-    } catch (e) {
-        statusEl.textContent = e.message || 'Failed to load berth plan.';
-    }
-}
+            const fmt = d => {
+                const day = String(d.getDate()).padStart(2, '0');
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const year = d.getFullYear();
+                return `${day}-${month}-${year}`;
+            };
 
-document.getElementById('bplnDate').value = todayStr();
-loadBerthPlan();
-</script>
-{% endblock %}
+            return {
+                dateLabel: fmt(selected),                                   // e.g. "22-07-2026"
+                rangeLabel: `${fmt(previous)} 07:00 to ${fmt(selected)} 07:00`  // e.g. "21-07-2026 07:00 to 22-07-2026 07:00"
+            };
+        }
+
+        const FIELDS_A = [
+            ['VIA/F/OVERSEAS/IMO', '__via_f_ovs_imo'],
+            ['VESSEL NAME', 'vessel_name'],
+            ['LOA/BHC/DFT', '__loa_dft'],
+            ['AGT / TF/PL', '__agt_tf_pl'],
+            ['Consigner', 'consigner'],
+            ['CARGO', 'cargo'],
+            ['QUANTITY', 'quantity'],
+            ['Alongside (Date/Time)', 'alongside'],
+            ['OPS COMMENECED', 'ops_commenced'],
+            ['Last 24 hrs Load/Discharge', 'last_24hr_qty'],
+            ['Till now discharged / Load', 'till_now_qty'],
+            ['BALANCE', 'balance'],
+            ['Expected completion (Date/Time)', 'expected_completion'],
+            ['Present Flow Rate(MT/hr)', 'present_flow_rate'],
+            ['Remarks', 'remarks'],
+        ];
+
+        const FIELDS_B = [
+            ['VIA/F/OVERSEAS/IMO', '__via_f_ovs_imo'],
+            ['VESSEL NAME', 'vessel_name'],
+            ['LOA/BHC/DFT', '__loa_dft'],
+            ['AGT / TF/PL', '__agt_tf_pl'],
+            ['Consigner', 'consigner'],
+            ['CARGO', 'cargo'],
+            ['QUANTITY', 'quantity'],
+            ['Alongside (Date/Time)', 'alongside'],
+            ['OPS COMMENECED', 'ops_commenced'],
+            ['Cargo Completion Time', 'cargo_completion'],
+            ['Sail Cast off time', 'cast_off'],
+            ['Flow Rate (MT/hr)', 'present_flow_rate'],
+        ];
+
+        function fieldValue(row, field) {
+            if (!row) return '';
+            if (field === '__loa_dft') {
+                const loa = row.loa != null ? row.loa : '';
+                const dft = row.draft != null ? row.draft : '';
+                return (loa || dft) ? `${loa} / ${dft}` : '';
+            }
+            if (field === '__via_f_ovs_imo') {
+                const via = row.via_no || '';
+                const flag = (row.nationality || '').trim().toLowerCase();
+                const ovsDom = flag === 'india' ? 'Domestic' : 'Overseas';
+                const imo = row.imo_num || '';
+                return `${via} / F / ${ovsDom} / ${imo}`;
+            }
+            if (field === '__agt_tf_pl') {
+                const agt = row.vessel_agent || row.agent || '';
+                const tf = row.terminal || '';
+                const pl = row.pipeline || '';
+                return `${agt} / ${tf} / ${pl}`;
+            }
+            const v = row[field];
+            return (v === null || v === undefined) ? '' : v;
+        }
+
+        /* Builds a vertical DETAILS table where:
+           - berth columns come from report.berths (fetched by the backend from
+             port_berth_master) — NOT hardcoded in the HTML/JS.
+           - a berth with no vessel currently there gets one empty column.
+           - a berth with 2+ vessels at the same time gets one column PER VESSEL,
+             with the berth header spanning across them (colspan), so a second
+             vessel at the same berth is never dropped.
+        */
+        function buildVerticalTable(tableId, vessels, berths, fields) {
+            const byBerth = {};
+            berths.forEach(b => { byBerth[b] = []; });
+            vessels.forEach(v => {
+                const b = v.berth_name || '(no berth)';
+                if (!byBerth[b]) byBerth[b] = []; // vessel at a berth not in master list — still show it
+                byBerth[b].push(v);
+            });
+
+            const berthCols = Object.keys(byBerth).map(b => ({
+                berth: b,
+                vessels: byBerth[b].length ? byBerth[b] : [null],
+            }));
+
+            const table = document.getElementById(tableId);
+            table.innerHTML = '';
+
+            // ===== Fixed, equal-width columns for every berth =====
+            // total individual vessel-slot columns across all berths (accounts for colspan)
+            const totalSlotCols = berthCols.reduce((sum, col) => sum + col.vessels.length, 0);
+            const LABEL_WIDTH_PCT = 18; // fixed width for the DETAILS column
+            const remainingPct = 100 - LABEL_WIDTH_PCT;
+            const slotWidthPct = totalSlotCols > 0 ? (remainingPct / totalSlotCols) : remainingPct;
+
+            const colgroup = document.createElement('colgroup');
+            const labelCol = document.createElement('col');
+            labelCol.style.width = LABEL_WIDTH_PCT + '%';
+            colgroup.appendChild(labelCol);
+            berthCols.forEach(col => {
+                col.vessels.forEach(() => {
+                    const c = document.createElement('col');
+                    c.style.width = slotWidthPct + '%';
+                    colgroup.appendChild(c);
+                });
+            });
+            table.appendChild(colgroup);
+
+            // header row
+            const headRow = document.createElement('tr');
+            const thDetails = document.createElement('th');
+            thDetails.textContent = 'DETAILS';
+            headRow.appendChild(thDetails);
+            berthCols.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col.berth;
+                if (col.vessels.length > 1) th.colSpan = col.vessels.length;
+                headRow.appendChild(th);
+            });
+            table.appendChild(headRow);
+
+            // data rows
+            fields.forEach(([label, field]) => {
+                const tr = document.createElement('tr');
+                const tdLabel = document.createElement('td');
+                tdLabel.className = 'label';
+                tdLabel.textContent = label;
+                tr.appendChild(tdLabel);
+                berthCols.forEach(col => {
+                    col.vessels.forEach(v => {
+                        const td = document.createElement('td');
+                        td.className = 'value' + (v ? '' : ' empty-berth');
+                        td.textContent = fieldValue(v, field);
+                        if (v && v.is_planned && (field === 'present_flow_rate' || field === 'expected_completion')) {
+                            td.classList.add('planned');
+                            td.title = 'Planned (Expected Start/Rate) — no operating data logged yet';
+                            if (field === 'expected_completion' && td.textContent) td.textContent += ' (Exp)';
+                        }
+                        tr.appendChild(td);
+                    });
+                });
+                table.appendChild(tr);
+            });
+        }
+
+        function renderGridTable(bodyId, rows) {
+            const tbody = document.getElementById(bodyId);
+            tbody.innerHTML = '';
+            rows.forEach(r => {
+                const tr = document.createElement('tr');
+                const cells = [
+                    r.terminal, r.vessel_name, r.via_no, r.loa, r.dft, r.agt_tnk_cons,
+                    r.cargo, r.mla, r.quantity, r.eta, r.ata, r.lpc, r.doc, r.nor, r.berth
+                ];
+                cells.forEach(c => {
+                    const td = document.createElement('td');
+                    td.textContent = (c === null || c === undefined) ? '' : c;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        /* ===== Download: PDF + Excel ===== */
+        function toggleDownloadMenu() {
+            document.getElementById('bplnDownloadMenu').classList.toggle('open');
+        }
+        document.addEventListener('click', function (e) {
+            const wrap = document.querySelector('.bpln-download-wrap');
+            if (wrap && !wrap.contains(e.target)) {
+                document.getElementById('bplnDownloadMenu').classList.remove('open');
+            }
+        });
+
+        function downloadPDF() {
+            toggleDownloadMenu();
+            window.print();   // @media print CSS hides toolbar/status, keeps the report sheet layout
+        }
+
+        function appendTableToSheet(wsData, title, tableId) {
+            wsData.push([title]);
+            document.getElementById(tableId).querySelectorAll('tr').forEach(tr => {
+                const row = [];
+                tr.querySelectorAll('th,td').forEach(cell => row.push(cell.textContent));
+                wsData.push(row);
+            });
+            wsData.push([]);
+        }
+
+        function downloadExcel() {
+            toggleDownloadMenu();
+            const date = document.getElementById('bplnDate').value || todayStr();
+            window.location.href = `/api/module/RP02/berthplan/export/excel?date=${date}`;
+        }
+
+        /* ===== Load ===== */
+        async function loadBerthPlan() {
+            const date = document.getElementById('bplnDate').value || todayStr();
+            const statusEl = document.getElementById('bplnStatus');
+            statusEl.textContent = 'Loading...';
+
+            try {
+                const abResp = await fetch(`/api/module/RP02/berthplan/data?date=${date}`);
+
+                if (!abResp.ok) {
+                    const err = await abResp.json().catch(() => ({}));
+                    throw new Error(err.error || 'Failed to load berth plan data');
+                }
+                const report = await abResp.json();
+
+                const asOnWindow = formatAsOnWindow(date);
+                document.getElementById('bplnAsOnDate').textContent = asOnWindow.dateLabel;
+                document.getElementById('bplnAsOnTime').textContent = asOnWindow.rangeLabel;
+
+                const berths = report.berths || [];   // fetched live from port_berth_master by the backend
+                buildVerticalTable('tableA', report.berthed || [], berths, FIELDS_A);
+                buildVerticalTable('tableB', report.sailed || [], berths, FIELDS_B);
+                renderGridTable('tableCBody', report.expected || []);
+
+                statusEl.textContent = '';
+            } catch (e) {
+                statusEl.textContent = e.message || 'Failed to load berth plan.';
+            }
+        }
+
+        document.getElementById('bplnDate').value = todayStr();
+        loadBerthPlan();
+    </script>
+    {% endblock %}
