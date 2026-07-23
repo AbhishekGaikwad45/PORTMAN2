@@ -272,8 +272,9 @@ def _fetch_legacy(fin_year: str, month_idx: int):
                 to_char(NULLIF(pilot_board_departure,'')::timestamp,'{DATETIME_FMT}') AS pilot_disembarked,
                 quantity
             FROM mis_vessel_master
-            WHERE fin_year = %(fin_year)s
-              AND LEFT(LOWER(month),3)=LEFT(LOWER(%(month_label)s),3)
+            WHERE COALESCE(is_deleted, FALSE) = FALSE
+              AND fin_year = %(fin_year)s
+              AND LEFT(LOWER(month), 3) = LEFT(LOWER(%(month_label)s), 3)
             ORDER BY NULLIF(anchorage_time,'')::timestamp
         """, {
             "fin_year": fin_year,
@@ -290,7 +291,6 @@ def _fetch_legacy(fin_year: str, month_idx: int):
 
     finally:
         cur.close()
-
 def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
     period_start, period_end = _period_bounds(fin_year, month_idx)
 
@@ -300,54 +300,43 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
     try:
         cur.execute(f"""
             WITH parcel_agg AS (
-                -- Vessel-level start/end derived the same way LUEU01 treats
-                -- parcel ops: start = earliest parcel start_dt entered;
-                -- end = latest parcel end_dt, but ONLY if every parcel on
-                -- this LDUD has an end_dt (mirrors the 'Completed' vs
-                -- 'In Progress' status check in get_started_parcels()).
                 SELECT
                     po.ldud_id,
-                    MIN(po.start_dt)                                   AS cargo_commenced,
-                    CASE WHEN bool_and(po.end_dt IS NOT NULL)
-                         THEN MAX(po.end_dt)
-                         ELSE NULL
-                    END                                                 AS cargo_completed,
-                    SUM(COALESCE(po.quantity, 0))                      AS quantity,
-                    -- pick one cargo_name to display; adjust if you need
-                    -- a concatenated list across parcels instead
-                    MAX(po.cargo_name)                                 AS cargo_name
+                    MIN(po.start_dt) AS cargo_commenced,
+                    CASE
+                        WHEN BOOL_AND(po.end_dt IS NOT NULL)
+                        THEN MAX(po.end_dt)
+                        ELSE NULL
+                    END AS cargo_completed,
+                    COALESCE(SUM(lpl.quantity), 0) AS quantity,
+                    MAX(po.cargo_name) AS cargo_name
                 FROM ldud_parcel_ops po
+                LEFT JOIN lueu_parcel_log lpl
+                    ON lpl.parcel_op_id = po.id
+                   AND COALESCE(lpl.is_deleted, FALSE) = FALSE
                 GROUP BY po.ldud_id
             )
 
             SELECT
-                to_char(NULLIF(lh.created_date, '')::date, '{DATE_ONLY_FMT}')
-                                                         AS month,
-                vh.via_number                           AS via_no,
-                COALESCE(v.imo_num, '')                 AS imo_no,
-                lh.vessel_name                          AS vessel_name,
-                vh.vessel_agent_name                    AS agent,
-                COALESCE(v.gt, 0)                       AS grt,
-                COALESCE(v.loa, 0)                      AS loa,
-                'LIQUID'                                AS cargo_type,
-                pa.cargo_name                           AS cargo,
-                'JJLTPL'                                AS terminal,
-                vh.berth_name                           AS berth,
-                to_char(NULLIF(lh.anchored_datetime, '')::timestamp, '{DATETIME_FMT}')
-                                                         AS anchored_time,
-                to_char(NULLIF(lh.pilot_pickup_time, '')::timestamp, '{DATETIME_FMT}')
-                                                         AS pilot_boarded,
-                to_char(NULLIF(lh.alongside_datetime, '')::timestamp, '{DATETIME_FMT}')
-                                                         AS alongside_time,
-                to_char(pa.cargo_commenced::timestamp, '{DATETIME_FMT}')
-                                                         AS cargo_commenced,
-                to_char(pa.cargo_completed::timestamp, '{DATETIME_FMT}')
-                                                         AS cargo_completed,
-                to_char(NULLIF(lh.cast_off_datetime, '')::timestamp, '{DATETIME_FMT}')
-                                                         AS cast_off_time,
-                to_char(NULLIF(lh.pilot_disembarked, '')::timestamp, '{DATETIME_FMT}')
-                                                         AS pilot_disembarked,
-                COALESCE(pa.quantity, 0)                AS quantity
+                to_char(NULLIF(lh.created_date, '')::date, '{DATE_ONLY_FMT}') AS month,
+                vh.via_number AS via_no,
+                COALESCE(v.imo_num, '') AS imo_no,
+                lh.vessel_name AS vessel_name,
+                vh.vessel_agent_name AS agent,
+                COALESCE(v.gt, 0) AS grt,
+                COALESCE(v.loa, 0) AS loa,
+                'LIQUID' AS cargo_type,
+                pa.cargo_name AS cargo,
+                'JJLTPL' AS terminal,
+                vh.berth_name AS berth,
+                to_char(NULLIF(lh.anchored_datetime, '')::timestamp, '{DATETIME_FMT}') AS anchored_time,
+                to_char(NULLIF(lh.pilot_pickup_time, '')::timestamp, '{DATETIME_FMT}') AS pilot_boarded,
+                to_char(NULLIF(lh.alongside_datetime, '')::timestamp, '{DATETIME_FMT}') AS alongside_time,
+                to_char(pa.cargo_commenced::timestamp, '{DATETIME_FMT}') AS cargo_commenced,
+                to_char(pa.cargo_completed::timestamp, '{DATETIME_FMT}') AS cargo_completed,
+                to_char(NULLIF(lh.cast_off_datetime, '')::timestamp, '{DATETIME_FMT}') AS cast_off_time,
+                to_char(NULLIF(lh.pilot_disembarked, '')::timestamp, '{DATETIME_FMT}') AS pilot_disembarked,
+                COALESCE(pa.quantity, 0) AS quantity
 
             FROM ldud_header lh
 
@@ -364,6 +353,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
             WHERE NULLIF(lh.created_date, '') IS NOT NULL
               AND NULLIF(lh.created_date, '')::date >= %(period_start)s
               AND NULLIF(lh.created_date, '')::date < %(period_end)s
+              AND COALESCE(lh.is_deleted, FALSE) = FALSE
 
             ORDER BY
                 NULLIF(lh.created_date, '')::date,
@@ -418,7 +408,7 @@ EXPORT_COL_WIDTHS = [
 # `None` means: this workbook column has no matching source field in the
 # current queries, so it is written out blank rather than guessed at.
 EXPORT_FIELD_MAP = [
-    None,                # SR. NO. -- generated below, not a row key
+    None,                # SR. NO.
     "month",
     "via_no",
     "imo_no",
@@ -430,26 +420,25 @@ EXPORT_FIELD_MAP = [
     "cargo",
     "terminal",
     "berth",
-    None,                # WINDOW SCHEDULE DATE & TIME -- no source field
+    None,                # WINDOW SCHEDULE DATE & TIME
     "anchored_time",
-    None,                # READINESS TIME -- no source field
+    None,                # READINESS TIME
     "pilot_boarded",
     "alongside_time",
-    "cargo_commenced",   # -> CARGO COMMENCED 1
-    "cargo_completed",   # -> CARGO COMPLETED 1
-    None,                # CARGO COMMENCED 2 -- no source field
-    None,                # CARGO COMPLETED 2 -- no source field
-    None,                # CARGO COMMENCED 3 -- no source field
-    None,                # CARGO COMPLETED 3 -- no source field
+   "cargo_commenced",    # CARGO COMMENCED 1 -- blank
+    None,                # CARGO COMPLETED 1 -- now blank
+    None,                # CARGO COMMENCED 2
+    None,                # CARGO COMPLETED 2
+    None,               # -> CARGO COMMENCED 3
+    "cargo_completed",   # -> CARGO COMPLETED 3
     "cast_off_time",
     "pilot_disembarked",
-    None,                # TOTAL CONTAINERS -- no source field
-    None,                # TOTAL TEUS -- no source field
-    "quantity",          # -> TOTAL TONNES
-    None,                # TOTAL MOVES -- no source field
-    None,                # TOTAL CRANE HOURS -- no source field
+    None,
+    None,
+    "quantity",
+    None,
+    None,
 ]
-
 
 @bp.route("/api/module/RP01/report13/export", methods=["GET"])
 def report13_export():
