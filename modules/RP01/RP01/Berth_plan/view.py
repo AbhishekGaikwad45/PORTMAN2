@@ -168,30 +168,34 @@ def berth_plan_page():
 
 def get_report_window(plan_date_str):
     """
-    Selected date = calendar day.
+    Report Window
 
-    Report window:
-        00:00:00 -> 23:59:59
+    Selected Date = 23-07-2026
 
-    'As On' time:
-        Today      -> current time (live)
-        Past date  -> 23:59
+    Window:
+        22-07-2026 07:00
+            ↓
+        23-07-2026 07:00
+
+    Today:
+        Window end = current time (if current time is before 07:00,
+        use current time)
     """
+
     plan_date = datetime.strptime(plan_date_str, "%Y-%m-%d").date()
     today = datetime.now().date()
 
-    window_start = datetime.combine(
+    window_end = datetime.combine(
         plan_date,
         datetime.min.time()
-    )
+    ) + timedelta(hours=7)
+
+    window_start = window_end - timedelta(days=1)
 
     if plan_date == today:
-        window_end = datetime.now()
-    else:
-        window_end = datetime.combine(
-            plan_date,
-            datetime.max.time().replace(microsecond=0)
-        )
+        now = datetime.now()
+        if now < window_end:
+            window_end = now
 
     return window_start, window_end
 
@@ -446,9 +450,9 @@ def get_berthed_vessels(window_start, window_end, berths):
         row['pipeline'] = h['exp_pipeline'] if h['operation_type'] == 'Export' else h['imp_pipeline']
         row.update(_enrich_vessel(cur, h['vcn_id'], h['ldud_id'], window_start, window_end))
         # Check whether discharge was completed as of the selected report date
-        balance = row.get("balance")
+        sail_dt = h.get("cast_off_datetime")
 
-        if balance is not None and float(balance) <= 0:
+        if sail_dt and sail_dt < window_end:
             continue
 
         out.append(row)
