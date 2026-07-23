@@ -213,69 +213,83 @@ def report13_report():
     if not fin_year or month_idx is None:
         return jsonify({"error": "fin_year and month_idx are required"}), 400
 
+    print("=" * 80)
+    print("REPORT13 API CALLED")
+    print("__file__ =", __file__)
+    print("fin_year =", fin_year)
+    print("month_idx =", month_idx)
+    print("month =", MONTH_LABELS[month_idx])
+    print("uses_legacy =", _uses_legacy_schema(fin_year, month_idx))
+    print("=" * 80)
+
     try:
-        print("fin_year =", fin_year)
-        print("month_idx =", month_idx)
-        print("Uses legacy =", _uses_legacy_schema(fin_year, month_idx))
         if _uses_legacy_schema(fin_year, month_idx):
+            print(">>> CALLING _fetch_legacy()")
             rows = _fetch_legacy(fin_year, month_idx)
         else:
+            print(">>> CALLING _fetch_new_schema()")
             rows = _fetch_new_schema(fin_year, month_idx)
 
         return jsonify({
             "month_label": f"{MONTH_LABELS[month_idx]} {fin_year}",
-            "rows": rows,
+            "rows": rows
         })
+
     except ReportDataError as exc:
         return jsonify({"error": str(exc)}), 422
     except Exception as exc:
-        return jsonify({"error": f"Failed to load report: {exc}"}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 500
 
 
-def _fetch_legacy(fin_year: str, month_idx: int) -> list[dict]:
+def _fetch_legacy(fin_year: str, month_idx: int):
+    print(">>> INSIDE _fetch_legacy")
+
     conn = get_db()
     cur = get_cursor(conn)
+
     try:
         cur.execute(f"""
             SELECT
-                fin_year                                                        AS month,
-                NULL                                                            AS via_no,
+                fin_year AS month,
+                COALESCE(TRIM(vcn_no), '') AS via_no,
                 imo_no,
                 vessel_name,
                 agent,
                 grt,
                 loa,
-                'LIQUID'                                                        AS cargo_type,
+                'LIQUID' AS cargo_type,
                 cargo,
-                'JJLTPL'                                                        AS terminal,
-                berth_no                                                        AS berth,
-                to_char(NULLIF(anchorage_time, '')::timestamp, '{DATETIME_FMT}')       AS anchored_time,
-                to_char(NULLIF(pilot_pickup, '')::timestamp, '{DATETIME_FMT}')         AS pilot_boarded,
-                to_char(NULLIF(alongside, '')::timestamp, '{DATETIME_FMT}')            AS alongside_time,
-                to_char(NULLIF(ops_commenced, '')::timestamp, '{DATETIME_FMT}')        AS cargo_commenced,
-                to_char(NULLIF(cargo_completion, '')::timestamp, '{DATETIME_FMT}')     AS cargo_completed,
-                to_char(NULLIF(cast_off, '')::timestamp, '{DATETIME_FMT}')             AS cast_off_time,
-                to_char(NULLIF(pilot_board_departure, '')::timestamp, '{DATETIME_FMT}') AS pilot_disembarked,
+                'JJLTPL' AS terminal,
+                berth_no AS berth,
+                to_char(NULLIF(anchorage_time,'')::timestamp,'{DATETIME_FMT}') AS anchored_time,
+                to_char(NULLIF(pilot_pickup,'')::timestamp,'{DATETIME_FMT}') AS pilot_boarded,
+                to_char(NULLIF(alongside,'')::timestamp,'{DATETIME_FMT}') AS alongside_time,
+                to_char(NULLIF(ops_commenced,'')::timestamp,'{DATETIME_FMT}') AS cargo_commenced,
+                to_char(NULLIF(cargo_completion,'')::timestamp,'{DATETIME_FMT}') AS cargo_completed,
+                to_char(NULLIF(cast_off,'')::timestamp,'{DATETIME_FMT}') AS cast_off_time,
+                to_char(NULLIF(pilot_board_departure,'')::timestamp,'{DATETIME_FMT}') AS pilot_disembarked,
                 quantity
             FROM mis_vessel_master
             WHERE fin_year = %(fin_year)s
-              AND LEFT(LOWER(month), 3) = LEFT(LOWER(%(month_label)s), 3)
-            ORDER BY NULLIF(anchorage_time, '')::timestamp
+              AND LEFT(LOWER(month),3)=LEFT(LOWER(%(month_label)s),3)
+            ORDER BY NULLIF(anchorage_time,'')::timestamp
         """, {
             "fin_year": fin_year,
             "month_label": MONTH_LABELS[month_idx]
         })
 
-        rows = cur.fetchall()
+        rows = [dict(r) for r in cur.fetchall()]
 
-        if rows is None:
-            raise ReportDataError("No legacy vessel data returned.")
+        print("TOTAL ROWS =", len(rows))
+        if rows:
+            print("FIRST ROW =", rows[0])
 
-        return [dict(r) for r in rows]
+        return rows
 
     finally:
         cur.close()
-
 
 def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
     period_start, period_end = _period_bounds(fin_year, month_idx)
