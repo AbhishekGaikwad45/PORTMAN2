@@ -419,13 +419,13 @@ def get_berthed_vessels(window_start, window_end, berths):
         WHERE h.berth_name = ANY(%s)
           AND l.alongside_datetime IS NOT NULL
           AND (NULLIF(l.alongside_datetime::text, ''))::timestamp < %s
-          AND (
+            AND (
                 l.{SAIL_COLUMN} IS NULL
                 OR NULLIF(TRIM(l.{SAIL_COLUMN}::text), '') IS NULL
-                OR (NULLIF(l.{SAIL_COLUMN}::text, ''))::timestamp > %s
-              )
-        ORDER BY h.berth_name, l.alongside_datetime DESC
-    ''', [berths, window_end, window_start])
+                OR l.{SAIL_COLUMN}::timestamp >= %s
+                )
+                    ORDER BY h.berth_name, l.alongside_datetime DESC
+    ''', [berths, window_end, window_end])
     headers = [dict(r) for r in cur.fetchall()]
 
     # ===== Keep only the LATEST vessel per berth (a berth can physically =====
@@ -497,27 +497,43 @@ def get_sailed_vessels(window_start, window_end, berths):
         sail_dt = h['sail_dt']
         completion_dt = h['cargo_completion_dt']
 
-        if sail_dt:
-            # ---- PRIORITY 1: cast off exists -> show ONLY on the day it happened ----
-            if not _in_window(sail_dt):
-                continue   # previous day or next day -> skip entirely
-        else:
-            # ---- PRIORITY 2: no cast off yet -> fall back to cargo completion date ----
-            if not _in_window(completion_dt):
-                continue
+        # Show only vessels that have actually sailed
+        if sail_dt is None:
+            continue
+
+        # Show only if sailed during the selected report window
+        if not (window_start <= sail_dt < window_end):
+            continue
 
         row = _base_row(h)
         row['alongside'] = _fmt_dt(h['alongside_datetime'])
         row['cast_off'] = _fmt_dt(sail_dt)
         row['cargo_completion'] = _fmt_dt(completion_dt)
         row['vessel_agent'] = h['vessel_agent_name']
-        row['terminal'] = h['exp_terminal'] if h['operation_type'] == 'Export' else h['imp_terminal']
-        row['pipeline'] = h['exp_pipeline'] if h['operation_type'] == 'Export' else h['imp_pipeline']
-        row.update(_enrich_vessel(cur, h['vcn_id'], h['ldud_id'], window_start, window_end))
+        row['terminal'] = (
+            h['exp_terminal']
+            if h['operation_type'] == 'Export'
+            else h['imp_terminal']
+        )
+        row['pipeline'] = (
+            h['exp_pipeline']
+            if h['operation_type'] == 'Export'
+            else h['imp_pipeline']
+        )
+
+        row.update(
+            _enrich_vessel(
+                cur,
+                h['vcn_id'],
+                h['ldud_id'],
+                window_start,
+                window_end
+            )
+        )
 
         balance = row.get('balance')
-        if not (balance is not None and balance <= 0):
-            continue   
+        if balance is None or balance > 0:
+            continue
 
         out.append(row)
     conn.close()
