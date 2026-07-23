@@ -272,8 +272,7 @@ def _fetch_legacy(fin_year: str, month_idx: int):
                 to_char(NULLIF(pilot_board_departure,'')::timestamp,'{DATETIME_FMT}') AS pilot_disembarked,
                 quantity
             FROM mis_vessel_master
-            WHERE COALESCE(is_deleted, FALSE) = FALSE
-              AND fin_year = %(fin_year)s
+            WHERE fin_year = %(fin_year)s
               AND LEFT(LOWER(month), 3) = LEFT(LOWER(%(month_label)s), 3)
             ORDER BY NULLIF(anchorage_time,'')::timestamp
         """, {
