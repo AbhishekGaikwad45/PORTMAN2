@@ -220,7 +220,14 @@ let META3 = { years: [], months: {} };
 
 function fmtVal(v) {
     if (v === null || v === undefined) return "";
-    return Number(v).toFixed(2);
+
+    const num = Number(v);
+
+    if (Number.isInteger(num)) {
+        return num.toString();
+    }
+
+    return num.toFixed(2);
 }
 function currentFinYear3() {
     const now = new Date();

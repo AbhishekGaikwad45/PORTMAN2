@@ -293,11 +293,16 @@ def load_data() -> pd.DataFrame:
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT fin_year, month, category, quantity
-            FROM mis_vessel_master
-            WHERE fin_year IS NOT NULL
-              AND month IS NOT NULL
-        """)
+    SELECT
+        fin_year,
+        month,
+        category,
+        quantity
+    FROM mis_vessel_master
+    WHERE fin_year IS NOT NULL
+      AND month IS NOT NULL
+      AND NULLIF(TRIM(cast_off), '') IS NOT NULL
+""")
         rows = cur.fetchall()
     finally:
         conn.close()

@@ -119,11 +119,14 @@
         width: 100%;
         border-collapse: collapse;
         margin-bottom: 6px;
+        table-layout: fixed;
     }
     table.bpln-vertical td, table.bpln-vertical th {
         border: 1px solid #444;
         padding: 3px 6px;
         vertical-align: middle;
+        overflow: hidden;
+        word-wrap: break-word;
     }
     table.bpln-vertical th {
         background: #dce6f1;
@@ -134,7 +137,6 @@
         font-weight: bold;
         color: #000;
         background: #f4f6fa;
-        width: 22%;
         white-space: nowrap;
     }
     table.bpln-vertical td.value {
@@ -372,10 +374,29 @@ function buildVerticalTable(tableId, vessels, berths, fields) {
     const table = document.getElementById(tableId);
     table.innerHTML = '';
 
+    // ===== Fixed, equal-width columns for every berth =====
+    // total individual vessel-slot columns across all berths (accounts for colspan)
+    const totalSlotCols = berthCols.reduce((sum, col) => sum + col.vessels.length, 0);
+    const LABEL_WIDTH_PCT = 18; // fixed width for the DETAILS column
+    const remainingPct = 100 - LABEL_WIDTH_PCT;
+    const slotWidthPct = totalSlotCols > 0 ? (remainingPct / totalSlotCols) : remainingPct;
+
+    const colgroup = document.createElement('colgroup');
+    const labelCol = document.createElement('col');
+    labelCol.style.width = LABEL_WIDTH_PCT + '%';
+    colgroup.appendChild(labelCol);
+    berthCols.forEach(col => {
+        col.vessels.forEach(() => {
+            const c = document.createElement('col');
+            c.style.width = slotWidthPct + '%';
+            colgroup.appendChild(c);
+        });
+    });
+    table.appendChild(colgroup);
+
     // header row
     const headRow = document.createElement('tr');
     const thDetails = document.createElement('th');
-    thDetails.style.width = '22%';
     thDetails.textContent = 'DETAILS';
     headRow.appendChild(thDetails);
     berthCols.forEach(col => {

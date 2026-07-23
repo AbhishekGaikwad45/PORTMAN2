@@ -90,7 +90,7 @@ CATEGORY_MAP = {
     'EDIBLE OIL': 'EDIBLE OIL',
     'OTHER LIQUID': 'OTHER LIQUIDS',
     'CHEMICAL': 'OTHER LIQUIDS',
-    'PH.ACID': 'OTHER LIQUIDS',
+    'PH.ACID': 'FARM LIQUIDS',
 }
 
 _MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
