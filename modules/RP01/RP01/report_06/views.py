@@ -240,6 +240,60 @@ def _fetch_reconciled_rows(month_label):
     return lines
 
 
+# def _fetch_live_rows(year_str, month_str):
+#     """
+#     LIVE fallback for the current / not-yet-reconciled month.
+#     Reads from vcn_header -> ldud_header -> ldud_parcel_ops -> lueu_parcel_log.
+
+#     NOTE: foreign_indian is not available in this chain (see module docstring)
+#     and is defaulted to 'I' by the caller via _aggregate's placeholder flag.
+#     category is matched against vessel_cargo.cargo_category with an exact
+#     match first, falling back to a fuzzy LIKE match.
+#     """
+#     y, m = month_str.split('-')
+#     y, m = int(y), int(m)
+#     # month range as text-comparable dates (doc_date is stored as text 'YYYY-MM-DD')
+#     start = f"{y:04d}-{m:02d}-01"
+#     if m == 12:
+#         end = f"{y + 1:04d}-01-01"
+#     else:
+#         end = f"{y:04d}-{m + 1:02d}-01"
+
+#     conn = get_db()
+#     cur = get_cursor(conn)
+#     cur.execute("""
+#         SELECT
+#             vh.vessel_run_type   AS overseas_coastal,
+#             vh.operation_type    AS import_export,
+#             vh.cargo_type        AS cargo_type_raw,
+#             COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
+#             SUM(lpl.quantity)    AS quantity
+#         FROM vcn_header vh
+#         JOIN ldud_header ldh         ON ldh.vcn_id = vh.id
+#         JOIN ldud_parcel_ops lpo     ON lpo.ldud_id = ldh.id
+#         JOIN lueu_parcel_log lpl     ON lpl.parcel_op_id = lpo.id
+#         LEFT JOIN vessel_cargo vc_exact
+#                ON UPPER(vc_exact.cargo_name) = UPPER(vh.cargo_type)
+#         LEFT JOIN vessel_cargo vc_fuzzy
+#                ON vc_exact.id IS NULL
+#               AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
+#         WHERE vh.doc_date >= %s AND vh.doc_date < %s
+#         GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
+#                  vc_exact.cargo_category, vc_fuzzy.cargo_category
+#     """, [start, end])
+#     rows = [dict(r) for r in cur.fetchall()]
+#     conn.close()
+
+#     lines = []
+#     for r in rows:
+#         lines.append({
+#             'overseas_coastal': r.get('overseas_coastal'),
+#             'foreign_indian': 'I',   # PLACEHOLDER — see module docstring
+#             'import_export': r.get('import_export'),
+#             'category': r.get('category') or r.get('cargo_type_raw'),
+#             'quantity': r.get('quantity'),
+#         })
+#     return lines
 def _fetch_live_rows(year_str, month_str):
     """
     LIVE fallback for the current / not-yet-reconciled month.
@@ -249,10 +303,16 @@ def _fetch_live_rows(year_str, month_str):
     and is defaulted to 'I' by the caller via _aggregate's placeholder flag.
     category is matched against vessel_cargo.cargo_category with an exact
     match first, falling back to a fuzzy LIKE match.
+
+    IMPORTANT: quantities are summed from a DISTINCT set of
+    lueu_parcel_log.id rows first (subquery `plog`), then joined up to
+    vcn_header/vessel_cargo. This guards against any row multiplication
+    introduced further up the join chain (ldud_header / ldud_parcel_ops)
+    or by the vessel_cargo fuzzy match, so each parcel log line is only
+    ever counted once no matter how many header/category rows it matches.
     """
     y, m = month_str.split('-')
     y, m = int(y), int(m)
-    # month range as text-comparable dates (doc_date is stored as text 'YYYY-MM-DD')
     start = f"{y:04d}-{m:02d}-01"
     if m == 12:
         end = f"{y + 1:04d}-01-01"
@@ -262,24 +322,47 @@ def _fetch_live_rows(year_str, month_str):
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute("""
-        SELECT
-            vh.vessel_run_type   AS overseas_coastal,
-            vh.operation_type    AS import_export,
-            vh.cargo_type        AS cargo_type_raw,
-            COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
-            SUM(lpl.quantity)    AS quantity
-        FROM vcn_header vh
-        JOIN ldud_header ldh         ON ldh.vcn_id = vh.id
-        JOIN ldud_parcel_ops lpo     ON lpo.ldud_id = ldh.id
-        JOIN lueu_parcel_log lpl     ON lpl.parcel_op_id = lpo.id
-        LEFT JOIN vessel_cargo vc_exact
-               ON UPPER(vc_exact.cargo_name) = UPPER(vh.cargo_type)
-        LEFT JOIN vessel_cargo vc_fuzzy
-               ON vc_exact.id IS NULL
-              AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
-        WHERE vh.doc_date >= %s AND vh.doc_date < %s
-        GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
-                 vc_exact.cargo_category, vc_fuzzy.cargo_category
+        WITH plog AS (
+            -- dedupe to one row per parcel log entry BEFORE any further joins
+            SELECT DISTINCT
+                lpl.id           AS parcel_log_id,
+                lpo.id           AS parcel_op_id,
+                ldh.vcn_id       AS vcn_id,
+                lpl.quantity     AS quantity
+            FROM lueu_parcel_log lpl
+            JOIN ldud_parcel_ops lpo ON lpo.id = lpl.parcel_op_id
+            JOIN ldud_header ldh     ON ldh.id = lpo.ldud_id
+        ),
+        vessel_qty AS (
+            SELECT
+                vh.id                AS vh_id,
+                vh.vessel_run_type   AS overseas_coastal,
+                vh.operation_type    AS import_export,
+                vh.cargo_type        AS cargo_type_raw,
+                SUM(plog.quantity)   AS quantity
+            FROM vcn_header vh
+            JOIN plog ON plog.vcn_id = vh.id
+            WHERE vh.doc_date >= %s AND vh.doc_date < %s
+            GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type
+        ),
+        matched AS (
+            SELECT
+                vq.*,
+                COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
+                ROW_NUMBER() OVER (
+                    PARTITION BY vq.vh_id
+                    ORDER BY vc_exact.id NULLS LAST, vc_fuzzy.id NULLS LAST
+                ) AS rn
+            FROM vessel_qty vq
+            LEFT JOIN vessel_cargo vc_exact
+                   ON UPPER(vc_exact.cargo_name) = UPPER(vq.cargo_type_raw)
+            LEFT JOIN vessel_cargo vc_fuzzy
+                   ON vc_exact.id IS NULL
+                  AND UPPER(vq.cargo_type_raw) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
+        )
+        SELECT overseas_coastal, import_export, cargo_type_raw, category, quantity
+        FROM matched
+        WHERE rn = 1
     """, [start, end])
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
@@ -294,7 +377,6 @@ def _fetch_live_rows(year_str, month_str):
             'quantity': r.get('quantity'),
         })
     return lines
-
 
 def get_report1_data(year_str, month_str, debug=False):
     """
