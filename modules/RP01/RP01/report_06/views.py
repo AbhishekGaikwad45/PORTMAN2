@@ -60,7 +60,7 @@ CATEGORY MAPPING (confirm/adjust CATEGORY_MAP below if wrong):
   Edible Oil   -> EDIBLE OIL
   Other Liquid -> OTHER LIQUIDS
   Chemical     -> OTHER LIQUIDS
-  Ph.Acid      -> OTHER LIQUIDS
+  Ph.Acid      -> FARM LIQUIDS
   (anything else, including NULL) -> OTHER BULK
   No current data maps to LPG / FARM LIQUIDS / MOLASSES / CEMENT /
   CONTAINER — those rows will correctly show 0.00 until such cargo exists.
@@ -91,6 +91,7 @@ CATEGORY_MAP = {
     'OTHER LIQUID': 'OTHER LIQUIDS',
     'CHEMICAL': 'OTHER LIQUIDS',
     'PH.ACID': 'FARM LIQUIDS',
+    'PHOSPHORIC ACID': 'FARM LIQUIDS',
 }
 
 _MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
