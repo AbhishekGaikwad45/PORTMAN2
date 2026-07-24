@@ -239,13 +239,19 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
         WHERE vh.berth_name = ANY(%s)
 
         AND NULLIF(lh.alongside_datetime,'') IS NOT NULL
-        AND NULLIF(lh.alongside_datetime,'')::timestamp BETWEEN %s AND %s
+        AND NULLIF(lh.alongside_datetime,'')::timestamp <= %s
 
-        AND NULLIF(lh.cast_off_datetime,'') IS NULL
+        AND (
+            -- Still on berth
+            NULLIF(lh.cast_off_datetime,'') IS NULL
+
+            -- Or cast off happens after this report window
+            OR NULLIF(lh.cast_off_datetime,'')::timestamp > %s
+        )
 
         ORDER BY
             vh.berth_name, po.id
-    """, (berths, window_start, window_end))
+    """, (berths, window_end, window_end))
 
     raw_rows = cur.fetchall()
 
