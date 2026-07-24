@@ -241,19 +241,13 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
           AND NULLIF(lh.alongside_datetime,'')::timestamp < %s
 
           AND (
-            NULLIF(lh.cast_off_datetime,'') IS NULL
-            OR NULLIF(lh.cast_off_datetime,'')::timestamp >= %s
-            OR NULLIF(lh.cast_off_datetime,'')::timestamp < %s
-        )
+                NULLIF(lh.cast_off_datetime,'') IS NULL
+                OR NULLIF(lh.cast_off_datetime,'')::timestamp >= %s
+          )
 
         ORDER BY
             vh.berth_name, po.id
-    """, (
-    berths,
-    window_end,    # alongside_datetime < %s
-    window_end,    # cast_off_datetime >= %s
-    window_start   # cast_off_datetime < %s
-))
+    """, (berths, window_end, window_start))
 
     raw_rows = cur.fetchall()
 
