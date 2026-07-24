@@ -92,6 +92,8 @@ CATEGORY_MAP = {
     'CHEMICAL': 'OTHER LIQUIDS',
     'PH.ACID': 'FARM LIQUIDS',
     'PHOSPHORIC ACID': 'FARM LIQUIDS',
+    'PH ACID [E]': 'FARM LIQUIDS',
+    'PH ACID': 'FARM LIQUIDS',
 }
 
 _MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
