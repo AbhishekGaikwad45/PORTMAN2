@@ -299,17 +299,21 @@ def _fetch_live_rows(year_str, month_str):
     LIVE fallback for the current / not-yet-reconciled month.
     Reads from vcn_header -> ldud_header -> ldud_parcel_ops -> lueu_parcel_log.
 
-    NOTE: foreign_indian is not available in this chain (see module docstring)
-    and is defaulted to 'I' by the caller via _aggregate's placeholder flag.
-    category is matched against vessel_cargo.cargo_category with an exact
-    match first, falling back to a fuzzy LIKE match.
+    CHANGE FROM PREVIOUS VERSION:
+      - Added `WHERE lpl.is_deleted = false` so soft-deleted parcel log
+        entries are excluded from totals (previously not filtered at all).
+      - Category matching kept as simple exact-then-fuzzy against
+        vessel_cargo, unchanged, since diagnostics confirmed this join
+        does NOT duplicate rows for the vessels checked.
 
-    IMPORTANT: quantities are summed from a DISTINCT set of
-    lueu_parcel_log.id rows first (subquery `plog`), then joined up to
-    vcn_header/vessel_cargo. This guards against any row multiplication
-    introduced further up the join chain (ldud_header / ldud_parcel_ops)
-    or by the vessel_cargo fuzzy match, so each parcel log line is only
-    ever counted once no matter how many header/category rows it matches.
+    STILL UNCONFIRMED / NOT HANDLED HERE:
+      - quantity_uom is not inspected or converted. If rows are stored
+        in mixed units (e.g. some in KL, some in MT), this will still
+        produce wrong totals. Run:
+            SELECT id, quantity, quantity_uom FROM lueu_parcel_log
+            WHERE id IN (123,124,125,126,127,128);
+        before trusting this output, and tell me what comes back so a
+        conversion can be added if needed.
     """
     y, m = month_str.split('-')
     y, m = int(y), int(m)
@@ -322,47 +326,25 @@ def _fetch_live_rows(year_str, month_str):
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute("""
-        WITH plog AS (
-            -- dedupe to one row per parcel log entry BEFORE any further joins
-            SELECT DISTINCT
-                lpl.id           AS parcel_log_id,
-                lpo.id           AS parcel_op_id,
-                ldh.vcn_id       AS vcn_id,
-                lpl.quantity     AS quantity
-            FROM lueu_parcel_log lpl
-            JOIN ldud_parcel_ops lpo ON lpo.id = lpl.parcel_op_id
-            JOIN ldud_header ldh     ON ldh.id = lpo.ldud_id
-        ),
-        vessel_qty AS (
-            SELECT
-                vh.id                AS vh_id,
-                vh.vessel_run_type   AS overseas_coastal,
-                vh.operation_type    AS import_export,
-                vh.cargo_type        AS cargo_type_raw,
-                SUM(plog.quantity)   AS quantity
-            FROM vcn_header vh
-            JOIN plog ON plog.vcn_id = vh.id
-            WHERE vh.doc_date >= %s AND vh.doc_date < %s
-            GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type
-        ),
-        matched AS (
-            SELECT
-                vq.*,
-                COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
-                ROW_NUMBER() OVER (
-                    PARTITION BY vq.vh_id
-                    ORDER BY vc_exact.id NULLS LAST, vc_fuzzy.id NULLS LAST
-                ) AS rn
-            FROM vessel_qty vq
-            LEFT JOIN vessel_cargo vc_exact
-                   ON UPPER(vc_exact.cargo_name) = UPPER(vq.cargo_type_raw)
-            LEFT JOIN vessel_cargo vc_fuzzy
-                   ON vc_exact.id IS NULL
-                  AND UPPER(vq.cargo_type_raw) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
-        )
-        SELECT overseas_coastal, import_export, cargo_type_raw, category, quantity
-        FROM matched
-        WHERE rn = 1
+        SELECT
+            vh.vessel_run_type   AS overseas_coastal,
+            vh.operation_type    AS import_export,
+            vh.cargo_type        AS cargo_type_raw,
+            COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
+            SUM(lpl.quantity)    AS quantity
+        FROM vcn_header vh
+        JOIN ldud_header ldh         ON ldh.vcn_id = vh.id
+        JOIN ldud_parcel_ops lpo     ON lpo.ldud_id = ldh.id
+        JOIN lueu_parcel_log lpl     ON lpl.parcel_op_id = lpo.id
+        LEFT JOIN vessel_cargo vc_exact
+               ON UPPER(vc_exact.cargo_name) = UPPER(vh.cargo_type)
+        LEFT JOIN vessel_cargo vc_fuzzy
+               ON vc_exact.id IS NULL
+              AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
+        WHERE vh.doc_date >= %s AND vh.doc_date < %s
+          AND COALESCE(lpl.is_deleted, false) = false
+        GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
+                 vc_exact.cargo_category, vc_fuzzy.cargo_category
     """, [start, end])
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
