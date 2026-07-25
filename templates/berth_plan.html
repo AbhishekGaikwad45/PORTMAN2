@@ -332,8 +332,6 @@
                     <th>QTY.</th>
                     <th>ETA</th>
                     <th>ATA</th>
-                    <th>LPC</th>
-                    <th>DOC</th>
                     <th>NOR</th>
                     <th>BERTH</th>
                 </tr>
@@ -519,7 +517,7 @@
                 const tr = document.createElement('tr');
                 const cells = [
                     r.terminal, r.vessel_name, r.via_no, r.loa, r.dft, r.agt_tnk_cons,
-                    r.cargo, r.mla, r.quantity, r.eta, r.ata, r.lpc, r.doc, r.nor, r.berth
+                    r.cargo, r.mla, r.quantity, r.eta, r.ata, r.nor, r.berth
                 ];
                 cells.forEach(c => {
                     const td = document.createElement('td');
@@ -529,7 +527,6 @@
                 tbody.appendChild(tr);
             });
         }
-
         /* ===== Download: PDF + Excel ===== */
         function toggleDownloadMenu() {
             document.getElementById('bplnDownloadMenu').classList.toggle('open');
