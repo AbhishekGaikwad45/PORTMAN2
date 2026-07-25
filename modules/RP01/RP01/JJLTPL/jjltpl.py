@@ -96,37 +96,25 @@ def _jjltpl_fin_year_label(selected_date):
 
 
 def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
-    """
-    DAY quantity, based on actual logged operations in lueu_parcel_log
-    (the same source LUEU01 uses for its running totals) rather than a
-    berth-occupancy snapshot. Each log row's timestamp is entry_date +
-    from_time (falling back to midnight if from_time is missing/blank),
-    and we sum whatever falls inside [period_start, period_end).
-    """
 
     cur.execute("""
         SELECT
-            COALESCE(SUM(pl.quantity), 0) AS qty
-        FROM lueu_parcel_log pl
-        WHERE pl.is_deleted IS NOT TRUE
-          AND pl.is_shortclose IS NOT TRUE
-          AND pl.parcel_op_id IN (
-                SELECT po.id
-                FROM ldud_parcel_ops po
-                JOIN ldud_header lh ON lh.id = po.ldud_id
-                JOIN vcn_header vh  ON vh.id = lh.vcn_id
-                WHERE vh.berth_name = ANY(%s)
+            COALESCE(SUM(po.quantity), 0) AS qty
+        FROM ldud_header lh
+        JOIN vcn_header vh
+            ON vh.id = lh.vcn_id
+        LEFT JOIN ldud_parcel_ops po
+            ON po.ldud_id = lh.id
+        WHERE vh.berth_name = ANY(%s)
+
+          AND NULLIF(lh.alongside_datetime,'') IS NOT NULL
+          AND NULLIF(lh.alongside_datetime,'')::timestamp <= %s
+
+          AND (
+                NULLIF(lh.cast_off_datetime,'') IS NULL
+                OR NULLIF(lh.cast_off_datetime,'')::timestamp > %s
           )
-          AND NULLIF(pl.entry_date, '') IS NOT NULL
-          AND (
-                NULLIF(pl.entry_date, '')::date
-                + COALESCE(NULLIF(pl.from_time, '')::time, '00:00'::time)
-              ) >= %s
-          AND (
-                NULLIF(pl.entry_date, '')::date
-                + COALESCE(NULLIF(pl.from_time, '')::time, '00:00'::time)
-              ) < %s
-    """, (berths, period_start, period_end))
+    """, (berths, period_end, period_end))
 
     row = cur.fetchone()
     qty = float(row["qty"] or 0)
@@ -400,6 +388,29 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
     rows.sort(key=lambda x: berth_order.get(x["berth"], 999))
 
     return rows
+
+
+# def _jjltpl_bulk_tons(cur, period_start, period_end):
+
+#     cur.execute("""
+#         SELECT
+#             COALESCE(SUM(quantity), 0) AS qty
+#         FROM mis_vessel_master
+#         WHERE NULLIF(TRIM(cast_off), '') IS NOT NULL
+#           AND NULLIF(TRIM(cast_off), '')::timestamp >= %s
+#           AND NULLIF(TRIM(cast_off), '')::timestamp < %s
+#     """, (period_start, period_end))
+
+#     row = cur.fetchone()
+
+#     qty = float(row["qty"] or 0)
+
+#     return {
+#         MEDIUM_DRY_BULK: 0.0,
+#         MEDIUM_BREAK_BULK: 0.0,
+#         MEDIUM_LIQUID_BULK: qty,
+#         "bulk_total": qty,
+#     }
 
 
 def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
