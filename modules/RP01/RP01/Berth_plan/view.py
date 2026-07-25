@@ -311,6 +311,24 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     ''', [ldud_id])
 
     cargo_completed = cur.fetchone()['completed']
+    
+    cur.execute("""
+        SELECT l.remarks
+        FROM ldud_parcel_ops po
+        JOIN lueu_parcel_log l
+            ON l.parcel_op_id = po.id
+        WHERE po.ldud_id = %s
+        AND l.is_deleted IS NOT TRUE
+        ORDER BY
+            po.id DESC,
+            NULLIF(l.entry_date,'')::date DESC,
+            NULLIF(l.to_time,'')::time DESC,
+            l.id DESC
+        LIMIT 1
+    """, [ldud_id])
+
+    remark_row = cur.fetchone()
+    remarks = remark_row["remarks"] if remark_row else ""
 
     # target_qty comes from the live VCN parcel quantities (via get_started_parcels) —
     # this is a "current truth" number and is NOT date-dependent.
@@ -398,14 +416,17 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     return {
         'consigner': consigner,
         'quantity': target_qty,
-    'ops_commenced': _fmt_dt(ops_commenced),          # First parcel start
-    'cargo_completion': _fmt_dt(cargo_completed),     # Last parcel end
+        'ops_commenced': _fmt_dt(ops_commenced),          # First parcel start
+        'cargo_completion': _fmt_dt(cargo_completed),     # Last parcel end
         'last_24hr_qty': last_24hr_qty,
         'till_now_qty': round(logged_qty, 3),
         'balance': balance_qty,
         'expected_completion': expected_completion,
         'present_flow_rate': display_rate,
         'is_planned': is_planned,
+        'present_flow_rate': display_rate,
+        'is_planned': is_planned,
+        'remarks': remarks,
     }
 
 
