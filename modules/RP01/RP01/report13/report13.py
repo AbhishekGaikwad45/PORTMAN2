@@ -71,6 +71,56 @@ sample data check on 2026-07-22):
       not added to EXPORT_HEADERS / EXPORT_FIELD_MAP. Legacy rows return
       both as None (mis_vessel_master has no per-parcel BL quantity).
 
+    - SHORT CLOSE ADJUSTMENT (added 2026-07-25, post-cutover only):
+      lueu_parcel_log has a `remarks` column. Any log row with
+      remarks = 'Short Close' represents a downward adjustment to the
+      NOMINATED (BL) quantity, not to the discharged quantity -- so its
+      quantity is subtracted from bl_quantity, not from the discharged
+      sum in parcel_agg.
+      Same fan-out concern as bl_quantity itself applies here: this sum
+      is computed in its own ldud_id-level CTE (short_close_agg),
+      joined through ldud_parcel_ops -> lueu_parcel_log and grouped by
+      ldud_id, BEFORE being combined with po_qty. Both po_qty and
+      short_close_agg are one-row-per-ldud_id after their own GROUP BY,
+      so joining them together on ldud_id is safe and introduces no
+      further fan-out.
+      Final bl_quantity = raw nominated quantity (po_qty) minus total
+      Short Close quantity (short_close_agg) for that ldud_id. The
+      discharged quantity in parcel_agg is unchanged -- Short Close log
+      rows are still included there, since only bl_quantity was asked
+      to be adjusted.
+
+    - EXPORT-ONLY FORMATTING (added 2026-07-25):
+      1. The exported "Month" column (post-cutover rows only) is
+         formatted as 'Mon-YYYY' (e.g. "Jul-2026") via to_char(...,
+         'Mon-YYYY'), instead of the DD-MM-YYYY date it showed before.
+         This only affects the `month` field's SQL formatting in
+         _fetch_new_schema -- the on-screen report doesn't display a
+         Month column at all, so nothing changes there. Legacy rows are
+         untouched (their `month` field is fin_year text, e.g.
+         "2025-26", not a date).
+      2. report13_export() now sorts rows ascending by VIA NO. before
+         writing them to the workbook (SR. NO. is assigned after this
+         sort, so it also runs 1..N in VIA NO. order). This sort is
+         export-only -- the on-screen /report endpoint still returns
+         rows in the original date-based order from the SQL query.
+         VIA NO. values are compared numerically where possible (via
+         _via_no_sort_key) so "9" sorts before "10"; non-numeric or
+         blank values fall back to string comparison and sort after all
+         numeric ones.
+
+      FOLLOW-UP (same day): the on-screen "Quantity (Tonnes)" column
+      and the exported TOTAL TONNES column both read the top-level
+      `quantity` field. That field previously held the discharged sum
+      from lueu_parcel_log, but was still showing the untouched nominal
+      figure to users, so per explicit request it now holds
+      (raw nominated quantity - Short Close quantity) instead -- i.e.
+      the same value as `bl_quantity`. The actual discharged sum is
+      still computed and returned separately as `discharged_quantity`,
+      and `remaining_qty` still measures bl_quantity minus that
+      discharged figure (not minus the new `quantity` field, which
+      would always net to zero).
+
 ASSUMPTIONS still open (not yet confirmed):
     1. mis_vessel_master.month values are assumed to literally match
        MONTH_LABELS strings below ("April", "May", ...). If your data
@@ -96,6 +146,12 @@ ASSUMPTIONS still open (not yet confirmed):
        current queries don't produce a second or third parcel window.
     5. `quantity` from the queries is exported into TOTAL TONNES, since
        that's the only quantity figure the current code fetches.
+    6. remarks = 'Short Close' is assumed to be an exact, case-sensitive
+       match against lueu_parcel_log.remarks. If the source data uses
+       different casing or trailing whitespace, switch the comparison
+       to UPPER(TRIM(lpl.remarks)) = 'SHORT CLOSE' -- run:
+           SELECT DISTINCT remarks FROM lueu_parcel_log;
+       to confirm the exact stored value(s).
 """
 
 from datetime import date
@@ -340,14 +396,31 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
     try:
         cur.execute(f"""
             WITH po_qty AS (
-                -- BL (nominated) quantity per ldud_id, summed BEFORE any
-                -- join to lueu_parcel_log so it can't be inflated by
+                -- Raw nominated (BL) quantity per ldud_id, summed BEFORE
+                -- any join to lueu_parcel_log so it can't be inflated by
                 -- join fan-out (see docstring note above).
                 SELECT
                     ldud_id,
-                    COALESCE(SUM(quantity), 0) AS bl_quantity
+                    COALESCE(SUM(quantity), 0) AS raw_bl_quantity
                 FROM ldud_parcel_ops
                 GROUP BY ldud_id
+            ),
+
+            short_close_agg AS (
+                -- Total quantity of Short Close log entries per ldud_id,
+                -- reached via ldud_parcel_ops -> lueu_parcel_log and
+                -- summed BEFORE being combined with po_qty, so this join
+                -- can't fan out po_qty's rows either. This amount is
+                -- subtracted from the raw nominated quantity below.
+                SELECT
+                    po.ldud_id,
+                    COALESCE(SUM(lpl.quantity), 0) AS short_close_qty
+                FROM ldud_parcel_ops po
+                JOIN lueu_parcel_log lpl
+                    ON lpl.parcel_op_id = po.id
+                   AND COALESCE(lpl.is_deleted, FALSE) = FALSE
+                   AND UPPER(TRIM(lpl.remarks)) = 'SHORT CLOSE'
+                GROUP BY po.ldud_id
             ),
 
             parcel_agg AS (
@@ -360,7 +433,13 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                         ELSE NULL
                     END AS cargo_completed,
                     -- Actual discharged quantity, summed from the log.
-                    COALESCE(SUM(lpl.quantity), 0) AS quantity,
+                    -- Short Close rows are still included here -- only
+                    -- bl_quantity is adjusted for them, per the docstring
+                    -- note above. Exposed as discharged_quantity (kept
+                    -- distinct from the `quantity` field, which now shows
+                    -- the nominal ldud amount minus Short Close instead
+                    -- -- see 2026-07-25 note in the docstring).
+                    COALESCE(SUM(lpl.quantity), 0) AS discharged_quantity,
                     MAX(po.cargo_name) AS cargo_name
                 FROM ldud_parcel_ops po
                 LEFT JOIN lueu_parcel_log lpl
@@ -370,7 +449,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
             )
 
             SELECT
-                to_char(NULLIF(lh.created_date, '')::date, '{DATE_ONLY_FMT}') AS month,
+                to_char(NULLIF(lh.created_date, '')::date, 'Mon-YYYY') AS month,
                 vh.via_number AS via_no,
                 COALESCE(v.imo_num, '') AS imo_no,
                 lh.vessel_name AS vessel_name,
@@ -392,9 +471,15 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                 to_char(NULLIF(lh.cast_off_datetime, '')::timestamp, '{DATETIME_FMT}') AS cast_off_time,
                 to_char(NULLIF(lh.pilot_disembarked, '')::timestamp, '{DATETIME_FMT}') AS pilot_disembarked,
 
-                COALESCE(pa.quantity, 0) AS quantity,
-                pq.bl_quantity AS bl_quantity,
-                pq.bl_quantity - COALESCE(pa.quantity, 0) AS remaining_qty
+                -- Main "quantity" figure shown on screen / exported as
+                -- TOTAL TONNES: nominal ldud quantity minus Short Close
+                -- (same formula as bl_quantity below), per 2026-07-25
+                -- request -- this replaces the discharged-log sum that
+                -- used to be exposed under this key.
+                pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0) AS quantity,
+                COALESCE(pa.discharged_quantity, 0) AS discharged_quantity,
+                pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0) AS bl_quantity,
+                (pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0)) - COALESCE(pa.discharged_quantity, 0) AS remaining_qty
 
             FROM ldud_header lh
 
@@ -410,6 +495,9 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
 
             LEFT JOIN po_qty pq
                 ON pq.ldud_id = lh.id
+
+            LEFT JOIN short_close_agg sca
+                ON sca.ldud_id = lh.id
 
             LEFT JOIN vessel_cargo vc
                 ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(pa.cargo_name))
@@ -505,6 +593,17 @@ EXPORT_FIELD_MAP = [
     None,
 ]
 
+
+def _via_no_sort_key(via_no):
+    """Ascending sort key for VIA NO. -- numeric values sort as numbers
+    (so "9" comes before "10"); anything non-numeric or blank falls back
+    to string comparison and sorts after all numeric values."""
+    text = (via_no or "").strip()
+    try:
+        return (0, int(text))
+    except (TypeError, ValueError):
+        return (1, text)
+
 @bp.route("/api/module/RP01/report13/export", methods=["GET"])
 def report13_export():
     fin_year = request.args.get("fin_year")
@@ -521,6 +620,10 @@ def report13_export():
         return jsonify({"error": str(exc)}), 422
     except Exception as exc:
         return jsonify({"error": f"Failed to build export: {exc}"}), 500
+
+    # Export-only requirement: rows ascending by VIA NO., regardless of
+    # the date-based ordering used for the on-screen report.
+    rows = sorted(rows, key=lambda r: _via_no_sort_key(r.get("via_no")))
 
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
