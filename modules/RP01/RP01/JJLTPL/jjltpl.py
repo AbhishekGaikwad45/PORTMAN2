@@ -520,7 +520,11 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
 
 
 def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
-
+    """
+    DAY vessel count: vessels CURRENTLY on berth as of period_end
+    (alongside already, not yet cast off / cast off after period_end).
+    This intentionally ignores period_start.
+    """
     cur.execute("""
         SELECT COUNT(DISTINCT vh.id) AS cnt
         FROM ldud_header lh
@@ -543,6 +547,29 @@ def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
     return row["cnt"] if row and row["cnt"] else 0
 
 
+def _jjltpl_month_bulk_vessel_count(cur, period_start, period_end, berths):
+    """
+    MONTH/YEAR-month-addition vessel count: vessels whose cast_off_datetime
+    falls WITHIN [period_start, period_end) — matches the same definition
+    _jjltpl_month_bulk_tons uses for tons, so the two figures agree.
+    (_jjltpl_bulk_vessel_count is deliberately NOT reused here — it counts
+    vessels still sitting on berth right now, which is a different set.)
+    """
+    cur.execute("""
+        SELECT COUNT(DISTINCT vh.id) AS cnt
+        FROM ldud_header lh
+        JOIN vcn_header vh
+            ON vh.id = lh.vcn_id
+        WHERE vh.berth_name = ANY(%s)
+          AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
+          AND NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
+          AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
+    """, (berths, period_start, period_end))
+
+    row = cur.fetchone()
+    return row["cnt"] if row and row["cnt"] else 0
+
+
 def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths, fin_year=None):
 
     if label == "YEAR":
@@ -550,9 +577,9 @@ def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths, f
         tons = _jjltpl_fy_bulk_tons(cur, fin_year)
         vessel_count = _jjltpl_fy_bulk_vessel_count(cur, fin_year)
 
-        # Current month values
+        # Current month values (cast-off-based, matching month_tons logic)
         month_tons = _jjltpl_month_bulk_tons(cur, period_start, period_end, berths)
-        month_vessels = _jjltpl_bulk_vessel_count(
+        month_vessels = _jjltpl_month_bulk_vessel_count(
             cur,
             period_start,
             period_end,
@@ -568,7 +595,7 @@ def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths, f
         vessel_count += month_vessels
     elif label == "MONTH":
         tons = _jjltpl_month_bulk_tons(cur, period_start, period_end, berths)
-        vessel_count = _jjltpl_bulk_vessel_count(
+        vessel_count = _jjltpl_month_bulk_vessel_count(
             cur,
             period_start,
             period_end,
