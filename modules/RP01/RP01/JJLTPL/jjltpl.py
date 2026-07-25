@@ -23,6 +23,11 @@ from openpyxl.utils import get_column_letter
 
 MODULE_CODE = 'RP01'
 
+# Flip this to True temporarily if numbers still look wrong — it prints
+# per parcel-op target vs. actual to stderr so you can see exactly what
+# the aggregation is doing at runtime.
+_JJLTPL_DEBUG = False
+
 
 def login_required(f):
     @wraps(f)
@@ -95,80 +100,6 @@ def _jjltpl_fin_year_label(selected_date):
     return f"{start_year}-{end_year_short:02d}"
 
 
-def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
-
-    cur.execute("""
-        SELECT
-            po.id AS parcel_op_id,
-            po.parcel_ids,
-            po.quantity AS op_qty,
-            vh.operation_type
-        FROM ldud_header lh
-        JOIN vcn_header vh
-            ON vh.id = lh.vcn_id
-        LEFT JOIN ldud_parcel_ops po
-            ON po.ldud_id = lh.id
-        WHERE vh.berth_name = ANY(%s)
-
-          AND NULLIF(lh.alongside_datetime,'') IS NOT NULL
-          AND NULLIF(lh.alongside_datetime,'')::timestamp <= %s
-
-          AND (
-                NULLIF(lh.cast_off_datetime,'') IS NULL
-                OR NULLIF(lh.cast_off_datetime,'')::timestamp > %s
-          )
-    """, (berths, period_end, period_end))
-
-    rows = cur.fetchall()
-
-    qty = 0.0
-    for r in rows:
-        if not r["parcel_op_id"]:
-            continue
-        # Same target resolution + capped log aggregation LUEU01/RP01 use
-        # elsewhere. This gives us what's ACTUALLY been done so far, not
-        # the full BL/target quantity.
-        target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
-        real_qty, hours, shortclose_qty = _lueu_log_aggregate(cur, r["parcel_op_id"], target)
-        qty += (real_qty + shortclose_qty)  # excludes remaining = target - actual
-
-    return {
-        MEDIUM_DRY_BULK: 0.0,
-        MEDIUM_BREAK_BULK: 0.0,
-        MEDIUM_LIQUID_BULK: qty,
-        "bulk_total": qty,
-    }
-def _jjltpl_fy_bulk_tons(cur, fin_year):
-
-    cur.execute("""
-        SELECT
-            COALESCE(SUM(quantity),0) AS qty
-        FROM mis_vessel_master
-        WHERE fin_year = %s
-    """, (fin_year,))
-
-    qty = float(cur.fetchone()["qty"] or 0)
-
-    return {
-        MEDIUM_DRY_BULK: 0.0,
-        MEDIUM_BREAK_BULK: 0.0,
-        MEDIUM_LIQUID_BULK: qty,
-        "bulk_total": qty,
-    }
-def _jjltpl_fy_bulk_vessel_count(cur, fin_year):
-    """
-    Count of vessels in mis_vessel_master for the given financial year.
-    """
-    cur.execute("""
-        SELECT COUNT(*) AS cnt
-        FROM mis_vessel_master
-        WHERE fin_year = %s
-    """, (fin_year,))
-
-    row = cur.fetchone()
-    return row["cnt"] if row and row["cnt"] else 0
-
-
 def _lueu_parse_ids(csv):
     return [int(x) for x in str(csv or '').split(',') if str(x).strip().isdigit()]
 
@@ -205,26 +136,172 @@ def _lueu_target_qty(cur, parcel_ids_csv, op_qty, operation_type):
     return total or float(op_qty or 0)
 
 
+def _lueu_is_shortclose_row(r):
+    """
+    Detect a shortclose row from the `remarks` text column (e.g. operators
+    typing "Shortclose", "Short Close", "SHORT-CLOSE" etc.) rather than
+    relying solely on the is_shortclose boolean flag, since that flag is
+    not reliably set (confirmed: rows with remarks="Short Close" can still
+    have is_shortclose=false in the data). Falls back to is_shortclose if
+    the remarks text doesn't match, in case some rows only set the flag.
+    """
+    remarks = str(r.get('remarks') or '').strip().lower()
+    if 'short' in remarks and 'close' in remarks:
+        return True
+    return bool(r.get('is_shortclose'))
+
+
 def _lueu_log_aggregate(cur, parcel_op_id, target):
-    """Capped aggregation of lueu_parcel_log rows for one parcel-op, exactly
-    mirroring the loop in model.py::get_started_parcels: once cumulative
-    qty (real + shortclose) reaches target, later rows are ignored so they
-    can't drag hours/avg_rate/ETC. Shortclose qty counts toward completion
-    but NOT toward hours or avg_rate."""
-    cur.execute('''SELECT from_time, to_time, COALESCE(quantity,0) AS q, is_shortclose
+    """
+    Aggregation of lueu_parcel_log rows for one parcel-op:
+      - real_qty = sum of qty on normal (non-shortclose) rows, capped so
+        it never exceeds the effective target.
+      - shortclose_qty = sum of qty on rows whose remark marks them as a
+        shortclose. This REDUCES the target (vessel closed short of the
+        full BL) rather than counting as delivered cargo — so it is NOT
+        added to real_qty and does not count toward hours/avg_rate.
+      - effective_target = target - shortclose_qty (never below 0).
+
+    Returns (real_qty, hours, shortclose_qty, effective_target).
+    """
+    cur.execute('''SELECT from_time, to_time, COALESCE(quantity,0) AS q,
+                          is_shortclose, remarks
                    FROM lueu_parcel_log
                    WHERE parcel_op_id=%s AND is_deleted IS NOT TRUE
                    ORDER BY entry_date, from_time NULLS LAST, id''', [parcel_op_id])
-    real_qty, hours, shortclose_qty = 0.0, 0.0, 0.0
-    for r in cur.fetchall():
-        if target > 0 and (real_qty + shortclose_qty) >= target - 1e-6:
+
+    rows = cur.fetchall()
+
+    # First pass: total shortclose qty reduces the target.
+    shortclose_qty = sum(
+        float(r['q'] or 0) for r in rows if _lueu_is_shortclose_row(r)
+    )
+    effective_target = max(target - shortclose_qty, 0) if target > 0 else target
+
+    # Second pass: sum real (non-shortclose) rows, capped at effective_target.
+    real_qty, hours = 0.0, 0.0
+    for r in rows:
+        if _lueu_is_shortclose_row(r):
+            continue
+        if effective_target > 0 and real_qty >= effective_target - 1e-6:
             break
-        if r['is_shortclose']:
-            shortclose_qty += float(r['q'] or 0)
-        else:
-            real_qty += float(r['q'] or 0)
-            hours += _lueu_hours(r['from_time'], r['to_time'])
-    return real_qty, hours, shortclose_qty
+        real_qty += float(r['q'] or 0)
+        hours += _lueu_hours(r['from_time'], r['to_time'])
+
+    return real_qty, hours, shortclose_qty, effective_target
+
+
+def _jjltpl_actual_qty_for_rows(cur, rows, label=""):
+    """
+    Shared helper: given raw rows containing parcel_op_id / parcel_ids /
+    op_qty / operation_type, resolve each parcel-op's TARGET (BL) quantity,
+    then aggregate the lueu_parcel_log to find what has ACTUALLY been
+    logged so far (real + shortclose, capped at target). Sums that across
+    all distinct parcel-ops.
+
+    Deduplicates on parcel_op_id in case the SQL join produces the same
+    parcel-op more than once (e.g. multiple ldud_header rows per vessel),
+    which would otherwise double-count it.
+    """
+    qty = 0.0
+    seen_ids = set()
+
+    for r in rows:
+        pid = r["parcel_op_id"]
+        if not pid or pid in seen_ids:
+            continue
+        seen_ids.add(pid)
+
+        target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
+        real_qty, hours, shortclose_qty, effective_target = _lueu_log_aggregate(cur, pid, target)
+        # Actual quantity handled = what was really pumped/loaded, i.e.
+        # real_qty only. Shortclose qty is NOT delivered cargo — it's a
+        # reduction of the target — so it's excluded from the tons total.
+        actual = real_qty
+        qty += actual
+
+        if _JJLTPL_DEBUG:
+            import sys
+            print(
+                f"[JJLTPL DEBUG {label}] parcel_op_id={pid} "
+                f"op_qty={r['op_qty']} target={target} "
+                f"shortclose_qty={shortclose_qty} effective_target={effective_target} "
+                f"real_qty={real_qty} remaining={max(effective_target - real_qty, 0)}",
+                file=sys.stderr,
+            )
+
+    return qty
+
+
+def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
+    """
+    DAY quantity: vessels currently alongside within the report window,
+    valued at their ACTUAL logged quantity so far (not the full BL/target).
+    """
+    cur.execute("""
+        SELECT
+            po.id AS parcel_op_id,
+            po.parcel_ids,
+            po.quantity AS op_qty,
+            vh.operation_type
+        FROM ldud_header lh
+        JOIN vcn_header vh
+            ON vh.id = lh.vcn_id
+        LEFT JOIN ldud_parcel_ops po
+            ON po.ldud_id = lh.id
+        WHERE vh.berth_name = ANY(%s)
+
+          AND NULLIF(lh.alongside_datetime,'') IS NOT NULL
+          AND NULLIF(lh.alongside_datetime,'')::timestamp <= %s
+
+          AND (
+                NULLIF(lh.cast_off_datetime,'') IS NULL
+                OR NULLIF(lh.cast_off_datetime,'')::timestamp > %s
+          )
+    """, (berths, period_end, period_end))
+
+    rows = cur.fetchall()
+    qty = _jjltpl_actual_qty_for_rows(cur, rows, label="DAY")
+
+    return {
+        MEDIUM_DRY_BULK: 0.0,
+        MEDIUM_BREAK_BULK: 0.0,
+        MEDIUM_LIQUID_BULK: qty,
+        "bulk_total": qty,
+    }
+
+
+def _jjltpl_fy_bulk_tons(cur, fin_year):
+
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(quantity),0) AS qty
+        FROM mis_vessel_master
+        WHERE fin_year = %s
+    """, (fin_year,))
+
+    qty = float(cur.fetchone()["qty"] or 0)
+
+    return {
+        MEDIUM_DRY_BULK: 0.0,
+        MEDIUM_BREAK_BULK: 0.0,
+        MEDIUM_LIQUID_BULK: qty,
+        "bulk_total": qty,
+    }
+
+
+def _jjltpl_fy_bulk_vessel_count(cur, fin_year):
+    """
+    Count of vessels in mis_vessel_master for the given financial year.
+    """
+    cur.execute("""
+        SELECT COUNT(*) AS cnt
+        FROM mis_vessel_master
+        WHERE fin_year = %s
+    """, (fin_year,))
+
+    row = cur.fetchone()
+    return row["cnt"] if row and row["cnt"] else 0
 
 
 def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
@@ -283,35 +360,40 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
         if r["parcel_op_id"]:
 
-            # Same target resolution + capped log aggregation LUEU01 uses.
+            # Same target resolution + log aggregation as the rest of the
+            # report. shortclose qty reduces the effective target rather
+            # than counting as delivered.
             target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
-            real_qty, hours, shortclose_qty = _lueu_log_aggregate(cur, r["parcel_op_id"], target)
-            remaining_qty = max(target - (real_qty + shortclose_qty), 0)
+            real_qty, hours, shortclose_qty, effective_target = _lueu_log_aggregate(
+                cur, r["parcel_op_id"], target
+            )
+            remaining_qty = max(effective_target - real_qty, 0)
 
             # Matches lueu01.html's etcText() exactly:
-            #   ETC = start_dt + (target_qty / avg_rate) hours
-            # — projected from the fixed start time using the FULL target
-            # (not remaining), not from "now". Only shown while remaining > 0.
+            #   ETC = start_dt + (effective_target / avg_rate) hours
+            # — projected from the fixed start time using the FULL
+            # (shortclose-adjusted) target, not "remaining" or "now".
+            # Only shown while remaining > 0.
             if remaining_qty > 0:
 
                 if r["start_dt"] and hours > 0 and real_qty > 0:
                     avg_rate = real_qty / hours
-                    if avg_rate > 0 and target > 0:
+                    if avg_rate > 0 and effective_target > 0:
                         expected_completion = r["start_dt"] + timedelta(
-                            hours=(target / avg_rate)
+                            hours=(effective_target / avg_rate)
                         )
 
                 elif (
                     r["expected_start"]
                     and r["expected_flow_rate"]
                     and float(r["expected_flow_rate"]) > 0
-                    and target > 0
+                    and effective_target > 0
                 ):
                     # Mirrors the separate "ETC (Exp)" chip: expected_start +
-                    # (target / expected_flow_rate), used only when there's
-                    # no actual start yet.
+                    # (effective_target / expected_flow_rate), used only when
+                    # there's no actual start yet.
                     expected_completion = r["expected_start"] + timedelta(
-                        hours=(target / float(r["expected_flow_rate"]))
+                        hours=(effective_target / float(r["expected_flow_rate"]))
                     )
 
         rows.append({
@@ -403,30 +485,12 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
     return rows
 
 
-# def _jjltpl_bulk_tons(cur, period_start, period_end):
-
-#     cur.execute("""
-#         SELECT
-#             COALESCE(SUM(quantity), 0) AS qty
-#         FROM mis_vessel_master
-#         WHERE NULLIF(TRIM(cast_off), '') IS NOT NULL
-#           AND NULLIF(TRIM(cast_off), '')::timestamp >= %s
-#           AND NULLIF(TRIM(cast_off), '')::timestamp < %s
-#     """, (period_start, period_end))
-
-#     row = cur.fetchone()
-
-#     qty = float(row["qty"] or 0)
-
-#     return {
-#         MEDIUM_DRY_BULK: 0.0,
-#         MEDIUM_BREAK_BULK: 0.0,
-#         MEDIUM_LIQUID_BULK: qty,
-#         "bulk_total": qty,
-#     }
-
-
 def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
+    """
+    MONTH quantity, based on vessels whose cast_off_datetime (in
+    ldud_header) falls within the period — valued at ACTUAL logged
+    quantity (capped at target), same as the DAY figure.
+    """
     cur.execute("""
         SELECT
             po.id AS parcel_op_id,
@@ -445,14 +509,7 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
     """, (berths, period_start, period_end))
 
     rows = cur.fetchall()
-
-    qty = 0.0
-    for r in rows:
-        if not r["parcel_op_id"]:
-            continue
-        target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
-        real_qty, hours, shortclose_qty = _lueu_log_aggregate(cur, r["parcel_op_id"], target)
-        qty += (real_qty + shortclose_qty)
+    qty = _jjltpl_actual_qty_for_rows(cur, rows, label="MONTH")
 
     return {
         MEDIUM_DRY_BULK: 0.0,
