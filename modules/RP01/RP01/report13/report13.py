@@ -38,6 +38,39 @@ sample data check on 2026-07-22):
       EXPORT_FIELD_MAP below for exactly which UI keys plug into which
       workbook columns.
 
+    - FILTERING (added 2026-07-25): both _fetch_legacy() and
+      _fetch_new_schema() now exclude any vessel whose cast-off time is
+      null/blank. Since these are the shared source for both the report
+      endpoint and the export endpoint, a vessel that hasn't cast off
+      yet (e.g. still berthed / mid-operations) will not appear in
+      either the on-screen report or the exported workbook for the
+      selected period. If you instead want such vessels to still show
+      up with a blank CAST OFF TIME cell (the previous behavior), remove
+      the two "cast off IS NOT NULL" conditions noted inline below.
+
+    - REMAINING QUANTITY (added 2026-07-25, post-cutover only):
+      There is NO separate BL-quantity column. Confirmed via
+      information_schema on 2026-07-25 that ldud_parcel_ops only has:
+      id, ldud_id, parcel_ids, cargo_name, start_dt, end_dt, quantity,
+      terminal_name, expected_start, expected_flow_rate. The BL
+      (nominated) quantity IS ldud_parcel_ops.quantity itself (e.g.
+      38000); the "actual discharged" quantity is the sum of
+      lueu_parcel_log.quantity for that parcel's log entries (e.g.
+      37929.207). remaining_qty = bl_quantity - discharged_quantity
+      (e.g. 38000 - 37929.207 = 70.793).
+      IMPORTANT: bl_quantity is summed in its OWN CTE (po_qty), grouped
+      by ldud_id, BEFORE any join to lueu_parcel_log. If it were summed
+      inside the same parcel_agg CTE that joins lueu_parcel_log, a
+      parcel_ops row would be counted once per matching log row (join
+      fan-out) and bl_quantity would come out inflated -- e.g. one
+      parcel_ops row of 38000 matched against 3 log rows would wrongly
+      sum to 114000. Keeping it in a separate ldud_id-level CTE avoids
+      that entirely.
+      Returned to the client as `bl_quantity` and `remaining_qty` on
+      each row; no matching column in the reference export workbook, so
+      not added to EXPORT_HEADERS / EXPORT_FIELD_MAP. Legacy rows return
+      both as None (mis_vessel_master has no per-parcel BL quantity).
+
 ASSUMPTIONS still open (not yet confirmed):
     1. mis_vessel_master.month values are assumed to literally match
        MONTH_LABELS strings below ("April", "May", ...). If your data
@@ -54,6 +87,9 @@ ASSUMPTIONS still open (not yet confirmed):
        text), so to_char() is applied directly without a NULLIF/::cast
        step. If legacy also stores these as text, add the same
        NULLIF(col,'')::timestamp cast used in the new-schema query.
+       (The new cast-off filter below uses the same NULLIF(col, '')
+       pattern already used elsewhere in this query, so it's consistent
+       with that existing assumption either way.)
     4. This build's single CARGO COMMENCED/COMPLETED pair is exported
        into the workbook's "...1" columns (Cargo Commenced 1 / Cargo
        Completed 1); the "...2"/"...3" pairs are left blank since the
@@ -270,10 +306,15 @@ def _fetch_legacy(fin_year: str, month_idx: int):
                 to_char(NULLIF(cargo_completion,'')::timestamp,'{DATETIME_FMT}') AS cargo_completed,
                 to_char(NULLIF(cast_off,'')::timestamp,'{DATETIME_FMT}') AS cast_off_time,
                 to_char(NULLIF(pilot_board_departure,'')::timestamp,'{DATETIME_FMT}') AS pilot_disembarked,
-                quantity
+                quantity,
+                -- No per-parcel BL quantity in the legacy schema; kept as
+                -- null here purely so both eras return the same row keys.
+                NULL::numeric AS bl_quantity,
+                NULL::numeric AS remaining_qty
             FROM mis_vessel_master
             WHERE fin_year = %(fin_year)s
               AND LEFT(LOWER(month), 3) = LEFT(LOWER(%(month_label)s), 3)
+              AND NULLIF(cast_off, '') IS NOT NULL
             ORDER BY NULLIF(anchorage_time,'')::timestamp
         """, {
             "fin_year": fin_year,
@@ -298,7 +339,18 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
 
     try:
         cur.execute(f"""
-            WITH parcel_agg AS (
+            WITH po_qty AS (
+                -- BL (nominated) quantity per ldud_id, summed BEFORE any
+                -- join to lueu_parcel_log so it can't be inflated by
+                -- join fan-out (see docstring note above).
+                SELECT
+                    ldud_id,
+                    COALESCE(SUM(quantity), 0) AS bl_quantity
+                FROM ldud_parcel_ops
+                GROUP BY ldud_id
+            ),
+
+            parcel_agg AS (
                 SELECT
                     po.ldud_id,
                     MIN(po.start_dt) AS cargo_commenced,
@@ -307,6 +359,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                         THEN MAX(po.end_dt)
                         ELSE NULL
                     END AS cargo_completed,
+                    -- Actual discharged quantity, summed from the log.
                     COALESCE(SUM(lpl.quantity), 0) AS quantity,
                     MAX(po.cargo_name) AS cargo_name
                 FROM ldud_parcel_ops po
@@ -339,7 +392,9 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                 to_char(NULLIF(lh.cast_off_datetime, '')::timestamp, '{DATETIME_FMT}') AS cast_off_time,
                 to_char(NULLIF(lh.pilot_disembarked, '')::timestamp, '{DATETIME_FMT}') AS pilot_disembarked,
 
-                COALESCE(pa.quantity, 0) AS quantity
+                COALESCE(pa.quantity, 0) AS quantity,
+                pq.bl_quantity AS bl_quantity,
+                pq.bl_quantity - COALESCE(pa.quantity, 0) AS remaining_qty
 
             FROM ldud_header lh
 
@@ -353,6 +408,9 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
             LEFT JOIN parcel_agg pa
                 ON pa.ldud_id = lh.id
 
+            LEFT JOIN po_qty pq
+                ON pq.ldud_id = lh.id
+
             LEFT JOIN vessel_cargo vc
                 ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(pa.cargo_name))
 
@@ -360,6 +418,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
               AND NULLIF(lh.created_date, '')::date >= %(period_start)s
               AND NULLIF(lh.created_date, '')::date < %(period_end)s
               AND COALESCE(lh.is_deleted, FALSE) = FALSE
+              AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
 
             ORDER BY
                 NULLIF(lh.created_date, '')::date,
