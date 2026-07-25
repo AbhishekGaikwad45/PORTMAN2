@@ -99,7 +99,10 @@ def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
 
     cur.execute("""
         SELECT
-            COALESCE(SUM(po.quantity), 0) AS qty
+            po.id AS parcel_op_id,
+            po.parcel_ids,
+            po.quantity AS op_qty,
+            vh.operation_type
         FROM ldud_header lh
         JOIN vcn_header vh
             ON vh.id = lh.vcn_id
@@ -116,8 +119,18 @@ def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
           )
     """, (berths, period_end, period_end))
 
-    row = cur.fetchone()
-    qty = float(row["qty"] or 0)
+    rows = cur.fetchall()
+
+    qty = 0.0
+    for r in rows:
+        if not r["parcel_op_id"]:
+            continue
+        # Same target resolution + capped log aggregation LUEU01/RP01 use
+        # elsewhere. This gives us what's ACTUALLY been done so far, not
+        # the full BL/target quantity.
+        target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
+        real_qty, hours, shortclose_qty = _lueu_log_aggregate(cur, r["parcel_op_id"], target)
+        qty += (real_qty + shortclose_qty)  # excludes remaining = target - actual
 
     return {
         MEDIUM_DRY_BULK: 0.0,
@@ -414,13 +427,12 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
 
 def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
-    """
-    MONTH quantity, based on vessels whose cast_off_datetime (in
-    ldud_header) falls within the period — not entry-time logs.
-    """
     cur.execute("""
         SELECT
-            COALESCE(SUM(po.quantity), 0) AS qty
+            po.id AS parcel_op_id,
+            po.parcel_ids,
+            po.quantity AS op_qty,
+            vh.operation_type
         FROM ldud_header lh
         JOIN vcn_header vh
             ON vh.id = lh.vcn_id
@@ -432,9 +444,15 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
           AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
     """, (berths, period_start, period_end))
 
-    row = cur.fetchone()
+    rows = cur.fetchall()
 
-    qty = float(row["qty"] or 0)
+    qty = 0.0
+    for r in rows:
+        if not r["parcel_op_id"]:
+            continue
+        target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
+        real_qty, hours, shortclose_qty = _lueu_log_aggregate(cur, r["parcel_op_id"], target)
+        qty += (real_qty + shortclose_qty)
 
     return {
         MEDIUM_DRY_BULK: 0.0,
