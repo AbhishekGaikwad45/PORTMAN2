@@ -672,8 +672,28 @@ def report11_api_report():
 # ---------------------------------------------------------------------
 # Excel export — same grid layout as the uploaded workbook:
 #   B=SR.NO, C=PARTICULARS, D=Units, E:P=Apr..Mar, Q=FY Total
+#
+# WHY THIS VERSION IS DIFFERENT FROM THE FORMULA-BASED ONE:
+#   Every openpyxl formula cell is written to disk as
+#       <f>SOME_FORMULA</f><v></v>
+#   i.e. the formula text with an EMPTY cached value. Full desktop Excel
+#   *usually* recalculates that automatically on open — but Excel Online,
+#   WPS Office, mobile Excel, LibreOffice with auto-recalc off, and most
+#   quick-preview panes just read the cached <v> and never run a calc
+#   engine at all, so every formula cell renders blank regardless of any
+#   fullCalcOnLoad setting. That's exactly the "Section B/C empty" bug.
+#
+#   Fix: don't ask Excel to compute anything. Section B and C are
+#   computed in Python already (compute_section_b_month /
+#   compute_section_c_month — the same functions the on-screen report
+#   uses), so we just write those literal numbers straight into the
+#   cells. Guaranteed to show correct data in any viewer, with zero
+#   dependency on Excel's recalculation behavior. The FY Total column
+#   uses compute_section_a_fy -> compute_section_b_month/c_month, i.e.
+#   the real FY-aggregated ratios — never a sum/average of the 12
+#   monthly ratios.
 # ---------------------------------------------------------------------
-def _write_row(ws, row_i, sr, label, unit, values, fmt, thin_border, is_formula_row=False):
+def _write_row(ws, row_i, sr, label, unit, values, fy_value, fmt, thin_border):
     ws[f"B{row_i}"] = sr
     ws[f"C{row_i}"] = label
     ws[f"D{row_i}"] = unit
@@ -683,10 +703,9 @@ def _write_row(ws, row_i, sr, label, unit, values, fmt, thin_border, is_formula_
         cell.value = v
         cell.number_format = fmt
         cell.border = thin_border
-    # FY total column (Q = col 17)
+    # FY total column (Q = col 17) — literal computed value, not a formula
     q = ws[f"Q{row_i}"]
-    if not is_formula_row:
-        q.value = f"=SUM(E{row_i}:P{row_i})"
+    q.value = fy_value
     q.number_format = fmt
     q.border = thin_border
     for c in ("B", "C", "D"):
@@ -714,6 +733,12 @@ def report11_api_export():
             b_list.append(b)
             c_list.append(c)
 
+        # Real FY totals — identical logic to the on-screen report: Section A
+        # aggregated over the whole year first, then B/C derived from that.
+        a_fy = compute_section_a_fy(df, fin_year)
+        b_fy = compute_section_b_month(a_fy)
+        c_fy = compute_section_c_month(a_fy, b_fy)
+
         wb = Workbook()
         ws = wb.active
         ws.title = "Bulk Terminal Performance"
@@ -723,7 +748,6 @@ def report11_api_export():
         header_font = Font(bold=True)
         section_font = Font(bold=True)
         center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        left = Alignment(horizontal="left", vertical="center")
 
         thin = Side(style="thin", color="000000")
         thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -787,23 +811,11 @@ def report11_api_export():
             ("Liquid - Import", "Tonnes", "0.000"),
             ("Liquid - Export", "Tonnes", "0.000"),
         ]
-        a_row_excel_num = {}
         for sr, (label, unit, fmt) in enumerate(a_rows, start=1):
             values = [a_list[i][label] for i in range(12)]
-            _write_row(ws, row_i, sr, label, unit, values, fmt, thin_border)
-
-            if label == "No. of berths for % berth occupancy":
-                ws[f"Q{row_i}"] = f"=AVERAGE(E{row_i}:P{row_i})"
-
-            a_row_excel_num[label] = row_i
+            fy_val = NO_OF_BERTHS if label == "No. of berths for % berth occupancy" else a_fy[label]
+            _write_row(ws, row_i, sr, label, unit, values, fy_val, fmt, thin_border)
             row_i += 1
-
-        def A(label, month_i):
-            return f"{get_column_letter(5 + month_i)}{a_row_excel_num[label]}"
-
-        def AQ(label):
-            """FY-total cell reference (Q column) for a Section A row."""
-            return f"Q{a_row_excel_num[label]}"
 
         row_i += 1
         # ---------------- Section B ----------------
@@ -813,105 +825,43 @@ def report11_api_export():
         ws[f"C{row_i}"].font = section_font
         row_i += 1
 
-        b_defs = [
-            ("Vessels Sailed", "Nos.", "0",
-             lambda i: f"={A('Vessels Sailed', i)}", None),
-            ("Total Traffic Throughputs (TEUs)", "TEUs", "0",
-             lambda i: f"={A('Vessel Discharge (Including Restow)', i)}+{A('Vessel Load (Including Restow)', i)}", None),
-            ("Total traffic throughputs (Tons)", "Tons", "0.000",
-             lambda i: f"={A('Dry Bulk traffic - Import', i)}+{A('Dry Bulk traffic - Export', i)}"
-                       f"+{A('Break Bulk traffic - Import', i)}+{A('Break Bulk traffic - Export', i)}"
-                       f"+{A('Liquid - Import', i)}+{A('Liquid - Export', i)}", None),
-            ("Parcel Size", "TEUs", "0",
-             lambda i: f"=IFERROR({A('Vessel Discharge (Including Restow)', i)}+{A('Vessel Load (Including Restow)', i)})/{A('Vessels Sailed', i)},0)", None),
-            ("Avg. Pre-berthing Waiting Time-Total", "Days", "0.000000",
-             lambda i: f"=IFERROR(({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}+{A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)})/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}+{AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')})/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Pre-berthing Waiting Time-Port A/c.", "Days", "0.000000",
-             lambda i: f"=IFERROR({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Pre-berthing Waiting Time-Non-Port A/c.", "Days", "0.000000",
-             lambda i: f"=IFERROR({A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)}/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')}/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Berth stay", "Days", "0.000000",
-             lambda i: f"=IFERROR({A('Total Berth Stay of all vessels (For Berth Productivity)', i)}/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Total Berth Stay of all vessels (For Berth Productivity)')}/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Total", "Days", "0.000000",
-             lambda i: f"=IFERROR(({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}+{A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)}+{A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}+{AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')}+{AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Port A/c.", "Days", "0.000000",
-             lambda i: f"=IFERROR(({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}+{A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}+{AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Non- Port A/c.", "Days", "0.000000",
-             lambda i: f"=IFERROR({A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)}/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')}/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Pilot Boarding to De-boarding-Total", "Days", "0.000000",
-             lambda i: f"=IFERROR(({A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/24/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c.", "Days", "0.000000",
-             lambda i: f"=IFERROR(({A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/24/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/24/{AQ('Vessels Sailed')},0)"),
-            ("Berth Occupancy", "%", "0.00%",
-             lambda i: f"=IFERROR({A('Total Berth Stay of all vessels (For Berth Productivity)', i)}/({A('Days in a month', i)}*24*{A('No. of berths for % berth occupancy', i)}),0)",
-             lambda: f"=IFERROR({AQ('Total Berth Stay of all vessels (For Berth Productivity)')}/({AQ('Days in a month')}*24*{AQ('No. of berths for % berth occupancy')}),0)"),
-            ("Idle time", "%", "0.00%",
-             lambda i: f"=IFERROR(({A('Idle time at working berth on Port A/c.', i)}+{A('Idle time at working berth on Non-Port A/c.', i)})/{A('Total Berth Stay of all vessels (For Berth Productivity)', i)},0)",
-             lambda: f"=IFERROR(({AQ('Idle time at working berth on Port A/c.')}+{AQ('Idle time at working berth on Non-Port A/c.')})/{AQ('Total Berth Stay of all vessels (For Berth Productivity)')},0)"),
-            ("Gross Berth Productivity", "Moves /Hrs", "0", lambda i: 0, None),
-            ("Gross Crane Productivity (Moves)", "Moves /Hrs", "0", lambda i: None, None),
-            ("Gross Crane Productivity (TEUs)", "TEUs/Hrs", "0", lambda i: None, None),
-            ("Ship Output per Day (TEUs)", "TEUs", "0", lambda i: 0, None),
+        b_rows = [
+            ("Vessels Sailed", "Nos.", "0"),
+            ("Total Traffic Throughputs (TEUs)", "TEUs", "0"),
+            ("Total traffic throughputs (Tons)", "Tons", "0.000"),
+            ("Parcel Size", "TEUs", "0"),
+            ("Avg. Pre-berthing Waiting Time-Total", "Days", "0.000000"),
+            ("Avg. Pre-berthing Waiting Time-Port A/c.", "Days", "0.000000"),
+            ("Avg. Pre-berthing Waiting Time-Non-Port A/c.", "Days", "0.000000"),
+            ("Avg. Berth stay", "Days", "0.000000"),
+            ("Avg. Turn around time - Total", "Days", "0.000000"),
+            ("Avg. Turn around time - Port A/c.", "Days", "0.000000"),
+            ("Avg. Turn around time - Non- Port A/c.", "Days", "0.000000"),
+            ("Avg. Turn around time - Pilot Boarding to De-boarding-Total", "Days", "0.000000"),
+            ("Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c.", "Days", "0.000000"),
+            ("Berth Occupancy", "%", "0.00%"),
+            ("Idle time", "%", "0.00%"),
+            ("Gross Berth Productivity", "Moves /Hrs", "0"),
+            ("Gross Crane Productivity (Moves)", "Moves /Hrs", "0"),
+            ("Gross Crane Productivity (TEUs)", "TEUs/Hrs", "0"),
+            ("Ship Output per Day (TEUs)", "TEUs", "0"),
+            ("Ship Output per Day (Tonnes)", "Tonnes", "0.000"),
         ]
-        b_row_excel_num = {}
-        for sr, entry in enumerate(b_defs, start=1):
-            label, unit, fmt, formula_fn, fy_formula_fn = entry
-            values = [formula_fn(i) for i in range(12)]
-            _write_row(ws, row_i, sr, label, unit, values, fmt, thin_border, is_formula_row=True)
-
-            if fy_formula_fn is not None:
-                ws[f"Q{row_i}"] = fy_formula_fn()
-            else:
-                ws[f"Q{row_i}"] = f"=SUM(E{row_i}:P{row_i})"
-
-            b_row_excel_num[label] = row_i
+        for sr, (label, unit, fmt) in enumerate(b_rows, start=1):
+            values = [b_list[i].get(label) for i in range(12)]
+            fy_val = b_fy.get(label)
+            _write_row(ws, row_i, sr, label, unit, values, fy_val, fmt, thin_border)
             row_i += 1
 
-        def B(label, month_i):
-            return f"{get_column_letter(5 + month_i)}{b_row_excel_num[label]}"
-
-        def BQ(label):
-            return f"Q{b_row_excel_num[label]}"
-
-        sr_next = len(b_defs) + 1
-        values = [
-            f"=IFERROR({A('Dry Bulk traffic - Import', i)}+{A('Dry Bulk traffic - Export', i)}"
-            f"+{A('Break Bulk traffic - Import', i)}+{A('Break Bulk traffic - Export', i)}"
-            f"+{A('Liquid - Import', i)}+{A('Liquid - Export', i)})/{B('Avg. Berth stay', i)},0)"
-            for i in range(12)
-        ]
-        _write_row(ws, row_i, sr_next, "Ship Output per Day (Tonnes)", "Tonnes", values, "0.000", thin_border, is_formula_row=True)
-
-        ws[f"Q{row_i}"] = (
-            f"=IFERROR(({AQ('Dry Bulk traffic - Import')}"
-            f"+{AQ('Dry Bulk traffic - Export')}"
-            f"+{AQ('Break Bulk traffic - Import')}"
-            f"+{AQ('Break Bulk traffic - Export')}"
-            f"+{AQ('Liquid - Import')}"
-            f"+{AQ('Liquid - Export')})/{BQ('Avg. Berth stay')},0)"
-        )
-        b_row_excel_num["Ship Output per Day (Tonnes)"] = row_i
         row_i += 1
-
         for label, unit, fmt in [
             ("No. of Rakes handled", "Nos", "0"),
             ("Total Rail traffic", "TEUs", "0"),
             ("% wrt to Total Thoughput", "%", "0.0%"),
         ]:
-            row_i += 1
-            ws[f"B{row_i}"] = ""
             ws[f"C{row_i}"] = label
             ws[f"D{row_i}"] = unit
-            row_i += 0
+            row_i += 1
 
         row_i += 1
         # ---------------- Section C ----------------
@@ -921,71 +871,33 @@ def report11_api_export():
         ws[f"C{row_i}"].font = section_font
         row_i += 1
 
-        c_defs = [
-            ("Avg. Pre-berthing Waiting Time-Total", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR(({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}+{A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)})/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}+{AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')})/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Pre-berthing Waiting Time-Port A/c.", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Pre-berthing Waiting Time-Non-Port A/c.", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR({A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)}/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')}/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Berth stay", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR({A('Total Berth Stay of all vessels (For Berth Productivity)', i)}/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Total Berth Stay of all vessels (For Berth Productivity)')}/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Total", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR(({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}+{A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)}+{A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}+{AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')}+{AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Port A/c.", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR(({A('Pre_berthing Waiting Time-on Port a/c (Total)', i)}+{A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Pre_berthing Waiting Time-on Port a/c (Total)')}+{AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Non- Port A/c.", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR({A('Pre_berthing Waiting Time-on Non-Port a/c (Total)', i)}/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR({AQ('Pre_berthing Waiting Time-on Non-Port a/c (Total)')}/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Pilot Boarding to De-boarding-Total", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR(({A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/{AQ('Vessels Sailed')},0)"),
-            ("Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c.", "Hrs.", "0.000000",
-             lambda i: f"=IFERROR(({A('Total Berth Stay of all vessels (For Berth Productivity)', i)}+{A('Vessel Inward movement (Total)', i)}+{A('Vessel Outward movement (Total)', i)})/{A('Vessels Sailed', i)},0)",
-             lambda: f"=IFERROR(({AQ('Total Berth Stay of all vessels (For Berth Productivity)')}+{AQ('Vessel Inward movement (Total)')}+{AQ('Vessel Outward movement (Total)')})/{AQ('Vessels Sailed')},0)"),
+        c_rows = [
+            ("Avg. Pre-berthing Waiting Time-Total", "Hrs.", "0.000000"),
+            ("Avg. Pre-berthing Waiting Time-Port A/c.", "Hrs.", "0.000000"),
+            ("Avg. Pre-berthing Waiting Time-Non-Port A/c.", "Hrs.", "0.000000"),
+            ("Avg. Berth stay", "Hrs.", "0.000000"),
+            ("Avg. Turn around time - Total", "Hrs.", "0.000000"),
+            ("Avg. Turn around time - Port A/c.", "Hrs.", "0.000000"),
+            ("Avg. Turn around time - Non- Port A/c.", "Hrs.", "0.000000"),
+            ("Avg. Turn around time - Pilot Boarding to De-boarding-Total", "Hrs.", "0.000000"),
+            ("Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c.", "Hrs.", "0.000000"),
+            ("Avg. TRT for 1000 tonnes (Days)", "Days", "0.000000"),
+            ("Avg. TRT for 1000 tonnes (Hrs)", "Hrs.", "0.000000"),
         ]
-        c_row_excel_num = {}
-        for sr, entry in enumerate(c_defs, start=1):
-            label, unit, fmt, formula_fn, fy_formula_fn = entry
-            values = [formula_fn(i) for i in range(12)]
-            _write_row(ws, row_i, sr, label, unit, values, fmt, thin_border, is_formula_row=True)
-            ws[f"Q{row_i}"] = fy_formula_fn()
-            c_row_excel_num[label] = row_i
+        for sr, (label, unit, fmt) in enumerate(c_rows, start=1):
+            values = [c_list[i].get(label) for i in range(12)]
+            fy_val = c_fy.get(label)
+            _write_row(ws, row_i, sr, label, unit, values, fy_val, fmt, thin_border)
             row_i += 1
 
-        def B_(label, month_i):
-            return f"{get_column_letter(5 + month_i)}{b_row_excel_num[label]}"
-
-        def BQ_(label):
-            return f"Q{b_row_excel_num[label]}"
-
-        trt_days_values = [
-            f"=IFERROR({B_('Avg. Turn around time - Total', i)}*{A('Vessels Sailed', i)}*1000/{B_('Total traffic throughputs (Tons)', i)},0)"
-            for i in range(12)
-        ]
-        _write_row(ws, row_i, len(c_defs) + 1, "Avg. TRT for 1000 tonnes", "Days", trt_days_values, "0.000000", thin_border, is_formula_row=True)
-        ws[f"Q{row_i}"] = f"=IFERROR({BQ_('Avg. Turn around time - Total')}*{AQ('Vessels Sailed')}*1000/{BQ_('Total traffic throughputs (Tons)')},0)"
-        trt_days_row = row_i
         row_i += 1
-
-        trt_hrs_values = [f"={get_column_letter(5 + i)}{trt_days_row}*24" for i in range(12)]
-        _write_row(ws, row_i, len(c_defs) + 2, "Avg. TRT for 1000 tonnes", "Hrs.", trt_hrs_values, "0.000000", thin_border, is_formula_row=True)
-        ws[f"Q{row_i}"] = f"=Q{trt_days_row}*24"
-        row_i += 1
-
         for label, unit in [("Avg. TRT for 1000 TEUs", "Days"), ("Avg. TRT for 1000 TEUs", "Hrs.")]:
-            row_i += 1
             ws[f"C{row_i}"] = label
             ws[f"D{row_i}"] = unit
+            row_i += 1
 
         # ---------------- Reasons block (static legend) ----------------
-        row_i += 2
+        row_i += 1
         ws[f"C{row_i}"] = "Reasons to be Considered"
         ws[f"C{row_i}"].font = bold
         row_i += 1
