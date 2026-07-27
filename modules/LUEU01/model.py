@@ -159,14 +159,15 @@ def get_started_parcels(vcn_id):
     return out
 
 
-# Master export layout: (Excel header, field on the parcel row)
+# Master export layout: (Excel header, field). 'dt:' fields split into Date + Time
+# columns — see excel_export.
 EXPORT_COLS = [
     ('Vessel', 'vessel_name'), ('VCN', 'vcn_doc_num'), ('Berth', 'berth_name'),
     ('Parcel No', 'parcel_no'), ('Cargo', 'cargo_name'), ('Terminal', 'terminal_name'),
     ('Equipment', 'equipment_names'), ('Pipeline', 'pipeline_name'),
     ('Target Qty', 'target_qty'), ('Logged Qty', 'logged_qty'), ('Remaining Qty', 'remaining_qty'),
-    ('UOM', 'uom'), ('Expected Start', 'expected_start'), ('Expected Rate (MT/Hr)', 'expected_flow_rate'),
-    ('Start', 'start_dt'), ('End', 'end_dt'), ('Run Hours', 'op_hours'),
+    ('UOM', 'uom'), ('Expected Start', 'dt:expected_start'), ('Expected Rate (MT/Hr)', 'expected_flow_rate'),
+    ('Start', 'dt:start_dt'), ('End', 'dt:end_dt'), ('Run Hours', 'op_hours'),
     ('Avg Rate (MT/Hr)', 'avg_rate'), ('Status', 'status'), ('Short-closed', 'is_shortclosed'),
     ('LDUD Status', 'ldud_status'),
 ]

@@ -287,6 +287,56 @@ def get_picker_parcels(vcn_id):
     return rows
 
 
+# Master parcel export — mirrors the on-screen parcels sub-table, prefixed with
+# the vessel/VCN identity. 'dt:' fields split into Date + Time columns (excel_export).
+EXPORT_PARCEL_COLS = [
+    ('Vessel Name', 'vessel_name'), ('VCN Doc', 'vcn_doc_num'), ('Operation Type', 'operation_type'),
+    ('Berth', 'berth_name'), ('Vessel Agent', 'vessel_agent_name'), ('VCN Status', 'doc_status'),
+    ('Doc Date', 'doc_date'), ('NOR Tendered', 'dt:nor_tendered'),
+    ('Parcel No', 'parcel_no'), ('Ln', 'igm_line_no'), ('BL No', 'bl_no'), ('BL Date', 'bl_date'),
+    ('Cargo Name', 'cargo_name'), ('Qty (MT)', 'quantity'), ('Consignee', 'consigner_name'),
+    ('Payment will be made by', 'importer_name'), ('Pipeline', 'pipeline_name'),
+    ('Terminal', 'unload_terminal'), ('Toll', 'toll_applicable'), ('Toll Reason', 'toll_reason'),
+    ('Equipment', 'equipment_names'),
+]
+
+
+def export_all_parcels():
+    """Every parcel across every VCN — import consigners and export declarations
+    in one list, same columns the parcels sub-table shows. Export rows carry no
+    BL, so those cells come back empty."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    rows = []
+    for tbl, bl in (('vcn_consigners', 'p.bl_no, p.bl_date'),
+                    ('vcn_export_cargo_declaration', "NULL AS bl_no, NULL AS bl_date")):
+        cur.execute(f'''
+            SELECT h.vessel_name, h.vcn_doc_num, h.operation_type, h.berth_name,
+                   h.vessel_agent_name, h.doc_status, h.doc_date, h.nor_tendered,
+                   p.parcel_no, p.parcel_seq, p.igm_line_no, {bl}, p.cargo_name, p.quantity,
+                   p.consigner_name, p.importer_name, p.pipeline_name, p.unload_terminal,
+                   p.toll_applicable, p.toll_reason, p.equipment_names
+            FROM {tbl} p JOIN vcn_header h ON h.id = p.vcn_id
+        ''')
+        rows += [dict(r) for r in cur.fetchall()]
+    conn.close()
+    rows.sort(key=lambda r: (r['vcn_doc_num'] or '', r['parcel_seq'] or 0))
+    return rows
+
+
+def get_delay_window(vcn_id):
+    """LDUD01's Anchorage / Pilot Pickup times — the window pre-berthing delays
+    must fall inside. Either may be unset; the UI then enforces only what it has."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT anchored_datetime, pilot_pickup_time FROM ldud_header
+                   WHERE vcn_id=%s AND is_deleted IS NOT TRUE ORDER BY id DESC LIMIT 1''', [vcn_id])
+    row = cur.fetchone() or {}
+    conn.close()
+    return {'anchored': row.get('anchored_datetime') or '',
+            'pilot_pickup': row.get('pilot_pickup_time') or ''}
+
+
 def get_export_parcel(row_id):
     """Single export-cargo parcel — returns generated parcel_no after a save."""
     conn = get_db()
@@ -427,7 +477,8 @@ def delete_consigner(row_id):
 def get_delays(vcn_id):
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('SELECT * FROM vcn_delays WHERE vcn_id=%s ORDER BY id DESC', (vcn_id,))
+    # chronological — the grid reads as a log and "+ Add" appends to the bottom
+    cur.execute('SELECT * FROM vcn_delays WHERE vcn_id=%s ORDER BY id', (vcn_id,))
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
