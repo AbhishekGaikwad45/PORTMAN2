@@ -240,6 +240,34 @@ def _jjltpl_actual_qty_for_rows(cur, rows, label=""):
     return qty
 
 
+def _parse_entry_date(entry_date):
+    """
+    entry_date may come back from the DB as a real date/datetime object,
+    or as plain text (this schema stores several date/time columns as
+    text elsewhere, cast with ::timestamp in SQL). Handle both so a
+    string value doesn't raise inside datetime.combine() and blow up
+    the request with a 500.
+    """
+    if entry_date is None:
+        return None
+    if isinstance(entry_date, datetime):
+        return entry_date.date()
+    if hasattr(entry_date, 'year') and hasattr(entry_date, 'month'):
+        # already a date object
+        return entry_date
+    s = str(entry_date).strip()
+    for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    # Last resort: try fromisoformat (handles date or datetime strings)
+    try:
+        return datetime.fromisoformat(s).date()
+    except ValueError:
+        return None
+
+
 def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
     """
     DAY quantity: sum of every lueu_parcel_log entry, for any parcel-op
@@ -279,7 +307,7 @@ def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
         if _lueu_is_shortclose_row(r):
             continue
 
-        entry_date = r['entry_date']
+        entry_date = _parse_entry_date(r['entry_date'])
         from_time = r['from_time']
         if not entry_date or not from_time:
             continue
@@ -701,7 +729,17 @@ def jjltpl_page():
 def jjltpl_data():
     selected_date = _jjltpl_parse_date(request.args.get('date'))
     terminal = request.args.get('terminal', DEFAULT_TERMINAL)
-    return jsonify(_jjltpl_report_payload(selected_date, terminal))
+    try:
+        return jsonify(_jjltpl_report_payload(selected_date, terminal))
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(tb)  # still goes to server console/log as usual
+        return jsonify({
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'traceback': tb,
+        }), 500
 
 
 # ---------------------------------------------------------------------------
