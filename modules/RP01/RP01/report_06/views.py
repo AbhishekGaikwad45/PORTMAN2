@@ -60,7 +60,7 @@ CATEGORY MAPPING (confirm/adjust CATEGORY_MAP below if wrong):
   Edible Oil   -> EDIBLE OIL
   Other Liquid -> OTHER LIQUIDS
   Chemical     -> OTHER LIQUIDS
-  Ph.Acid      -> OTHER LIQUIDS
+  Ph.Acid      -> FARM LIQUIDS
   (anything else, including NULL) -> OTHER BULK
   No current data maps to LPG / FARM LIQUIDS / MOLASSES / CEMENT /
   CONTAINER — those rows will correctly show 0.00 until such cargo exists.
@@ -91,6 +91,9 @@ CATEGORY_MAP = {
     'OTHER LIQUID': 'OTHER LIQUIDS',
     'CHEMICAL': 'OTHER LIQUIDS',
     'PH.ACID': 'FARM LIQUIDS',
+    'PHOSPHORIC ACID': 'FARM LIQUIDS',
+    'PH ACID [E]': 'FARM LIQUIDS',
+    'PH ACID': 'FARM LIQUIDS',
 }
 
 _MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -237,19 +240,83 @@ def _fetch_reconciled_rows(month_label):
     return lines
 
 
+# def _fetch_live_rows(year_str, month_str):
+#     """
+#     LIVE fallback for the current / not-yet-reconciled month.
+#     Reads from vcn_header -> ldud_header -> ldud_parcel_ops -> lueu_parcel_log.
+
+#     NOTE: foreign_indian is not available in this chain (see module docstring)
+#     and is defaulted to 'I' by the caller via _aggregate's placeholder flag.
+#     category is matched against vessel_cargo.cargo_category with an exact
+#     match first, falling back to a fuzzy LIKE match.
+#     """
+#     y, m = month_str.split('-')
+#     y, m = int(y), int(m)
+#     # month range as text-comparable dates (doc_date is stored as text 'YYYY-MM-DD')
+#     start = f"{y:04d}-{m:02d}-01"
+#     if m == 12:
+#         end = f"{y + 1:04d}-01-01"
+#     else:
+#         end = f"{y:04d}-{m + 1:02d}-01"
+
+#     conn = get_db()
+#     cur = get_cursor(conn)
+#     cur.execute("""
+#         SELECT
+#             vh.vessel_run_type   AS overseas_coastal,
+#             vh.operation_type    AS import_export,
+#             vh.cargo_type        AS cargo_type_raw,
+#             COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
+#             SUM(lpl.quantity)    AS quantity
+#         FROM vcn_header vh
+#         JOIN ldud_header ldh         ON ldh.vcn_id = vh.id
+#         JOIN ldud_parcel_ops lpo     ON lpo.ldud_id = ldh.id
+#         JOIN lueu_parcel_log lpl     ON lpl.parcel_op_id = lpo.id
+#         LEFT JOIN vessel_cargo vc_exact
+#                ON UPPER(vc_exact.cargo_name) = UPPER(vh.cargo_type)
+#         LEFT JOIN vessel_cargo vc_fuzzy
+#                ON vc_exact.id IS NULL
+#               AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
+#         WHERE vh.doc_date >= %s AND vh.doc_date < %s
+#         GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
+#                  vc_exact.cargo_category, vc_fuzzy.cargo_category
+#     """, [start, end])
+#     rows = [dict(r) for r in cur.fetchall()]
+#     conn.close()
+
+#     lines = []
+#     for r in rows:
+#         lines.append({
+#             'overseas_coastal': r.get('overseas_coastal'),
+#             'foreign_indian': 'I',   # PLACEHOLDER — see module docstring
+#             'import_export': r.get('import_export'),
+#             'category': r.get('category') or r.get('cargo_type_raw'),
+#             'quantity': r.get('quantity'),
+#         })
+#     return lines
 def _fetch_live_rows(year_str, month_str):
     """
     LIVE fallback for the current / not-yet-reconciled month.
     Reads from vcn_header -> ldud_header -> ldud_parcel_ops -> lueu_parcel_log.
 
-    NOTE: foreign_indian is not available in this chain (see module docstring)
-    and is defaulted to 'I' by the caller via _aggregate's placeholder flag.
-    category is matched against vessel_cargo.cargo_category with an exact
-    match first, falling back to a fuzzy LIKE match.
+    CHANGE FROM PREVIOUS VERSION:
+      - Added `WHERE lpl.is_deleted = false` so soft-deleted parcel log
+        entries are excluded from totals (previously not filtered at all).
+      - Category matching kept as simple exact-then-fuzzy against
+        vessel_cargo, unchanged, since diagnostics confirmed this join
+        does NOT duplicate rows for the vessels checked.
+
+    STILL UNCONFIRMED / NOT HANDLED HERE:
+      - quantity_uom is not inspected or converted. If rows are stored
+        in mixed units (e.g. some in KL, some in MT), this will still
+        produce wrong totals. Run:
+            SELECT id, quantity, quantity_uom FROM lueu_parcel_log
+            WHERE id IN (123,124,125,126,127,128);
+        before trusting this output, and tell me what comes back so a
+        conversion can be added if needed.
     """
     y, m = month_str.split('-')
     y, m = int(y), int(m)
-    # month range as text-comparable dates (doc_date is stored as text 'YYYY-MM-DD')
     start = f"{y:04d}-{m:02d}-01"
     if m == 12:
         end = f"{y + 1:04d}-01-01"
@@ -275,6 +342,7 @@ def _fetch_live_rows(year_str, month_str):
                ON vc_exact.id IS NULL
               AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
         WHERE vh.doc_date >= %s AND vh.doc_date < %s
+          AND COALESCE(lpl.is_deleted, false) = false
         GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
                  vc_exact.cargo_category, vc_fuzzy.cargo_category
     """, [start, end])
@@ -291,7 +359,6 @@ def _fetch_live_rows(year_str, month_str):
             'quantity': r.get('quantity'),
         })
     return lines
-
 
 def get_report1_data(year_str, month_str, debug=False):
     """

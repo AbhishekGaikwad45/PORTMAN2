@@ -23,6 +23,11 @@ from openpyxl.utils import get_column_letter
 
 MODULE_CODE = 'RP01'
 
+# Flip this to True temporarily if numbers still look wrong — it prints
+# per parcel-op target vs. actual to stderr so you can see exactly what
+# the aggregation is doing at runtime.
+_JJLTPL_DEBUG = False
+
 
 def login_required(f):
     @wraps(f)
@@ -95,60 +100,6 @@ def _jjltpl_fin_year_label(selected_date):
     return f"{start_year}-{end_year_short:02d}"
 
 
-def _jjltpl_bulk_tons(cur, period_start, period_end):
-
-    cur.execute("""
-        SELECT
-            COALESCE(SUM(quantity), 0) AS qty
-        FROM lueu_parcel_log
-        WHERE is_deleted IS NOT TRUE
-          AND entry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-          AND from_time ~ '^[0-9]{2}:[0-9]{2}$'
-          AND (entry_date::date + from_time::time) >= %s
-          AND (entry_date::date + from_time::time) < %s
-    """, (period_start, period_end))
-
-    row = cur.fetchone()
-
-    qty = float(row["qty"] or 0)
-
-    return {
-        MEDIUM_DRY_BULK: 0.0,
-        MEDIUM_BREAK_BULK: 0.0,
-        MEDIUM_LIQUID_BULK: qty,
-        "bulk_total": qty,
-    }
-def _jjltpl_fy_bulk_tons(cur, fin_year):
-
-    cur.execute("""
-        SELECT
-            COALESCE(SUM(quantity),0) AS qty
-        FROM mis_vessel_master
-        WHERE fin_year = %s
-    """, (fin_year,))
-
-    qty = float(cur.fetchone()["qty"] or 0)
-
-    return {
-        MEDIUM_DRY_BULK: 0.0,
-        MEDIUM_BREAK_BULK: 0.0,
-        MEDIUM_LIQUID_BULK: qty,
-        "bulk_total": qty,
-    }
-def _jjltpl_fy_bulk_vessel_count(cur, fin_year):
-    """
-    Count of vessels in mis_vessel_master for the given financial year.
-    """
-    cur.execute("""
-        SELECT COUNT(*) AS cnt
-        FROM mis_vessel_master
-        WHERE fin_year = %s
-    """, (fin_year,))
-
-    row = cur.fetchone()
-    return row["cnt"] if row and row["cnt"] else 0
-
-
 def _lueu_parse_ids(csv):
     return [int(x) for x in str(csv or '').split(',') if str(x).strip().isdigit()]
 
@@ -185,26 +136,236 @@ def _lueu_target_qty(cur, parcel_ids_csv, op_qty, operation_type):
     return total or float(op_qty or 0)
 
 
+def _lueu_is_shortclose_row(r):
+    """
+    Detect a shortclose row from the `remarks` text column (e.g. operators
+    typing "Shortclose", "Short Close", "SHORT-CLOSE" etc.) rather than
+    relying solely on the is_shortclose boolean flag, since that flag is
+    not reliably set (confirmed: rows with remarks="Short Close" can still
+    have is_shortclose=false in the data). Falls back to is_shortclose if
+    the remarks text doesn't match, in case some rows only set the flag.
+    """
+    remarks = str(r.get('remarks') or '').strip().lower()
+    if 'short' in remarks and 'close' in remarks:
+        return True
+    return bool(r.get('is_shortclose'))
+
+
 def _lueu_log_aggregate(cur, parcel_op_id, target):
-    """Capped aggregation of lueu_parcel_log rows for one parcel-op, exactly
-    mirroring the loop in model.py::get_started_parcels: once cumulative
-    qty (real + shortclose) reaches target, later rows are ignored so they
-    can't drag hours/avg_rate/ETC. Shortclose qty counts toward completion
-    but NOT toward hours or avg_rate."""
-    cur.execute('''SELECT from_time, to_time, COALESCE(quantity,0) AS q, is_shortclose
+    """
+    Aggregation of lueu_parcel_log rows for one parcel-op:
+      - real_qty = sum of qty on normal (non-shortclose) rows, capped so
+        it never exceeds the effective target.
+      - shortclose_qty = sum of qty on rows whose remark marks them as a
+        shortclose. This REDUCES the target (vessel closed short of the
+        full BL) rather than counting as delivered cargo — so it is NOT
+        added to real_qty and does not count toward hours/avg_rate.
+      - effective_target = target - shortclose_qty (never below 0).
+
+    Returns (real_qty, hours, shortclose_qty, effective_target).
+    """
+    cur.execute('''SELECT from_time, to_time, COALESCE(quantity,0) AS q,
+                          is_shortclose, remarks
                    FROM lueu_parcel_log
                    WHERE parcel_op_id=%s AND is_deleted IS NOT TRUE
                    ORDER BY entry_date, from_time NULLS LAST, id''', [parcel_op_id])
-    real_qty, hours, shortclose_qty = 0.0, 0.0, 0.0
-    for r in cur.fetchall():
-        if target > 0 and (real_qty + shortclose_qty) >= target - 1e-6:
+
+    rows = cur.fetchall()
+
+    # First pass: total shortclose qty reduces the target.
+    shortclose_qty = sum(
+        float(r['q'] or 0) for r in rows if _lueu_is_shortclose_row(r)
+    )
+    effective_target = max(target - shortclose_qty, 0) if target > 0 else target
+
+    # Second pass: sum real (non-shortclose) rows, capped at effective_target.
+    real_qty, hours = 0.0, 0.0
+    for r in rows:
+        if _lueu_is_shortclose_row(r):
+            continue
+        if effective_target > 0 and real_qty >= effective_target - 1e-6:
             break
-        if r['is_shortclose']:
-            shortclose_qty += float(r['q'] or 0)
-        else:
-            real_qty += float(r['q'] or 0)
-            hours += _lueu_hours(r['from_time'], r['to_time'])
-    return real_qty, hours, shortclose_qty
+        real_qty += float(r['q'] or 0)
+        hours += _lueu_hours(r['from_time'], r['to_time'])
+
+    return real_qty, hours, shortclose_qty, effective_target
+
+
+def _jjltpl_actual_qty_for_rows(cur, rows, label=""):
+    """
+    Shared helper: given raw rows containing parcel_op_id / parcel_ids /
+    op_qty / operation_type, resolve each parcel-op's TARGET (BL) quantity,
+    then aggregate the lueu_parcel_log to find what has ACTUALLY been
+    logged so far (real + shortclose, capped at target). Sums that across
+    all distinct parcel-ops.
+
+    Deduplicates on parcel_op_id in case the SQL join produces the same
+    parcel-op more than once (e.g. multiple ldud_header rows per vessel),
+    which would otherwise double-count it.
+
+    NOTE: this is a CUMULATIVE (lifetime-to-date) figure. It is used for
+    MONTH/YEAR, where the underlying query already scopes vessels by
+    cast_off_datetime falling inside the period, so "actual to date" is
+    effectively "final total for that call". DAY does NOT use this —
+    see _jjltpl_bulk_tons, which sums log entries directly against the
+    24hr window instead.
+    """
+    qty = 0.0
+    seen_ids = set()
+
+    for r in rows:
+        pid = r["parcel_op_id"]
+        if not pid or pid in seen_ids:
+            continue
+        seen_ids.add(pid)
+
+        target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
+        real_qty, hours, shortclose_qty, effective_target = _lueu_log_aggregate(cur, pid, target)
+        # Actual quantity handled = what was really pumped/loaded, i.e.
+        # real_qty only. Shortclose qty is NOT delivered cargo — it's a
+        # reduction of the target — so it's excluded from the tons total.
+        actual = real_qty
+        qty += actual
+
+        if _JJLTPL_DEBUG:
+            import sys
+            print(
+                f"[JJLTPL DEBUG {label}] parcel_op_id={pid} "
+                f"op_qty={r['op_qty']} target={target} "
+                f"shortclose_qty={shortclose_qty} effective_target={effective_target} "
+                f"real_qty={real_qty} remaining={max(effective_target - real_qty, 0)}",
+                file=sys.stderr,
+            )
+
+    return qty
+
+
+def _parse_entry_date(entry_date):
+    """
+    entry_date may come back from the DB as a real date/datetime object,
+    or as plain text (this schema stores several date/time columns as
+    text elsewhere, cast with ::timestamp in SQL). Handle both so a
+    string value doesn't raise inside datetime.combine() and blow up
+    the request with a 500.
+    """
+    if entry_date is None:
+        return None
+    if isinstance(entry_date, datetime):
+        return entry_date.date()
+    if hasattr(entry_date, 'year') and hasattr(entry_date, 'month'):
+        # already a date object
+        return entry_date
+    s = str(entry_date).strip()
+    for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    # Last resort: try fromisoformat (handles date or datetime strings)
+    try:
+        return datetime.fromisoformat(s).date()
+    except ValueError:
+        return None
+
+
+def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
+    """
+    DAY quantity: sum of every lueu_parcel_log entry, for any parcel-op
+    belonging to a vessel call at these berths, whose entry timestamp
+    (entry_date + from_time) falls within [period_start, period_end) —
+    i.e. the plain 24hr 7am->7am window.
+
+    Deliberately NOT filtered by "vessel currently alongside at
+    period_end" — that wrongly excluded vessels that cast off DURING
+    the window (they'd still have real log entries inside the window,
+    just no longer match the alongside/cast-off snapshot condition).
+    This queries the log table directly instead, so a vessel that
+    arrived, worked, and departed entirely within the window is still
+    counted correctly, and a vessel that's alongside but logged nothing
+    in this window contributes 0.
+    """
+    cur.execute("""
+        SELECT
+            log.entry_date,
+            log.from_time,
+            log.to_time,
+            COALESCE(log.quantity, 0) AS q,
+            log.is_shortclose,
+            log.remarks
+        FROM lueu_parcel_log log
+        JOIN ldud_parcel_ops po ON po.id = log.parcel_op_id
+        JOIN ldud_header lh ON lh.id = po.ldud_id
+        JOIN vcn_header vh ON vh.id = lh.vcn_id
+        WHERE vh.berth_name = ANY(%s)
+          AND log.is_deleted IS NOT TRUE
+    """, (berths,))
+
+    rows = cur.fetchall()
+    qty = 0.0
+
+    for r in rows:
+        if _lueu_is_shortclose_row(r):
+            continue
+
+        entry_date = _parse_entry_date(r['entry_date'])
+        from_time = r['from_time']
+        if not entry_date or not from_time:
+            continue
+        try:
+            fh, fm = (int(x) for x in str(from_time).split(':')[:2])
+        except (ValueError, AttributeError):
+            continue
+
+        entry_dt = datetime.combine(entry_date, time(fh, fm))
+        if period_start <= entry_dt < period_end:
+            qty += float(r['q'] or 0)
+            if _JJLTPL_DEBUG:
+                import sys
+                print(
+                    f"[JJLTPL DEBUG DAY] entry_dt={entry_dt} q={r['q']} "
+                    f"running_total={qty}",
+                    file=sys.stderr,
+                )
+
+    return {
+        MEDIUM_DRY_BULK: 0.0,
+        MEDIUM_BREAK_BULK: 0.0,
+        MEDIUM_LIQUID_BULK: qty,
+        "bulk_total": qty,
+    }
+
+
+def _jjltpl_fy_bulk_tons(cur, fin_year):
+
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(quantity),0) AS qty
+        FROM mis_vessel_master
+        WHERE fin_year = %s
+    """, (fin_year,))
+
+    qty = float(cur.fetchone()["qty"] or 0)
+
+    return {
+        MEDIUM_DRY_BULK: 0.0,
+        MEDIUM_BREAK_BULK: 0.0,
+        MEDIUM_LIQUID_BULK: qty,
+        "bulk_total": qty,
+    }
+
+
+def _jjltpl_fy_bulk_vessel_count(cur, fin_year):
+    """
+    Count of vessels in mis_vessel_master for the given financial year.
+    """
+    cur.execute("""
+        SELECT COUNT(*) AS cnt
+        FROM mis_vessel_master
+        WHERE fin_year = %s
+    """, (fin_year,))
+
+    row = cur.fetchone()
+    return row["cnt"] if row and row["cnt"] else 0
 
 
 def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
@@ -238,16 +399,20 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
         WHERE vh.berth_name = ANY(%s)
 
-          AND NULLIF(lh.alongside_datetime,'')::timestamp < %s
+        AND NULLIF(lh.alongside_datetime,'') IS NOT NULL
+        AND NULLIF(lh.alongside_datetime,'')::timestamp <= %s
 
-          AND (
-                NULLIF(lh.cast_off_datetime,'') IS NULL
-                OR NULLIF(lh.cast_off_datetime,'')::timestamp >= %s
-          )
+        AND (
+            -- Still on berth
+            NULLIF(lh.cast_off_datetime,'') IS NULL
+
+            -- Or cast off happens after this report window
+            OR NULLIF(lh.cast_off_datetime,'')::timestamp > %s
+        )
 
         ORDER BY
             vh.berth_name, po.id
-    """, (berths, window_end, window_start))
+    """, (berths, window_end, window_end))
 
     raw_rows = cur.fetchall()
 
@@ -259,35 +424,40 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
         if r["parcel_op_id"]:
 
-            # Same target resolution + capped log aggregation LUEU01 uses.
+            # Same target resolution + log aggregation as the rest of the
+            # report. shortclose qty reduces the effective target rather
+            # than counting as delivered.
             target = _lueu_target_qty(cur, r["parcel_ids"], r["op_qty"], r["operation_type"])
-            real_qty, hours, shortclose_qty = _lueu_log_aggregate(cur, r["parcel_op_id"], target)
-            remaining_qty = max(target - (real_qty + shortclose_qty), 0)
+            real_qty, hours, shortclose_qty, effective_target = _lueu_log_aggregate(
+                cur, r["parcel_op_id"], target
+            )
+            remaining_qty = max(effective_target - real_qty, 0)
 
             # Matches lueu01.html's etcText() exactly:
-            #   ETC = start_dt + (target_qty / avg_rate) hours
-            # — projected from the fixed start time using the FULL target
-            # (not remaining), not from "now". Only shown while remaining > 0.
+            #   ETC = start_dt + (effective_target / avg_rate) hours
+            # — projected from the fixed start time using the FULL
+            # (shortclose-adjusted) target, not "remaining" or "now".
+            # Only shown while remaining > 0.
             if remaining_qty > 0:
 
                 if r["start_dt"] and hours > 0 and real_qty > 0:
                     avg_rate = real_qty / hours
-                    if avg_rate > 0 and target > 0:
+                    if avg_rate > 0 and effective_target > 0:
                         expected_completion = r["start_dt"] + timedelta(
-                            hours=(target / avg_rate)
+                            hours=(effective_target / avg_rate)
                         )
 
                 elif (
                     r["expected_start"]
                     and r["expected_flow_rate"]
                     and float(r["expected_flow_rate"]) > 0
-                    and target > 0
+                    and effective_target > 0
                 ):
                     # Mirrors the separate "ETC (Exp)" chip: expected_start +
-                    # (target / expected_flow_rate), used only when there's
-                    # no actual start yet.
+                    # (effective_target / expected_flow_rate), used only when
+                    # there's no actual start yet.
                     expected_completion = r["expected_start"] + timedelta(
-                        hours=(target / float(r["expected_flow_rate"]))
+                        hours=(effective_target / float(r["expected_flow_rate"]))
                     )
 
         rows.append({
@@ -379,37 +549,18 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
     return rows
 
 
-# def _jjltpl_bulk_tons(cur, period_start, period_end):
-
-#     cur.execute("""
-#         SELECT
-#             COALESCE(SUM(quantity), 0) AS qty
-#         FROM mis_vessel_master
-#         WHERE NULLIF(TRIM(cast_off), '') IS NOT NULL
-#           AND NULLIF(TRIM(cast_off), '')::timestamp >= %s
-#           AND NULLIF(TRIM(cast_off), '')::timestamp < %s
-#     """, (period_start, period_end))
-
-#     row = cur.fetchone()
-
-#     qty = float(row["qty"] or 0)
-
-#     return {
-#         MEDIUM_DRY_BULK: 0.0,
-#         MEDIUM_BREAK_BULK: 0.0,
-#         MEDIUM_LIQUID_BULK: qty,
-#         "bulk_total": qty,
-#     }
-
-
 def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
     """
     MONTH quantity, based on vessels whose cast_off_datetime (in
-    ldud_header) falls within the period — not entry-time logs.
+    ldud_header) falls within the period — valued at ACTUAL logged
+    quantity (capped at target), same as the DAY figure used to be.
     """
     cur.execute("""
         SELECT
-            COALESCE(SUM(po.quantity), 0) AS qty
+            po.id AS parcel_op_id,
+            po.parcel_ids,
+            po.quantity AS op_qty,
+            vh.operation_type
         FROM ldud_header lh
         JOIN vcn_header vh
             ON vh.id = lh.vcn_id
@@ -421,9 +572,8 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
           AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
     """, (berths, period_start, period_end))
 
-    row = cur.fetchone()
-
-    qty = float(row["qty"] or 0)
+    rows = cur.fetchall()
+    qty = _jjltpl_actual_qty_for_rows(cur, rows, label="MONTH")
 
     return {
         MEDIUM_DRY_BULK: 0.0,
@@ -434,7 +584,41 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
 
 
 def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
+    """
+    DAY vessel count: vessels CURRENTLY on berth as of period_end
+    (alongside already, not yet cast off / cast off after period_end).
+    This intentionally ignores period_start.
+    """
+    cur.execute("""
+        SELECT COUNT(DISTINCT vh.id) AS cnt
+        FROM ldud_header lh
+        JOIN vcn_header vh
+            ON vh.id = lh.vcn_id
+        WHERE vh.berth_name = ANY(%s)
 
+          -- Vessel has already come alongside
+          AND NULLIF(lh.alongside_datetime, '') IS NOT NULL
+          AND NULLIF(lh.alongside_datetime, '')::timestamp <= %s
+
+          -- Still on berth OR cast off after the selected report window
+          AND (
+                NULLIF(lh.cast_off_datetime, '') IS NULL
+                OR NULLIF(lh.cast_off_datetime, '')::timestamp > %s
+          )
+    """, (berths, period_end, period_end))
+
+    row = cur.fetchone()
+    return row["cnt"] if row and row["cnt"] else 0
+
+
+def _jjltpl_month_bulk_vessel_count(cur, period_start, period_end, berths):
+    """
+    MONTH/YEAR-month-addition vessel count: vessels whose cast_off_datetime
+    falls WITHIN [period_start, period_end) — matches the same definition
+    _jjltpl_month_bulk_tons uses for tons, so the two figures agree.
+    (_jjltpl_bulk_vessel_count is deliberately NOT reused here — it counts
+    vessels still sitting on berth right now, which is a different set.)
+    """
     cur.execute("""
         SELECT COUNT(DISTINCT vh.id) AS cnt
         FROM ldud_header lh
@@ -457,9 +641,9 @@ def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths, f
         tons = _jjltpl_fy_bulk_tons(cur, fin_year)
         vessel_count = _jjltpl_fy_bulk_vessel_count(cur, fin_year)
 
-        # Current month values
+        # Current month values (cast-off-based, matching month_tons logic)
         month_tons = _jjltpl_month_bulk_tons(cur, period_start, period_end, berths)
-        month_vessels = _jjltpl_bulk_vessel_count(
+        month_vessels = _jjltpl_month_bulk_vessel_count(
             cur,
             period_start,
             period_end,
@@ -475,14 +659,19 @@ def _jjltpl_period_row(cur, label, period_start, period_end, terminal, berths, f
         vessel_count += month_vessels
     elif label == "MONTH":
         tons = _jjltpl_month_bulk_tons(cur, period_start, period_end, berths)
-        vessel_count = _jjltpl_bulk_vessel_count(
+        vessel_count = _jjltpl_month_bulk_vessel_count(
             cur,
             period_start,
             period_end,
             berths
         )
     else:
-        tons = _jjltpl_bulk_tons(cur, period_start, period_end)
+        tons = _jjltpl_bulk_tons(
+            cur,
+            period_start,
+            period_end,
+            berths
+        )
         vessel_count = _jjltpl_bulk_vessel_count(
             cur,
             period_start,
@@ -540,7 +729,17 @@ def jjltpl_page():
 def jjltpl_data():
     selected_date = _jjltpl_parse_date(request.args.get('date'))
     terminal = request.args.get('terminal', DEFAULT_TERMINAL)
-    return jsonify(_jjltpl_report_payload(selected_date, terminal))
+    try:
+        return jsonify(_jjltpl_report_payload(selected_date, terminal))
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(tb)  # still goes to server console/log as usual
+        return jsonify({
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'traceback': tb,
+        }), 500
 
 
 # ---------------------------------------------------------------------------

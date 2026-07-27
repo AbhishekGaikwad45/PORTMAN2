@@ -22,7 +22,6 @@
     .rp02-wrap *{ box-sizing:border-box; }
     .rp02-wrap{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
 
-    /* ---------- Module header ---------- */
     .module-header{
         display:flex;
         align-items:center;
@@ -39,7 +38,6 @@
     .module-header .rp-back{ margin-left:auto; font-size:13px; font-weight:500; color:var(--rp-blue); text-decoration:none; }
     .module-header .rp-back:hover{ text-decoration:underline; }
 
-    /* ---------- Sheet tabs (kept for parity, currently unused - single sheet report) ---------- */
     .rp02-tabs{
         display:flex;
         gap:8px;
@@ -61,7 +59,6 @@
         color:#fff;
     }
 
-    /* ---------- Toolbar ---------- */
     .jjltpl-toolbar{
         display:flex; align-items:center; gap:10px; flex-wrap:wrap;
         background:var(--rp-card); border:1px solid var(--rp-border); border-radius:10px;
@@ -89,7 +86,6 @@
 
     #reportStatus{ font-size:13px; color:var(--rp-muted); min-height:18px; margin-bottom:14px; }
 
-    /* ---------- Report card ---------- */
     .jjltpl-table-wrap{
         background:var(--rp-card); border:1px solid var(--rp-border); border-radius:10px;
         overflow:hidden;
@@ -104,7 +100,6 @@
         color:var(--rp-muted); text-transform:uppercase;
     }
 
-    /* ---------- Table ---------- */
     .table-scroll{ overflow-x:auto; }
     .traffic-report-table{ width:100%; border-collapse:collapse; min-width:1400px; }
     .traffic-report-table th, .traffic-report-table td{ border:1px solid var(--rp-border); }
@@ -348,19 +343,22 @@ function buildHead11(months) {
     thead.appendChild(row);
 }
 
-function buildSectionRows11(rows, monthData, sectionLabel, colspan) {
+// FY Total column now comes straight from the backend's real yearly
+// calculation (fyData) — it is NEVER summed or averaged from the 12
+// monthly cells in the browser, which used to produce meaningless
+// numbers for "Avg." rows (e.g. adding 12 monthly averages together).
+function buildSectionRows11(rows, monthData, fyData, sectionLabel, colspan) {
     let html = `<tr class="section-row"><td colspan="${colspan}">${sectionLabel}</td></tr>`;
     rows.forEach(([key, unit]) => {
         html += `<tr><td class="label">${key}</td><td class="unit">${unit}</td>`;
-        let total = 0;
-        let hasVal = false;
         monthData.forEach(m => {
             const v = m[key];
-            if (typeof v === "number") { total += v; hasVal = true; }
             const cls = "num" + (v ? " highlight-cell" : "");
             html += `<td class="${cls}">${formatNumber11(v, unit)}</td>`;
         });
-        html += `<td class="num highlight-cell">${hasVal ? formatNumber11(total, unit) : ""}</td>`;
+        const fyVal = fyData ? fyData[key] : undefined;
+        const fyHasVal = fyVal !== undefined && fyVal !== null && fyVal !== "";
+        html += `<td class="num highlight-cell">${fyHasVal ? formatNumber11(fyVal, unit) : ""}</td>`;
         html += `</tr>`;
     });
     return html;
@@ -390,10 +388,11 @@ function loadReport11() {
             const colspan = 3 + j.months.length;
             buildHead11(j.months);
 
+            const fy = j.fy_total || {};
             let body = "";
-            body += buildSectionRows11(SECTION_A_ROWS, j.section_a, "A) TERMINAL PERFORMANCE (To be filled by Terminals)", colspan);
-            body += buildSectionRows11(SECTION_B_ROWS, j.section_b, "B) PRODUCTIVITY PARAMETERS (Derived - Days)", colspan);
-            body += buildSectionRows11(SECTION_C_ROWS, j.section_c, "C) PRODUCTIVITY PARAMETERS (Derived - Hrs)", colspan);
+            body += buildSectionRows11(SECTION_A_ROWS, j.section_a, fy.section_a, "A) TERMINAL PERFORMANCE (To be filled by Terminals)", colspan);
+            body += buildSectionRows11(SECTION_B_ROWS, j.section_b, fy.section_b, "B) PRODUCTIVITY PARAMETERS (Derived - Days)", colspan);
+            body += buildSectionRows11(SECTION_C_ROWS, j.section_c, fy.section_c, "C) PRODUCTIVITY PARAMETERS (Derived - Hrs)", colspan);
 
             document.getElementById("reportBody").innerHTML = body;
         })

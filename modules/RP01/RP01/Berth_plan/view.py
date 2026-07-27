@@ -18,7 +18,12 @@ from flask import send_file
 # from modules.LUEU01.model import get_started_parcels
 
 MODULE_CODE = 'RP01'
-
+# ---- adjust if your real column name differs ----------
+SAIL_COLUMN = 'cast_off_datetime'   # ldud_header column: actual sail time
+LDUD_TERMINAL_COL = 'terminal_name'        # ldud_parcel_ops: terminal name column
+LUEU_EQUIPMENT_COL = 'equipment_name'      # lueu_parcel_log: equipment name column
+# BERTHS constant removed — berths are now fetched live from port_berth_master
+# -------------------------------------------------------------------------
 # ---- adjust if your real column name differs ----------
 SAIL_COLUMN = 'cast_off_datetime'   # ldud_header column: actual sail time
 # BERTHS constant removed — berths are now fetched live from port_berth_master
@@ -57,7 +62,7 @@ def get_expected_waiting_vessels(window_start, window_end):
     cur = get_cursor(conn)
 
     try:
-        cur.execute("""
+        cur.execute(f"""
             SELECT
                 vh.id,
                 vh.vessel_name,
@@ -69,12 +74,16 @@ def get_expected_waiting_vessels(window_start, window_end):
                 vh.doc_date,
                 vh.cargo_type AS cargo_name,
 
-                parcels.terminal_name,
+                parcels.terminal_name AS declared_terminal_name,
                 parcels.total_quantity AS cargo_quantity,
                 parcels.equipment_names,
-                parcels.consigner_names,
+                vh.load_port,
+                ldud.alongside_datetime,
+                ldud.anchored_datetime,
+                ldud.nor_accepted,
 
-                ldud.alongside_datetime
+                ops.terminal_name AS ops_terminal_name,
+                ops.has_equipment
 
             FROM vcn_header vh
 
@@ -82,24 +91,15 @@ def get_expected_waiting_vessels(window_start, window_end):
                 SELECT
                     STRING_AGG(DISTINCT NULLIF(TRIM(unload_terminal), ''), ', ') AS terminal_name,
                     STRING_AGG(DISTINCT NULLIF(TRIM(equipment_names), ''), ', ') AS equipment_names,
-                    STRING_AGG(DISTINCT NULLIF(TRIM(consigner_name), ''), ', ') AS consigner_names,
                     SUM(NULLIF(quantity, '')::numeric) AS total_quantity
                 FROM (
-                    SELECT
-                        unload_terminal,
-                        equipment_names,
-                        consigner_name,
-                        quantity
+                    SELECT unload_terminal, equipment_names, quantity
                     FROM vcn_consigners
                     WHERE vcn_id = vh.id
 
                     UNION ALL
 
-                    SELECT
-                        unload_terminal,
-                        equipment_names,
-                        consigner_name,
-                        quantity
+                    SELECT unload_terminal, equipment_names, quantity
                     FROM vcn_export_cargo_declaration
                     WHERE vcn_id = vh.id
                 ) p
@@ -107,12 +107,32 @@ def get_expected_waiting_vessels(window_start, window_end):
 
             LEFT JOIN LATERAL (
                 SELECT
-                    alongside_datetime
+                    alongside_datetime,
+                    anchored_datetime,
+                    nor_accepted
                 FROM ldud_header
                 WHERE vcn_id = vh.id
                 ORDER BY id DESC
                 LIMIT 1
             ) ldud ON TRUE
+
+            LEFT JOIN LATERAL (
+                SELECT
+                    STRING_AGG(DISTINCT NULLIF(TRIM(po.{LDUD_TERMINAL_COL}), ''), ', ') AS terminal_name,
+                    CASE WHEN BOOL_OR(eq.has_eq) THEN 'Y' ELSE 'N' END AS has_equipment
+                FROM ldud_header lh
+                JOIN ldud_parcel_ops po ON po.ldud_id = lh.id
+                LEFT JOIN LATERAL (
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM lueu_parcel_log l
+                        WHERE l.parcel_op_id = po.id
+                          AND l.is_deleted IS NOT TRUE
+                          AND NULLIF(TRIM(l.{LUEU_EQUIPMENT_COL}), '') IS NOT NULL
+                    ) AS has_eq
+                ) eq ON TRUE
+                WHERE lh.vcn_id = vh.id
+            ) ops ON TRUE
 
             WHERE
                 ldud.alongside_datetime IS NULL
@@ -126,32 +146,33 @@ def get_expected_waiting_vessels(window_start, window_end):
     finally:
         conn.close()
 
-    def _combine(r):
-        parts = [r.get("agents"), r.get("consigner_names")]
-        return " / ".join(p for p in parts if p)
-
     out = []
 
     for r in rows:
+        tank_terminal = r.get("ops_terminal_name") or r.get("declared_terminal_name")
+        load_port = r.get("load_port")
+
+        # Waiting vessels haven't started ops yet — base CONS purely on
+        # declared equipment, not on lueu_parcel_log usage
+        cons = 'Y' if (r.get("equipment_names") or '').strip() else 'N'
+
         out.append({
-            "terminal":     r.get("terminal_name"),
+            "terminal":     tank_terminal,
             "vessel_name":  r.get("vessel_name"),
             "via_no":       r.get("via_number"),
             "loa":          r.get("loa"),
             "dft":          r.get("draft"),
-            "agt_tnk_cons": _combine(r),
+            "agt_tnk_cons": f"{r.get('agents') or ''} / {load_port or ''} / {cons}",
             "cargo":        r.get("cargo_name"),
             "mla":          r.get("equipment_names"),
             "quantity":     r.get("cargo_quantity"),
-            "eta":          _fmt_dt(r.get("doc_date")),
-            "ata":          "",
-            "lpc":          "",
-            "doc":          _fmt_dt(r.get("doc_date")),
+            "eta":          _fmt_dt(r.get("doc_date"), fmt='%d-%m-%Y'),
+            "ata":          _fmt_dt(r.get("anchored_datetime")),
+            "nor":          _fmt_dt(r.get("nor_accepted")),
             "berth":        r.get("berth_name"),
         })
 
     return out
-
 
 # ══════════════════════════════════════════════════════════════════
 #  Page route
@@ -168,30 +189,34 @@ def berth_plan_page():
 
 def get_report_window(plan_date_str):
     """
-    Selected date = calendar day.
+    Report Window
 
-    Report window:
-        00:00:00 -> 23:59:59
+    Selected Date = 23-07-2026
 
-    'As On' time:
-        Today      -> current time (live)
-        Past date  -> 23:59
+    Window:
+        22-07-2026 07:00
+            ↓
+        23-07-2026 07:00
+
+    Today:
+        Window end = current time (if current time is before 07:00,
+        use current time)
     """
+
     plan_date = datetime.strptime(plan_date_str, "%Y-%m-%d").date()
     today = datetime.now().date()
 
-    window_start = datetime.combine(
+    window_end = datetime.combine(
         plan_date,
         datetime.min.time()
-    )
+    ) + timedelta(hours=7)
+
+    window_start = window_end - timedelta(days=1)
 
     if plan_date == today:
-        window_end = datetime.now()
-    else:
-        window_end = datetime.combine(
-            plan_date,
-            datetime.max.time().replace(microsecond=0)
-        )
+        now = datetime.now()
+        if now < window_end:
+            window_end = now
 
     return window_start, window_end
 
@@ -280,6 +305,24 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     ''', [ldud_id])
 
     cargo_completed = cur.fetchone()['completed']
+    
+    cur.execute("""
+        SELECT l.remarks
+        FROM ldud_parcel_ops po
+        JOIN lueu_parcel_log l
+            ON l.parcel_op_id = po.id
+        WHERE po.ldud_id = %s
+        AND l.is_deleted IS NOT TRUE
+        ORDER BY
+            po.id DESC,
+            NULLIF(l.entry_date,'')::date DESC,
+            NULLIF(l.to_time,'')::time DESC,
+            l.id DESC
+        LIMIT 1
+    """, [ldud_id])
+
+    remark_row = cur.fetchone()
+    remarks = remark_row["remarks"] if remark_row else ""
 
     # target_qty comes from the live VCN parcel quantities (via get_started_parcels) —
     # this is a "current truth" number and is NOT date-dependent.
@@ -367,14 +410,17 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     return {
         'consigner': consigner,
         'quantity': target_qty,
-    'ops_commenced': _fmt_dt(ops_commenced),          # First parcel start
-    'cargo_completion': _fmt_dt(cargo_completed),     # Last parcel end
+        'ops_commenced': _fmt_dt(ops_commenced),          # First parcel start
+        'cargo_completion': _fmt_dt(cargo_completed),     # Last parcel end
         'last_24hr_qty': last_24hr_qty,
         'till_now_qty': round(logged_qty, 3),
         'balance': balance_qty,
         'expected_completion': expected_completion,
         'present_flow_rate': display_rate,
         'is_planned': is_planned,
+        'present_flow_rate': display_rate,
+        'is_planned': is_planned,
+        'remarks': remarks,
     }
 
 
@@ -419,13 +465,13 @@ def get_berthed_vessels(window_start, window_end, berths):
         WHERE h.berth_name = ANY(%s)
           AND l.alongside_datetime IS NOT NULL
           AND (NULLIF(l.alongside_datetime::text, ''))::timestamp < %s
-          AND (
+            AND (
                 l.{SAIL_COLUMN} IS NULL
                 OR NULLIF(TRIM(l.{SAIL_COLUMN}::text), '') IS NULL
-                OR (NULLIF(l.{SAIL_COLUMN}::text, ''))::timestamp > %s
-              )
-        ORDER BY h.berth_name, l.alongside_datetime DESC
-    ''', [berths, window_end, window_start])
+                OR l.{SAIL_COLUMN}::timestamp >= %s
+                )
+                    ORDER BY h.berth_name, l.alongside_datetime DESC
+    ''', [berths, window_end, window_end])
     headers = [dict(r) for r in cur.fetchall()]
 
     # ===== Keep only the LATEST vessel per berth (a berth can physically =====
@@ -446,9 +492,9 @@ def get_berthed_vessels(window_start, window_end, berths):
         row['pipeline'] = h['exp_pipeline'] if h['operation_type'] == 'Export' else h['imp_pipeline']
         row.update(_enrich_vessel(cur, h['vcn_id'], h['ldud_id'], window_start, window_end))
         # Check whether discharge was completed as of the selected report date
-        balance = row.get("balance")
+        sail_dt = h.get("cast_off_datetime")
 
-        if balance is not None and float(balance) <= 0:
+        if sail_dt and sail_dt < window_end:
             continue
 
         out.append(row)
@@ -497,27 +543,43 @@ def get_sailed_vessels(window_start, window_end, berths):
         sail_dt = h['sail_dt']
         completion_dt = h['cargo_completion_dt']
 
-        if sail_dt:
-            # ---- PRIORITY 1: cast off exists -> show ONLY on the day it happened ----
-            if not _in_window(sail_dt):
-                continue   # previous day or next day -> skip entirely
-        else:
-            # ---- PRIORITY 2: no cast off yet -> fall back to cargo completion date ----
-            if not _in_window(completion_dt):
-                continue
+        # Show only vessels that have actually sailed
+        if sail_dt is None:
+            continue
+
+        # Show only if sailed during the selected report window
+        if not (window_start <= sail_dt < window_end):
+            continue
 
         row = _base_row(h)
         row['alongside'] = _fmt_dt(h['alongside_datetime'])
         row['cast_off'] = _fmt_dt(sail_dt)
         row['cargo_completion'] = _fmt_dt(completion_dt)
         row['vessel_agent'] = h['vessel_agent_name']
-        row['terminal'] = h['exp_terminal'] if h['operation_type'] == 'Export' else h['imp_terminal']
-        row['pipeline'] = h['exp_pipeline'] if h['operation_type'] == 'Export' else h['imp_pipeline']
-        row.update(_enrich_vessel(cur, h['vcn_id'], h['ldud_id'], window_start, window_end))
+        row['terminal'] = (
+            h['exp_terminal']
+            if h['operation_type'] == 'Export'
+            else h['imp_terminal']
+        )
+        row['pipeline'] = (
+            h['exp_pipeline']
+            if h['operation_type'] == 'Export'
+            else h['imp_pipeline']
+        )
+
+        row.update(
+            _enrich_vessel(
+                cur,
+                h['vcn_id'],
+                h['ldud_id'],
+                window_start,
+                window_end
+            )
+        )
 
         balance = row.get('balance')
-        if not (balance is not None and balance <= 0):
-            continue   
+        if balance is None or balance > 0:
+            continue
 
         out.append(row)
     conn.close()
@@ -629,6 +691,8 @@ def rp02_export_excel():
     title_rows.append((r, 'JSW JNPT LIQUID TERMINAL PRIVATE LIMITED', bold_underline)); r += 1
     title_rows.append((r, 'JAWAHARLAL NEHRU PORT AUTHORITY (BULK TERMINAL)', bold_underline)); r += 1
     title_rows.append((r, 'DAILY PERFORMANCE REPORT', bold)); r += 2
+    
+    
 
     ws.cell(r, 1, 'As on').font = bold
     date_cell = ws.cell(r, 2, report['as_on_date'])
@@ -639,9 +703,11 @@ def rp02_export_excel():
     time_cell.font = Font(bold=True, color='0000C8')
     time_cell.alignment = Alignment(horizontal='center')
     r += 2
-
+    
     c_headers = ['TERMINAL', 'VESSEL NAME', 'VIA NO.', 'LOA', 'DFT', 'AGT/TNK/CONS', 'CARGO',
-                 'MLA', 'QTY.', 'ETA', 'ATA', 'LPC', 'DOC', 'NOR', 'BERTH']
+                 'MLA', 'QTY.', 'ETA', 'ATA', 'NOR', 'BERTH']
+
+
 
     # ------------------------------------------------------------------
     # Column-width matching logic
@@ -759,15 +825,15 @@ def rp02_export_excel():
     ws.cell(r, 1, 'C] Expected /Waiting Tank Vessels at JJLTPL Berth').font = section_font
     r += 1
     for col_i, h in enumerate(c_headers, start=1):
-        cell = ws.cell(r, col_i, h)
-        cell.font = bold; cell.fill = header_fill; cell.alignment = center; cell.border = border
+            cell = ws.cell(r, col_i, h)
+            cell.font = bold; cell.fill = header_fill; cell.alignment = center; cell.border = border
     r += 1
 
     for row in report['expected']:
         vals = [row.get('terminal'), row.get('vessel_name'), row.get('via_no'), row.get('loa'),
                 row.get('dft'), row.get('agt_tnk_cons'), row.get('cargo'), row.get('mla'),
-                row.get('quantity'), row.get('eta'), row.get('ata'), row.get('lpc'),
-                row.get('doc'), row.get('nor'), row.get('berth')]
+                row.get('quantity'), row.get('eta'), row.get('ata'), 
+                row.get('nor'), row.get('berth')]
         for col_i, v in enumerate(vals, start=1):
             cell = ws.cell(r, col_i, v if v is not None else '')
             cell.border = border
