@@ -604,6 +604,55 @@ REASONS_NON_PORT = [
     "7. Weather restrictions", "8. Lack of storage", "9. Tidal",
     "10. Documents not Ready", "11. Power Failure Grid", "12. Not in Schedule", "13. Others",
 ]
+# ---------------------------------------------------------------------
+# FY Total override for rows marked "Formula need to check"
+# For these specific rows, the FY Total column should NOT be a
+# recomputed ratio from yearly-aggregated Section A. Instead it should
+# be a plain SUM of the 12 monthly values already shown on screen.
+# All other rows keep the original ratio-based FY Total behavior.
+# ---------------------------------------------------------------------
+SUM_FY_LABELS_B = [
+    "Avg. Pre-berthing Waiting Time-Total",
+    "Avg. Pre-berthing Waiting Time-Port A/c.",
+    "Avg. Pre-berthing Waiting Time-Non-Port A/c.",
+    "Avg. Berth stay",
+    "Avg. Turn around time - Total",
+    "Avg. Turn around time - Port A/c.",
+    "Avg. Turn around time - Non- Port A/c.",
+    "Avg. Turn around time - Pilot Boarding to De-boarding-Total",
+    "Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c.",
+    "Berth Occupancy",
+    "Idle time",
+]
+
+SUM_FY_LABELS_C = [
+    "Avg. Pre-berthing Waiting Time-Total",
+    "Avg. Pre-berthing Waiting Time-Port A/c.",
+    "Avg. Pre-berthing Waiting Time-Non-Port A/c.",
+    "Avg. Berth stay",
+    "Avg. Turn around time - Total",
+    "Avg. Turn around time - Port A/c.",
+    "Avg. Turn around time - Non- Port A/c.",
+    "Avg. Turn around time - Pilot Boarding to De-boarding-Total",
+    "Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c.",
+    "Avg. TRT for 1000 tonnes (Days)",
+    "Avg. TRT for 1000 tonnes (Hrs)",
+]
+
+
+def _apply_sum_fy_override(fy_dict, monthly_list, labels):
+    """
+    Given the FY dict (originally ratio-based) and the list of 12 monthly
+    dicts, overrides fy_dict[label] with a plain SUM of the 12 monthly
+    values — but only for the labels marked "Formula need to check".
+    Every other key in fy_dict is left untouched (still the real
+    ratio-based FY value computed from yearly-aggregated Section A).
+    """
+    for label in labels:
+        vals = [m.get(label) for m in monthly_list if m.get(label) is not None]
+        if vals:
+            fy_dict[label] = round(sum(vals), 6)
+    return fy_dict
 
 
 @bp.route("/module/RP01/report11/")
@@ -648,6 +697,11 @@ def report11_api_report():
         a_fy = compute_section_a_fy(df, fin_year)
         b_fy = compute_section_b_month(a_fy)
         c_fy = compute_section_c_month(a_fy, b_fy)
+
+        # NEW — For rows marked "Formula need to check", replace the
+        # ratio-based FY Total with a plain SUM of the 12 monthly values.
+        b_fy = _apply_sum_fy_override(b_fy, b_by_month, SUM_FY_LABELS_B)
+        c_fy = _apply_sum_fy_override(c_fy, c_by_month, SUM_FY_LABELS_C)
 
         return jsonify({
             "port_name": "JJLTPL",
@@ -712,6 +766,7 @@ def _write_row(ws, row_i, sr, label, unit, values, fy_value, fmt, thin_border):
         ws[f"{c}{row_i}"].border = thin_border
 
 
+
 @bp.route("/api/module/RP01/report11/export")
 @login_required
 def report11_api_export():
@@ -738,6 +793,11 @@ def report11_api_export():
         a_fy = compute_section_a_fy(df, fin_year)
         b_fy = compute_section_b_month(a_fy)
         c_fy = compute_section_c_month(a_fy, b_fy)
+
+        # NEW — Same override applied here so the Excel export matches
+        # the on-screen report for rows marked "Formula need to check".
+        b_fy = _apply_sum_fy_override(b_fy, b_list, SUM_FY_LABELS_B)
+        c_fy = _apply_sum_fy_override(c_fy, c_list, SUM_FY_LABELS_C)
 
         wb = Workbook()
         ws = wb.active
