@@ -191,44 +191,6 @@ def _lueu_log_aggregate(cur, parcel_op_id, target):
     return real_qty, hours, shortclose_qty, effective_target
 
 
-def _lueu_window_log_qty(cur, parcel_op_id, period_start, period_end):
-    """
-    Sum of NON-shortclose lueu_parcel_log quantity whose entry timestamp
-    (entry_date + from_time) falls within [period_start, period_end).
-
-    This is a period slice (e.g. "what was pumped between 7am yesterday
-    and 7am today"), not a cumulative/lifetime total, and is NOT capped
-    against the parcel-op's target — a day's logged qty can legitimately
-    be any size regardless of how much of the BL is left.
-    """
-    cur.execute('''SELECT entry_date, from_time, to_time, COALESCE(quantity,0) AS q,
-                          is_shortclose, remarks
-                   FROM lueu_parcel_log
-                   WHERE parcel_op_id=%s AND is_deleted IS NOT TRUE
-                   ORDER BY entry_date, from_time NULLS LAST, id''', [parcel_op_id])
-
-    rows = cur.fetchall()
-    qty = 0.0
-    for r in rows:
-        if _lueu_is_shortclose_row(r):
-            continue
-
-        entry_date = r['entry_date']
-        from_time = r['from_time']
-        if not entry_date or not from_time:
-            continue
-        try:
-            fh, fm = (int(x) for x in str(from_time).split(':')[:2])
-        except (ValueError, AttributeError):
-            continue
-
-        entry_dt = datetime.combine(entry_date, time(fh, fm))
-        if period_start <= entry_dt < period_end:
-            qty += float(r['q'] or 0)
-
-    return qty
-
-
 def _jjltpl_actual_qty_for_rows(cur, rows, label=""):
     """
     Shared helper: given raw rows containing parcel_op_id / parcel_ids /
@@ -244,8 +206,9 @@ def _jjltpl_actual_qty_for_rows(cur, rows, label=""):
     NOTE: this is a CUMULATIVE (lifetime-to-date) figure. It is used for
     MONTH/YEAR, where the underlying query already scopes vessels by
     cast_off_datetime falling inside the period, so "actual to date" is
-    effectively "final total for that call". It is deliberately NOT used
-    for DAY anymore — see _jjltpl_actual_qty_for_rows_window below.
+    effectively "final total for that call". DAY does NOT use this —
+    see _jjltpl_bulk_tons, which sums log entries directly against the
+    24hr window instead.
     """
     qty = 0.0
     seen_ids = set()
@@ -277,68 +240,64 @@ def _jjltpl_actual_qty_for_rows(cur, rows, label=""):
     return qty
 
 
-def _jjltpl_actual_qty_for_rows_window(cur, rows, period_start, period_end, label=""):
-    """
-    Like _jjltpl_actual_qty_for_rows, but sums each parcel-op's log qty
-    logged strictly WITHIN [period_start, period_end) instead of its
-    cumulative actual-to-date. Used for the DAY figure, which should be
-    "cargo handled in this 24hr (7am-7am) window", not "vessel's total
-    progress so far".
-    """
-    qty = 0.0
-    seen_ids = set()
-
-    for r in rows:
-        pid = r["parcel_op_id"]
-        if not pid or pid in seen_ids:
-            continue
-        seen_ids.add(pid)
-
-        w_qty = _lueu_window_log_qty(cur, pid, period_start, period_end)
-        qty += w_qty
-
-        if _JJLTPL_DEBUG:
-            import sys
-            print(
-                f"[JJLTPL DEBUG {label}] parcel_op_id={pid} "
-                f"window=[{period_start},{period_end}) window_qty={w_qty}",
-                file=sys.stderr,
-            )
-
-    return qty
-
-
 def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
     """
-    DAY quantity: cargo actually LOGGED within the 24hr report window
-    [period_start, period_end) — i.e. 7am yesterday to 7am today — for
-    vessels that were alongside during that window. This is a period
-    slice, not the vessel's cumulative actual-to-date.
+    DAY quantity: sum of every lueu_parcel_log entry, for any parcel-op
+    belonging to a vessel call at these berths, whose entry timestamp
+    (entry_date + from_time) falls within [period_start, period_end) —
+    i.e. the plain 24hr 7am->7am window.
+
+    Deliberately NOT filtered by "vessel currently alongside at
+    period_end" — that wrongly excluded vessels that cast off DURING
+    the window (they'd still have real log entries inside the window,
+    just no longer match the alongside/cast-off snapshot condition).
+    This queries the log table directly instead, so a vessel that
+    arrived, worked, and departed entirely within the window is still
+    counted correctly, and a vessel that's alongside but logged nothing
+    in this window contributes 0.
     """
     cur.execute("""
         SELECT
-            po.id AS parcel_op_id,
-            po.parcel_ids,
-            po.quantity AS op_qty,
-            vh.operation_type
-        FROM ldud_header lh
-        JOIN vcn_header vh
-            ON vh.id = lh.vcn_id
-        LEFT JOIN ldud_parcel_ops po
-            ON po.ldud_id = lh.id
+            log.entry_date,
+            log.from_time,
+            log.to_time,
+            COALESCE(log.quantity, 0) AS q,
+            log.is_shortclose,
+            log.remarks
+        FROM lueu_parcel_log log
+        JOIN ldud_parcel_ops po ON po.id = log.parcel_op_id
+        JOIN ldud_header lh ON lh.id = po.ldud_id
+        JOIN vcn_header vh ON vh.id = lh.vcn_id
         WHERE vh.berth_name = ANY(%s)
-
-          AND NULLIF(lh.alongside_datetime,'') IS NOT NULL
-          AND NULLIF(lh.alongside_datetime,'')::timestamp <= %s
-
-          AND (
-                NULLIF(lh.cast_off_datetime,'') IS NULL
-                OR NULLIF(lh.cast_off_datetime,'')::timestamp > %s
-          )
-    """, (berths, period_end, period_end))
+          AND log.is_deleted IS NOT TRUE
+    """, (berths,))
 
     rows = cur.fetchall()
-    qty = _jjltpl_actual_qty_for_rows_window(cur, rows, period_start, period_end, label="DAY")
+    qty = 0.0
+
+    for r in rows:
+        if _lueu_is_shortclose_row(r):
+            continue
+
+        entry_date = r['entry_date']
+        from_time = r['from_time']
+        if not entry_date or not from_time:
+            continue
+        try:
+            fh, fm = (int(x) for x in str(from_time).split(':')[:2])
+        except (ValueError, AttributeError):
+            continue
+
+        entry_dt = datetime.combine(entry_date, time(fh, fm))
+        if period_start <= entry_dt < period_end:
+            qty += float(r['q'] or 0)
+            if _JJLTPL_DEBUG:
+                import sys
+                print(
+                    f"[JJLTPL DEBUG DAY] entry_dt={entry_dt} q={r['q']} "
+                    f"running_total={qty}",
+                    file=sys.stderr,
+                )
 
     return {
         MEDIUM_DRY_BULK: 0.0,
