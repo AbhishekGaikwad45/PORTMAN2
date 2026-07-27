@@ -77,7 +77,7 @@ def get_expected_waiting_vessels(window_start, window_end):
                 parcels.terminal_name AS declared_terminal_name,
                 parcels.total_quantity AS cargo_quantity,
                 parcels.equipment_names,
-
+                vh.load_port,
                 ldud.alongside_datetime,
                 ldud.anchored_datetime,
                 ldud.nor_accepted,
@@ -149,26 +149,20 @@ def get_expected_waiting_vessels(window_start, window_end):
     out = []
 
     for r in rows:
-        terminal = r.get("ops_terminal_name") or r.get("declared_terminal_name")
+        tank_terminal = r.get("ops_terminal_name") or r.get("declared_terminal_name")
+        load_port = r.get("load_port")
 
-        # CONS: real logged-equipment check once ops have started,
-        # else fall back to whether equipment was declared on the VCN
-        has_equipment_logged = r.get("has_equipment")  # 'Y' / 'N' / None (no ldud yet)
-        if has_equipment_logged == 'Y':
-            cons = 'Y'
-        elif has_equipment_logged == 'N':
-            cons = 'N'
-        else:
-            # no ldud_parcel_ops rows yet (still waiting) — use declared equipment instead
-            cons = 'Y' if (r.get("equipment_names") or '').strip() else 'N'
+        # Waiting vessels haven't started ops yet — base CONS purely on
+        # declared equipment, not on lueu_parcel_log usage
+        cons = 'Y' if (r.get("equipment_names") or '').strip() else 'N'
 
         out.append({
-            "terminal":     terminal,
+            "terminal":     tank_terminal,
             "vessel_name":  r.get("vessel_name"),
             "via_no":       r.get("via_number"),
             "loa":          r.get("loa"),
             "dft":          r.get("draft"),
-            "agt_tnk_cons": f"{r.get('agents') or ''} / {terminal or ''} / {cons}",
+            "agt_tnk_cons": f"{r.get('agents') or ''} / {load_port or ''} / {cons}",
             "cargo":        r.get("cargo_name"),
             "mla":          r.get("equipment_names"),
             "quantity":     r.get("cargo_quantity"),
