@@ -1394,10 +1394,13 @@
         if (type === 'delays') {
             // First delay line opens at the LDUD Anchorage time; later ones chain
             // off the previous End, so the operator only fills in what changed.
+            // The second line closes the window at Pilot Pickup.
+            const w = delayWindows[vcnId] || {};
             const t = subTables[vcnId] && subTables[vcnId].delays;
             const rows = t ? t.getRows() : [];
             const prevEnd = rows.length ? rows[rows.length - 1].getData().delay_end : '';
-            seed.delay_start = prevEnd || (delayWindows[vcnId] || {}).anchored || '';
+            seed.delay_start = prevEnd || w.anchored || '';
+            if (rows.length === 1) seed.delay_end = w.pilot_pickup || '';
         }
         const res = await fetch(`/api/module/VCN01/${type}/save`, {
             method: 'POST',
@@ -1412,7 +1415,10 @@
         if (data.id && subTables[vcnId] && subTables[vcnId][type]) {
             const newRow = {id: data.id, vcn_id: vcnId};
             if (type === 'consigners') newRow.toll_applicable = true;
-            if (type === 'delays' && seed.delay_start) newRow.delay_start = seed.delay_start;
+            if (type === 'delays') {
+                if (seed.delay_start) newRow.delay_start = seed.delay_start;
+                if (seed.delay_end) newRow.delay_end = seed.delay_end;
+            }
             if (type === 'export_cargo' && defaultUom) {
                 newRow.quantity_uom = defaultUom;
             }
