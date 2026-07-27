@@ -1,5 +1,11 @@
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_file
 from functools import wraps
+from datetime import datetime
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+import io
+import re
 from . import model
 from database import get_user_permissions, get_db, get_cursor
 
@@ -52,6 +58,44 @@ def get_vessels():
 @login_required
 def get_parcels(vcn_id):
     return jsonify(model.get_started_parcels(vcn_id))
+
+
+_DT = re.compile(r'^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})')
+
+
+def _cell(v):
+    """Excel-friendly value: bools as Yes/blank, stored 'YYYY-MM-DDTHH:MM'
+    datetimes as the DD-MM-YYYY HH:MM the screen shows."""
+    if isinstance(v, bool):
+        return 'Yes' if v else ''
+    m = _DT.match(str(v)) if v else None
+    return f'{m[3]}-{m[2]}-{m[1]} {m[4]}:{m[5]}' if m else v
+
+
+@bp.route('/api/module/LUEU01/export')
+@login_required
+def export_master():
+    """Master export — every parcel operation, all vessels, one sheet."""
+    if not get_perms().get('can_read'):
+        return render_template('no_access.html'), 403
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Parcel Operations'
+    ws.append([h for h, _ in model.EXPORT_COLS])
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for r in model.export_all_parcels():
+        ws.append([_cell(r.get(f)) for _, f in model.EXPORT_COLS])
+    ws.freeze_panes = 'A2'
+    ws.auto_filter.ref = ws.dimensions
+    for i, (h, _) in enumerate(model.EXPORT_COLS, 1):
+        ws.column_dimensions[get_column_letter(i)].width = max(12, len(h) + 2)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True,
+                     download_name=f"LUEU01_Parcel_Operations_{datetime.now():%Y%m%d_%H%M}.xlsx",
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @bp.route('/api/module/LUEU01/parcel/times', methods=['POST'])

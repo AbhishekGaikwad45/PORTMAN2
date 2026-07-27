@@ -27,7 +27,10 @@
   <div class="lueu-parcels">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;">
       <h3 id="vesselTitle" style="margin:0;">Select a vessel</h3>
-      <button class="lueu-btn secondary" onclick="refreshInPlace()">&#8635; Refresh</button>
+      <div style="display:flex;gap:6px;">
+        <button class="lueu-btn" onclick="window.location='/api/module/LUEU01/export'" title="Download every parcel operation, all vessels">&#8681; Export Master</button>
+        <button class="lueu-btn secondary" onclick="refreshInPlace()">&#8635; Refresh</button>
+      </div>
     </div>
     <div id="parcelList"></div>
   </div>
