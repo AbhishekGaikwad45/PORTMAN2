@@ -632,6 +632,17 @@ def get_sailed_vessels(window_start, window_end, berths):
                 window_end
             )
         )
+        if row.get("ops_commenced") and row.get("cargo_completion") and row.get("quantity"):
+            ops = datetime.strptime(row["ops_commenced"], "%d-%m-%Y %H:%M")
+            completion = datetime.strptime(row["cargo_completion"], "%d-%m-%Y %H:%M")
+
+            hours = (completion - ops).total_seconds() / 3600
+
+            if hours > 0:
+                row["present_flow_rate"] = round(
+                    float(row["quantity"]) / hours,
+                    2
+                )
 
         balance = row.get('balance')
         if balance is None or balance > 0:
