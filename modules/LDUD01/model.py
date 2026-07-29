@@ -96,6 +96,17 @@ def get_data(page=1, size=20, filters=None):
         # Collect vcn_ids to batch-fetch computed fields
         vcn_ids = list(set(r['vcn_id'] for r in rows if r.get('vcn_id')))
 
+        # Short-closed (written-off) quantity per LDUD — deducted from the BL total shown
+        shortclose = {}
+        if rows:
+            cur.execute('''SELECT po.ldud_id, COALESCE(SUM(lg.quantity), 0) AS sc
+                           FROM lueu_parcel_log lg
+                           JOIN ldud_parcel_ops po ON po.id = lg.parcel_op_id
+                           WHERE po.ldud_id = ANY(%s) AND lg.is_shortclose IS TRUE
+                             AND lg.is_deleted IS NOT TRUE
+                           GROUP BY po.ldud_id''', ([r['id'] for r in rows],))
+            shortclose = {s['ldud_id']: float(s['sc'] or 0) for s in cur.fetchall()}
+
         vcn_cargo = {}   # vcn_id -> {cargo_names, bl_quantities}
         vcn_agents = {}  # vcn_id -> {agent_name, stevedore_name}
         vcn_meta = {}    # vcn_id -> {doc_date}
@@ -163,7 +174,8 @@ def get_data(page=1, size=20, filters=None):
             # ponytail: single total, first non-empty UOM wins (mixed UOMs are not a real case here)
             if ci['quantities']:
                 uom = next((u for u in uoms if u), '')
-                r['bl_quantities_display'] = f"{int(round(sum(ci['quantities'])))} {uom}".strip()
+                total = sum(ci['quantities']) - shortclose.get(r['id'], 0.0)
+                r['bl_quantities_display'] = f"{total:.3f} {uom}".strip()
             else:
                 r['bl_quantities_display'] = ''
 
