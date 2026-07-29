@@ -160,11 +160,12 @@ def get_data(page=1, size=20, filters=None):
             ci = vcn_cargo.get(vid, {'names': [], 'quantities': [], 'uoms': []})
             uoms = ci.get('uoms', [])
             r['cargo_names_display'] = ', '.join(ci['names']) if ci['names'] else ''
-            bl_parts = []
-            for i, q in enumerate(ci['quantities']):
-                uom = uoms[i] if i < len(uoms) else ''
-                bl_parts.append(f"{int(round(q))} {uom}".strip())
-            r['bl_quantities_display'] = ', '.join(bl_parts) if bl_parts else ''
+            # ponytail: single total, first non-empty UOM wins (mixed UOMs are not a real case here)
+            if ci['quantities']:
+                uom = next((u for u in uoms if u), '')
+                r['bl_quantities_display'] = f"{int(round(sum(ci['quantities'])))} {uom}".strip()
+            else:
+                r['bl_quantities_display'] = ''
 
             # VCN doc date for display
             vm = vcn_meta.get(vid, {})

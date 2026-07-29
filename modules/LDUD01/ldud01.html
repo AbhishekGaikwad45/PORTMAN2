@@ -759,9 +759,7 @@
             {title: "Cargo Name", field: "cargo_names_display", width: 200, frozen: true,
                 formatter: function(cell) { return cargoColorBadges(cell.getValue()); }
             },
-            {title: "BL Quantity", field: "bl_quantities_display", width: 160, frozen: true,
-                formatter: function(cell) { return cargoColorBadges(cell.getValue()); }
-            },
+            {title: "BL Quantity", field: "bl_quantities_display", width: 160, frozen: true},
             {title: "Agent Name", field: "agent_name", width: 120},
             {title: "Anchorage Time", field: "anchored_datetime", editor: canEdit ? datetimeEditor : false, width: 150,
                 formatter: datetimeCellFormatter, cellEdited: validateSofOrder},
