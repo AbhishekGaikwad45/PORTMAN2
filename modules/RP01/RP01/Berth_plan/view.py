@@ -278,7 +278,67 @@ def _cumulative_as_of(cur, ldud_id, window_end):
 
 MIN_HOURS_FOR_ACTUAL = 4      # must match MIN_HOURS_FOR_ACTUAL in lueu01.html
 MAX_REASONABLE_DAYS = 90      # if the actual-rate ETC projects beyond this, treat it as unreliable
+def _per_parcel_completion(cur, ldud_id, window_end):
+    """ETC per parcel_op (= per discharge line running in parallel), computed
+    the same way LUEU01 shows it: start_dt + (target_qty / actual_rate),
+    using ALL logged entries (no window cutoff, no minimum-hours gate) so it
+    matches LUEU01's live ETC exactly. Falls back to Expected Start/Rate only
+    when there's no actual logged data at all yet."""
+    cur.execute('''
+        SELECT id, quantity, start_dt, expected_start, expected_flow_rate
+        FROM ldud_parcel_ops
+        WHERE ldud_id = %s
+    ''', [ldud_id])
+    pos = cur.fetchall()
 
+    results = []
+    for po in pos:
+        po_id = po['id']
+        target = float(po['quantity'] or 0)
+
+        cur.execute('''
+            SELECT COALESCE(SUM(quantity), 0) AS qty,
+                   COALESCE(SUM(
+                     EXTRACT(EPOCH FROM (
+                       COALESCE(NULLIF(to_time,'')::time, '00:00'::time)
+                       - COALESCE(NULLIF(from_time,'')::time, '00:00'::time)
+                       + CASE WHEN NULLIF(to_time,'')::time < NULLIF(from_time,'')::time
+                              THEN INTERVAL '24 hours' ELSE INTERVAL '0' END
+                     )) / 3600.0
+                   ), 0) AS hrs
+            FROM lueu_parcel_log
+            WHERE parcel_op_id = %s
+              AND is_deleted IS NOT TRUE
+              AND is_shortclose IS NOT TRUE
+        ''', [po_id])
+        row = cur.fetchone()
+        logged_qty = float(row['qty'] or 0)
+        hours = float(row['hrs'] or 0)
+        balance = target - logged_qty
+
+        etc, planned = None, False
+        if balance > 0:
+            if hours > 0 and logged_qty > 0 and po.get('start_dt'):
+                rate = logged_qty / hours
+                try:
+                    start_dt = datetime.strptime(
+                        str(po['start_dt']).replace('T', ' ')[:16], '%Y-%m-%d %H:%M')
+                    etc = start_dt + timedelta(hours=target / rate)
+                except ValueError:
+                    pass
+            if etc is None:
+                exp_rate = float(po.get('expected_flow_rate') or 0)
+                exp_start = po.get('expected_start')
+                if exp_rate and exp_start and target:
+                    try:
+                        start_dt = datetime.strptime(
+                            str(exp_start).replace('T', ' ')[:16], '%Y-%m-%d %H:%M')
+                        etc = start_dt + timedelta(hours=target / exp_rate)
+                        planned = True
+                    except ValueError:
+                        pass
+        results.append((etc, planned))
+    return results
 
 def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     from modules.LUEU01.model import get_started_parcels
@@ -384,19 +444,14 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     # enough to use as-is
     has_actual = present_flow_rate > 0 and total_hours >= MIN_HOURS_FOR_ACTUAL
 
-    if balance_qty > 0:
-        actual_etc = None
-        if has_actual:
-            hrs_left = balance_qty / present_flow_rate
-            actual_etc = window_end + timedelta(hours=hrs_left)
+    per_line = _per_parcel_completion(cur, ldud_id, window_end)
+    active_lines = [(etc, planned) for (etc, planned) in per_line if etc is not None]
 
-        if actual_etc and (actual_etc - window_end).days <= MAX_REASONABLE_DAYS:
-            expected_completion = actual_etc.strftime('%d-%m-%Y %H:%M')
-        else:
-            best_etc, _ = _planned_etc()
-            if best_etc:
-                expected_completion = best_etc.strftime('%d-%m-%Y %H:%M')
-                is_planned = True
+    if active_lines:
+        etc, completion_is_planned = max(active_lines, key=lambda x: x[0])
+        expected_completion = etc.strftime('%d-%m-%Y %H:%M')
+        if completion_is_planned:
+            is_planned = True
 
     # ── Flow-rate display: SAME rule for BOTH Section A (berthed) and
     #    Section B (sailed) rows — no longer gated on balance_qty>0.
@@ -577,6 +632,17 @@ def get_sailed_vessels(window_start, window_end, berths):
                 window_end
             )
         )
+        if row.get("ops_commenced") and row.get("cargo_completion") and row.get("quantity"):
+            ops = datetime.strptime(row["ops_commenced"], "%d-%m-%Y %H:%M")
+            completion = datetime.strptime(row["cargo_completion"], "%d-%m-%Y %H:%M")
+
+            hours = (completion - ops).total_seconds() / 3600
+
+            if hours > 0:
+                row["present_flow_rate"] = round(
+                    float(row["quantity"]) / hours,
+                    2
+                )
 
         balance = row.get('balance')
         if balance is None or balance > 0:

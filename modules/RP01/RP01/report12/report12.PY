@@ -356,10 +356,23 @@ def load_data() -> pd.DataFrame:
                     h.vessel_run_type AS overseas_coastal,
                     'Import' AS import_export,
                     c.cargo_name AS cargo,
-                    c.quantity
+                    COALESCE(actual.real_qty, c.quantity::numeric) AS quantity
                 FROM vcn_header h
                 JOIN vcn_consigners c
-                    ON c.vcn_id=h.id
+                    ON c.vcn_id = h.id
+                LEFT JOIN ldud_header lh
+                    ON lh.vcn_id = h.id
+                LEFT JOIN ldud_parcel_ops po
+                    ON po.ldud_id = lh.id
+                    AND UPPER(TRIM(po.cargo_name)) = UPPER(TRIM(c.cargo_name))
+                LEFT JOIN (
+                    SELECT parcel_op_id, SUM(quantity) AS real_qty
+                    FROM lueu_parcel_log
+                    WHERE is_deleted = false
+                    AND is_shortclose = false
+                    GROUP BY parcel_op_id
+                ) actual
+                    ON actual.parcel_op_id = po.id
 
                 UNION ALL
 
@@ -369,10 +382,23 @@ def load_data() -> pd.DataFrame:
                     h.vessel_run_type,
                     'Export',
                     e.cargo_name,
-                    e.quantity
+                    COALESCE(actual.real_qty, e.quantity::numeric)
                 FROM vcn_header h
                 JOIN vcn_export_cargo_declaration e
-                    ON e.vcn_id=h.id
+                    ON e.vcn_id = h.id
+                LEFT JOIN ldud_header lh
+                    ON lh.vcn_id = h.id
+                LEFT JOIN ldud_parcel_ops po
+                    ON po.ldud_id = lh.id
+                    AND UPPER(TRIM(po.cargo_name)) = UPPER(TRIM(e.cargo_name))
+                LEFT JOIN (
+                    SELECT parcel_op_id, SUM(quantity) AS real_qty
+                    FROM lueu_parcel_log
+                    WHERE is_deleted = false
+                    AND is_shortclose = false
+                    GROUP BY parcel_op_id
+                ) actual
+                    ON actual.parcel_op_id = po.id
             """)
 
             live_rows = cur.fetchall()

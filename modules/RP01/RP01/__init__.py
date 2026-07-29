@@ -29,4 +29,5 @@ from .report9 import report09 as report_09_views
 from .report13 import report13 as report_13_views
 from.report11 import report11 as report_11_views 
 from .report12 import report12 as report_12_views
+from .report5 import report5 as report_05_views
    
