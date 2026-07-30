@@ -232,80 +232,97 @@ def _direction(import_export):
         return "Outbound"
     return None
 
-def get_report_category(cargo):
-    cargo = str(cargo or "").strip().upper()
+# def get_report_category(cargo):
+#     cargo = str(cargo or "").strip().upper()
 
-    # ---------------- POL PRODUCTS ----------------
-    if cargo in (
-        "FO",
-        "FO [E]",
-        "CBFS",
-        "FURNACE OIL",
-    ):
-        return "POL-Products (In MMT)"
+#     # ---------------- POL PRODUCTS ----------------
+#     if cargo in (
+#         "FO",
+#         "FO [E]",
+#         "CBFS",
+#         "FURNACE OIL",
+#     ):
+#         return "POL-Products (In MMT)"
 
-    # ---------------- POL CRUDE ----------------
-    if cargo == "POL CRUDE":
-        return "POL-Crude (In MMT)"
+#     # ---------------- POL CRUDE ----------------
+#     if cargo == "POL CRUDE":
+#         return "POL-Crude (In MMT)"
 
-    # ---------------- LPG ----------------
-    if "LPG" in cargo or "LNG" in cargo:
-        return "LPG or LNG (In MMT)"
+#     # ---------------- LPG ----------------
+#     if "LPG" in cargo or "LNG" in cargo:
+#         return "LPG or LNG (In MMT)"
 
-    # ---------------- EDIBLE OIL ----------------
-    if cargo in (
-        "CPO",
-        "CPKO",
-        "CPO/CPKO",
-        "CPO/RBDPO",
-        "RBD PALM OLEIN",
-        "EDIBLE OIL",
-        "SUNFLOWER OIL",
-        "CDSBO",
-        "CSBO",
-        "CSFO",
-    ):
-        return "Edible Oil (In MMT)"
+#     # ---------------- EDIBLE OIL ----------------
+#     if any(x in cargo for x in (
+#         "CPO",
+#         "CPKO",
+#         "RBD PALM OLEIN",
+#         "EDIBLE OIL",
+#         "SUNFLOWER OIL",
+#         "CDSBO",
+#         "CSBO",
+#         "CSFO",
+#     )):
+#         return "Edible Oil (In MMT)"
 
-    # ---------------- CHEMICALS ----------------
-    if cargo in (
-        "CHEMICAL",
-        "ACETIC ACID",
-        "A. ACID",
-        "A.ACID",
-        "AACID",
-        "VAM",
-        "PHENOL/ACETON/VAM",
-        "PHENOL",
-        "MDC",
-        "MEK",
-        "IPA",
-        "ISOPROPYL ALCOHOL",
-        "SM",
-        "STRENE MONOMER",
-        "STYRENE MONOMER",
-        "N BUTONAL/TOLUNE",
-    ):
-        return "Chemicals (In MMT)"
+#     # ---------------- CHEMICALS ----------------
+#     chemical_keywords = [
+#         "CHEMICAL",
+#         "CHEMICALS",
+#         "IPA",
+#         "SM",
+#         "VAM",
+#         "PHENOL",
+#         "ACETONE",
+#         "AACID",
+#         "A.ACID",
+#         "A. ACID",
+#         "ACETIC ACID",
+#         "MDC",
+#         "MEK",
+#         "ISOPROPYL ALCOHOL",
+#         "METHYLENE",
+#         "METHELENE",
+#         "CHOLORIDE",
+#         "CHLORIDE",
+#         "STRENE MONOMER",
+#         "STYRENE MONOMER",
+#         "N BUTONAL",
+#         "TOLUNE",
+#         "NITRIC ACID",
+#     ]
 
-    # ---------------- FRM LIQUID ----------------
-    if cargo in (
-        "PHOSPHORIC ACID",
-        "PH.ACID",
-        "PH ACID",
-    ):
-        return "FRM-Liquid (In MMT)"
+#     if any(k in cargo for k in chemical_keywords):
+#         return "Chemicals (In MMT)"
 
-    # ---------------- OTHER LIQUID ----------------
-    if (
-        "BASE OIL" in cargo
-        or "LUBE" in cargo
-        or "SHELL" in cargo
-        or cargo == "CHEMICALS"
-    ):
-        return "Other Liquids (In MMT)"
+#     # ---------------- FRM LIQUID ----------------
+#     if cargo in (
+#         "PHOSPHORIC ACID",
+#         "PH.ACID",
+#         "PH ACID",
+#     ):
+#         return "FRM-Liquid (In MMT)"
 
-    return None
+#     # ---------------- OTHER LIQUID ----------------
+#     if any(x in cargo for x in (
+#         "BASE OIL",
+#         "LUBE",
+#         "SHELL",
+#     )):
+#         return "Other Liquids (In MMT)"
+#     print("\n===== UNMAPPED =====")
+
+#     print(
+#         df[df["row_key"].isna()][["cargo", "quantity"]]
+#         .groupby("cargo")
+#         .sum()
+#         .sort_values("quantity", ascending=False)
+#     )
+
+#     print("====================")
+    
+
+#     return None
 
 def load_data() -> pd.DataFrame:
     """Pulls every mis_vessel_master row (joined to vessel_cargo for the
@@ -323,6 +340,8 @@ def load_data() -> pd.DataFrame:
                 foreign_indian,
                 import_export,
                 cargo,
+                category,
+                category1,
                 quantity
             FROM mis_vessel_master
             WHERE fin_year IS NOT NULL
@@ -436,7 +455,64 @@ def load_data() -> pd.DataFrame:
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
     # Map cargo to report category
-    df["row_key"] = df["cargo"].apply(get_report_category)
+    def get_report_category(category1):
+        value = str(category1 or "").strip().upper()
+
+        mapping = {
+            "EDIBLE OIL": "Edible Oil (In MMT)",
+            "PH.ACID": "FRM-Liquid (In MMT)",
+            "CHEMICAL": "Chemicals (In MMT)",
+            "OTHER": "Other Liquids (In MMT)",
+            "POL": "POL-Products (In MMT)",   # <-- add this
+            
+        }
+
+        return mapping.get(value)
+
+    def get_report_category(cargo, category1):
+        cargo_u = str(cargo or "").strip().upper()
+        cat1_u = str(category1 or "").strip().upper()
+
+        # 1) mis_vessel_master rows already have a curated Category-1 — trust it
+        mapping = {
+            "EDIBLE OIL": "Edible Oil (In MMT)",
+            "PH.ACID":    "FRM-Liquid (In MMT)",
+            "CHEMICAL":   "Chemicals (In MMT)",
+            "OTHER":      "Other Liquids (In MMT)",
+            "POL":        "POL-Products (In MMT)",
+        }
+        if cat1_u in mapping:
+            return mapping[cat1_u]
+
+        # 2) Live VCN rows have no category1 at all — fall back to cargo keywords
+        if cargo_u in ("FO", "FO [E]", "CBFS", "FURNACE OIL"):
+            return "POL-Products (In MMT)"
+        if cargo_u == "POL CRUDE":
+            return "POL-Crude (In MMT)"
+        if "LPG" in cargo_u or "LNG" in cargo_u:
+            return "LPG or LNG (In MMT)"
+        if any(x in cargo_u for x in ("CPO", "CPKO", "RBD PALM OLEIN", "EDIBLE OIL",
+                                    "SUNFLOWER OIL", "CDSBO", "CSBO", "CSFO")):
+            return "Edible Oil (In MMT)"
+        chemical_keywords = ["CHEMICAL", "CHEMICALS", "IPA", "SM", "VAM", "PHENOL",
+                            "ACETONE", "AACID", "A.ACID", "A. ACID", "ACETIC ACID",
+                            "MDC", "MEK", "ISOPROPYL ALCOHOL", "METHYLENE",
+                            "METHELENE", "CHOLORIDE", "CHLORIDE", "STRENE MONOMER",
+                            "STYRENE MONOMER", "N BUTONAL", "TOLUNE", "NITRIC ACID"]
+        if any(k in cargo_u for k in chemical_keywords):
+            return "Chemicals (In MMT)"
+        if cargo_u in ("PHOSPHORIC ACID", "PH.ACID", "PH ACID"):
+            return "FRM-Liquid (In MMT)"
+        if any(x in cargo_u for x in ("BASE OIL", "LUBE", "SHELL")):
+            return "Other Liquids (In MMT)"
+
+        return None
+
+    df["row_key"] = df.apply(
+        lambda r: get_report_category(r["cargo"], r["category1"]),
+        axis=1
+    )
+
 
     # Show unmapped cargo values
     unmapped = sorted(
@@ -520,6 +596,16 @@ def _get_df_and_years():
 def compute_table(df, sheet, fin_year, month_idx):
     sdef = SHEET_DEFS[sheet]
     subset = df[(df["sheet"] == sheet) & (df["fin_year"] == fin_year) & (df["fy_month_idx"] == month_idx)]
+    print("\n========== MONTH DEBUG ==========")
+    print("Month Index:", month_idx)
+
+    print(
+        subset.groupby("row_key")["value"]
+            .sum()
+            .sort_values(ascending=False)
+    )
+
+    print("=================================\n")
 
     values = {}
     for grp in sdef["groups"]:
