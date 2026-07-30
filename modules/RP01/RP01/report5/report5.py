@@ -57,30 +57,54 @@ applied server-side. This is threaded through fetch_berth_hours() and
 surfaced in compute_berth_occupancy()'s result under "debug_rows", and
 therefore also under result["occupancy_detail"]["debug_rows"] in the
 /report endpoint response.
+
+======================================================================
+ EXPORT-TO-EXCEL (added)
+======================================================================
+report5_export() below is the implementation behind the "Export Excel"
+button in report5.html (window.location =
+"/api/module/RP01/report5/export?month=...&year=..."), which previously
+had no matching route.
+
+No external template file is used — build_report5_export_workbook()
+builds the workbook entirely in code with openpyxl, so this module has
+no dependency on any other file on disk. The exact layout of the
+original "5. Monthly Rep Sum" sheet (every label, merge, border, fill,
+number format, and formula) is captured as static data in
+EXPORT_SUM_CELLS / EXPORT_SUM_MERGES / EXPORT_SUM_COLUMN_WIDTHS /
+EXPORT_SUM_ROW_HEIGHTS below, and re-applied to a fresh sheet on every
+export. After that fixed layout is laid down, this month's numbers are
+written into the handful of cells that hold real (non-formula) data —
+Table 1's "Liquid (LB-03&LB-04)" row, Table 2's "LIQUID (JJLTPL)" row,
+Table 3's Liquid/Cement rows — the same handful of "real" data points
+applyReportToPerformanceData() / applyReportToVolumeComparisonData() in
+report5.html fill into an otherwise-fixed table shape client-side.
+Every other cell (labels + the row 11/22/23 totals, increase-% columns,
+etc., which are all still live formulas) is left exactly as captured.
 ======================================================================
 """
 
 import calendar
+import io
 import logging
+import os
 import traceback
 from datetime import date
 from functools import wraps
 
 from dateutil import parser as dateutil_parser
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
+from openpyxl.cell.cell import MergedCell
 
-from flask import jsonify, request, render_template, session, redirect, url_for
+from flask import jsonify, request, render_template, session, redirect, url_for, send_file
 
 from database import get_db, get_cursor
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
 from .. import bp
 
-# ---------------------------------------------------------------------
-# DEBUG LOGGING
-# ---------------------------------------------------------------------
-# Dedicated logger for this module so berth-occupancy debugging doesn't
-# get lost in general Flask/werkzeug request logs. Prints to console by
-# default (propagates to root logger); set to logging.INFO or higher to
-# quiet this down once things are confirmed working.
 logger = logging.getLogger("report5")
 if not logger.handlers:
     _handler = logging.StreamHandler()
@@ -90,8 +114,6 @@ if not logger.handlers:
     logger.addHandler(_handler)
 logger.setLevel(logging.DEBUG)
 
-# Flip to False once berth occupancy is confirmed working, to stop
-# printing full row dumps on every request.
 DEBUG_BERTH_OCCUPANCY = True
 
 
@@ -111,27 +133,19 @@ MONTH_NUM = {  # calendar month number, for date filtering against the new table
 }
 NUM_TO_MONTH_ABBREV = {v: k for k, v in MONTH_NUM.items()}
 
-# One-time system migration date. Any (month, calendar-year) at or after
-# this date reads from the new tables; anything before reads from
-# mis_vessel_master. See module docstring — this is NOT a recurring
-# "every July" rule.
+
+MONTH_ABBREV_TO_FULL = {
+    "Jan": "January", "Feb": "February", "Mar": "March", "Apr": "April",
+    "May": "May", "Jun": "June", "Jul": "July", "Aug": "August",
+    "Sep": "September", "Oct": "October", "Nov": "November", "Dec": "December",
+}
+
+
 CUTOVER_DATE = date(2026, 7, 1)
 
-# Per user instruction: use ldud_header.created_date to determine which
-# month a vessel record counts toward.
 LDUD_HEADER_DATE_COLUMN = "created_date"
 
-# --- Berth occupancy column names — confirmed against information_schema ---
-# mis_vessel_master has THREE candidate "end" columns: cast_off, sail_cast_off,
-# and a pre-computed numeric stay_at_berth. Went with alongside/cast_off as the
-# most literal match to "Cast off - All fast", but this is a judgment call —
-# please confirm cast_off (not sail_cast_off) is the right one, and whether
-# stay_at_berth (already numeric) might be a better/pre-computed source than
-# deriving hours from alongside/cast_off ourselves.
-# Confirmed from mis_vessel_master data (Jun-26): the Liquid berths are
-# LB-03 and LB-04 (berth_no column). Berth occupancy must be scoped to
-# just these, not every berth in the port, or the sum includes Shallow/
-# Coastal/Anchorage hours too and comes out ~4-5x too high.
+
 LIQUID_BERTH_CODES_MIS = ["LB-03", "LB-04"]  # <-- CONFIRM this is the full/correct set
 
 MIS_ALONGSIDE_COLUMN = "alongside"      # confirmed column, text (needs datetime parse)
@@ -140,58 +154,377 @@ LDUD_ALONGSIDE_COLUMN = "alongside_datetime"  # confirmed column, text (needs da
 LDUD_CASTOFF_COLUMN = "cast_off_datetime"     # confirmed column, text (needs datetime parse)
 NUM_BERTHS = 2  # per formula: divide by 2 -> 2 physical berths
 
-# --- Commodity turnaround / parcel size (Commoditywise Av. Turn Around
-# table) — column names.
-#
-# CONFIRMED against information_schema (portman_jnpa, 30-Jul-2026):
-#   mis_vessel_master DOES have a cargo/commodity column, but it's named
-#   "cargo", not "commodity". Fixed below.
-#
-# RESOLVED (per user instruction, 30-Jul-2026): neither ldud_header nor
-#   lueu_parcel_log has ANY commodity-like column. Checked candidates:
-#     ldud_header: id, doc_num, vcn_id, vcn_doc_num, vessel_name,
-#       anchored_datetime, arrival_inner_anchorage, arrival_outer_anchorage,
-#       arrived_mbpt, arrived_mfl, free_pratique_granted, nor_tendered,
-#       nor_accepted, discharge_commenced, discharge_completed,
-#       initial_draft_survey_quantity, doc_status, created_by,
-#       created_date, custom_clearance, agent_stevedore_onboard,
-#       operation_type, material_po_number, alongside_datetime,
-#       cast_off_datetime, pilot_board_departure, pilot_disembarked,
-#       first_line, pilot_pickup_time, is_deleted, deleted_by, deleted_date
-#     lueu_parcel_log: id, parcel_op_id, entry_date, from_time, to_time,
-#       quantity, quantity_uom, medium, equipment_name, delay_name, shift,
-#       operator_name, shift_incharge, berth_name, remarks, created_by,
-#       created_date, is_deleted, deleted_by, deleted_date, pressure,
-#       is_shortclose
-#   lueu_parcel_log.medium was checked directly (SELECT DISTINCT medium
-#   FROM lueu_parcel_log) and only contains handling-method values
-#   ('Direct Pipe', 'Equipment'), not commodity/cargo type -- ruled out.
-#
-#   DECISION: per user instruction, ldud_header/lueu_parcel_log are used
-#   only for the Liquid berths, so fetch_commodity_turnaround_from_new_system
-#   applies NO commodity filter -- every row for the given month/year is
-#   treated as Liquid. LDUD_COMMODITY_COLUMN / PARCEL_LOG_COMMODITY_COLUMN
-#   are left as None/unused (not referenced anywhere) to reflect that no
-#   such column exists; if the new system ever handles another commodity
-#   through these same tables, this will need revisiting.
 MIS_COMMODITY_COLUMN = "cargo"            # CONFIRMED: real column on mis_vessel_master
 LDUD_COMMODITY_COLUMN = None              # N/A: no commodity column on ldud_header; new-system data assumed Liquid-only
 PARCEL_LOG_COMMODITY_COLUMN = None        # N/A: no commodity column on lueu_parcel_log; new-system data assumed Liquid-only
 
-# --- mis_history — used for Av. Parcel Size on legacy (Apr-Jun) months ---
-# CONFIRMED against information_schema + sample data (portman_jnpa, 30-Jul-2026):
-#   - month_jsw stores the same "Mon-YY" format as mis_vessel_master.month
-#     (sample: 'Jun-25', 'Jun-26').
-#   - cargo_type holds commodity values, but UPPERCASE ('LIQUID', not
-#     'Liquid') -- the ILIKE filter used below is already case-insensitive,
-#     so this doesn't need special-casing.
-#   - cargo_category / cargo_sub_category are a finer breakdown within a
-#     cargo_type (e.g. LIQUID -> EDIBLE OIL / FERTILIZERS / OTHER LIQUID /
-#     POL) -- NOT an alternate commodity label, so cargo_type is the right
-#     column to match against "Liquid"/"Cement", not these.
+
 MIS_HISTORY_MONTH_COLUMN = "month_jsw"
 MIS_HISTORY_COMMODITY_COLUMN = "cargo_type"
 MIS_HISTORY_QUANTITY_COLUMN = "quantity"
+
+# --- Export-to-Excel layout (no external file) ---
+EXPORT_SUMMARY_SHEET = "5. Monthly Rep Sum"
+
+# Column widths / row heights / merges from the original "5. Monthly
+# Rep Sum" sheet layout.
+EXPORT_SUM_COLUMN_WIDTHS = {
+    "A": 2.109375, "B": 24.88671875, "C": 19.6640625, "D": 13.88671875,
+    "E": 12.6640625, "F": 17.33203125, "G": 16.33203125, "H": 11.88671875,
+    "I": 12.33203125, "J": 9.5546875, "K": 14.6640625, "L": 9.5546875,
+}
+EXPORT_SUM_ROW_HEIGHTS = {3: 15.6, 22: 17.25, 23: 17.25, 26: 13.8, 27: 15.75, 28: 15.75, 39: 15.6}
+EXPORT_SUM_MERGES = ["B3:I3", "C27:E27", "F27:H27", "C28:E28", "F28:H28"]
+
+
+EXPORT_SUM_CELLS = [
+    ('B2', '  ', ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('B3', 'Performance Report for the Month of June-2026', ('Arial', 12.0, True, False, 'single', None), None, (None, None, None, None), ('center', None), 'General'),
+    ('B5', 'Berth', ('Arial', 10.0, True, False, None, None), None, (('thin', None), None, ('thin', None), None), (None, None), 'General'),
+    ('C5', 'Commodity', ('Arial', 10.0, True, False, None, None), None, (('thin', None), None, ('thin', None), None), (None, None), 'General'),
+    ('D5', 'No. of ', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), ('center', None), 'General'),
+    ('E5', 'Berth', ('Arial', 10.0, True, False, None, None), None, (None, ('thin', None), ('thin', None), None), ('center', None), 'General'),
+    ('F5', 'Handling', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), ('center', None), 'General'),
+    ('G5', 'Handling', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), ('center', None), 'General'),
+    ('H5', 'Increase', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), ('center', None), 'General'),
+    ('B6', None, ('Arial', 10.0, True, False, None, None), None, (('thin', None), None, None, ('thin', None)), (None, None), 'General'),
+    ('C6', None, ('Arial', 10.0, True, False, None, None), None, (('thin', None), None, None, ('thin', None)), (None, None), 'General'),
+    ('D6', 'Vessels sailed', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+    ('E6', 'Occupancy', ('Arial', 10.0, True, False, None, None), None, (None, ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+    ('F6', 'June-25(Previous)', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), None, None), ('center', None), 'General'),
+    ('G6', 'June-26(Current)', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), None, None), ('center', None), 'General'),
+    ('H6', '%', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+    ('B7', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('C7', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('D7', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), ('center', None), 'General'),
+    ('E7', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('F7', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('G7', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('H7', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), 'General'),
+    ('B8', 'Liquid Berth', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C8', 'Liquid (LB-01&LB-02)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('D8', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), ('center', None), 'General'),
+    ('E8', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F8', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('G8', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('H8', '=(G8-F8)/F22', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), '0.00%'),
+    ('J8', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), (None, None), '0.00'),
+    ('B9', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C9', 'Liquid (LB-03&LB-04)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('D9', 12, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), ('center', None), 'General'),
+    ('E9', 0.2446236559141741, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F9', 117960.688, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.000'),
+    ('G9', 92676.773, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.000'),
+    ('H9', '=(G9-F9)/F23', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B10', 'ANCHORAGE', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C10', 'INN ANCH', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('D10', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), ('center', None), 'General'),
+    ('E10', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F10', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.000'),
+    ('G10', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.000'),
+    ('H10', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), '0.00%'),
+    ('J10', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), (None, None), '0.00'),
+    ('B11', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C11', 'Total Liquid', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('D11', '=SUM(D8:D10)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), ('center', None), 'General'),
+    ('E11', '=E9', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F11', '=SUM(F8:F10)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.000'),
+    ('G11', '=SUM(G8:G10)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.000'),
+    ('H11', '=(G11-F11)/F23', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), '0.00%'),
+    ('J11', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), (None, None), '0.00'),
+    ('B12', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C12', 'Others', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('D12', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), ('center', None), 'General'),
+    ('E12', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('F12', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('G12', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('H12', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), 'General'),
+    ('J12', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), (None, None), '0.00'),
+    ('B13', 'Shallow Berth ', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C13', 'cement', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D13', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('E13', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F13', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('G13', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('H13', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0.00%'),
+    ('J13', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), (None, None), '0.00'),
+    ('B14', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C14', 'others', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('D14', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('E14', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F14', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0'),
+    ('G14', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('H14', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B15', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('C15', 'Container', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('D15', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('E15', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F15', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('G15', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('H15', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B16', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C16', 'liquid', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D16', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('center', None), 'General'),
+    ('E16', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F16', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('G16', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0'),
+    ('H16', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B17', 'Anchorage', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C17', 'Liquid', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('D17', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('E17', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F17', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0'),
+    ('G17', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0'),
+    ('H17', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B18', 'Coastal Berth', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('C18', 'cement', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D18', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('E18', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F18', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('right', None), '0'),
+    ('G18', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0'),
+    ('H18', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B19', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('C19', 'Others', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D19', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('E19', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F19', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('right', None), '0'),
+    ('G19', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0'),
+    ('H19', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B20', 'CB01/CB-02', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C20', 'CEMENT', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D20', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('center', None), 'General'),
+    ('E20', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), '0.00%'),
+    ('F20', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0'),
+    ('G20', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0'),
+    ('H20', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('right', None), '0.00%'),
+    ('B21', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, ('thin', None)), (None, None), 'General'),
+    ('C21', 'Others', ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (('thin', None), ('thin', None), None, ('thin', None)), (None, None), 'General'),
+    ('D21', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+    ('E21', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), (None, None), '0.00%'),
+    ('F21', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('right', None), '0'),
+    ('G21', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('right', None), '0'),
+    ('H21', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('right', None), '0.00%'),
+    ('B22', 'TOTAL LIQUID ', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), ('thin', None), None, ('thin', None)), (None, None), 'General'),
+    ('C22', None, ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), None, None, ('thin', None)), (None, None), 'General'),
+    ('D22', '=D8+D9', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+    ('E22', '=E8+E9', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), '0.00%'),
+    ('F22', '=F8+F9', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), ('thin', None), None, ('thin', None)), ('right', None), '0.000'),
+    ('G22', '=G8+G9', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), ('thin', None), None, ('thin', None)), ('right', None), '0.000'),
+    ('H22', '=(G22-F22)/F22', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (None, ('thin', None), None, None), ('right', None), '0.00%'),
+   ('B23', 'Total', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
+('C23', None, ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
+('D23', '=SUM(D8:D10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+('E23', '=SUM(E8:E10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), '0.00%'),
+('F23', '=SUM(F7:F9)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), None, None, ('thin', None)), ('right', None), '0.000'),
+('G23', '=SUM(G7:G10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), None, None, ('thin', None)), ('right', None), '0.000'),
+('H23', '=(G23-F23)/F23', ('Arial', 10.0, False, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('right', None), '0.00%'),
+    ('B24', None, ('Arial', 10.0, True, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('B25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('C25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('D25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('E25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('F25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('G25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('H25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('I25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('J25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B26', 'COMPARISON OF VOLUME HANDLED IN THE CURRENT YEAR VIS-\u00c0-VIS LAST YEAR', ('Arial', 11.0, True, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('C26', None, ('Arial', 11.0, True, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('D26', None, ('Arial', 11.0, True, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('E26', None, ('Arial', 11.0, True, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('F26', None, ('Arial', 11.0, True, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('G26', None, ('Arial', 11.0, True, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('H26', None, ('Arial', 11.0, True, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('I26', None, ('Arial', 11.0, False, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('J26', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B27', '         TOTAL HANDLING', ('Arial', 10.0, True, False, None, None), None, (('thin', None), None, ('thin', None), None), (None, None), 'General'),
+    ('C27', '2025-26', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), ('center', 'center'), 'General'),
+    ('E27', None, ('Arial', 11.0, False, False, None, None), None, (None, ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('F27', ' 2026-27', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), ('center', 'center'), 'General'),
+    ('H27', None, ('Arial', 11.0, False, False, None, None), None, (None, ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('I27', 'INCREASE', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), ('center', None), 'General'),
+    ('J27', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B28', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('C28', "APR'2025 \u2013 MAR-2026", ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('center', 'center'), 'General'),
+    ('E28', None, ('Arial', 11.0, False, False, None, None), None, (None, ('thin', None), None, ('thin', None)), (None, None), 'General'),
+    ('F28', "APR' 2026 \u2013 MAR-2027", ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+    ('H28', None, ('Arial', 11.0, False, False, None, None), None, (None, ('thin', None), None, ('thin', None)), (None, None), 'General'),
+    ('I28', '      %', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, ('thin', None)), (None, None), 'General'),
+    ('J28', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B29', 'LIQUID JNPT (INN ANCH)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('C29', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('D29', "='[1]5. Monthly Rep Det'!D113", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('E29', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('F29', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, ('thin', None), None), ('center', None), 'General'),
+    ('G29', "='[1]5. Monthly Rep Det'!G113", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('H29', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), ('thin', None), None), ('center', None), 'General'),
+    ('I29', 0, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J29', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B30', 'LIQUID JNPT ( SWB)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D30', "='[1]5. Monthly Rep Det'!D114", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('F30', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('G30', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('H30', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('I30', '=(G30-D30)*100/D30', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J30', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B31', 'LIQUID       (BPCL)', ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D31', "='[1]5. Monthly Rep Det'!D115", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('F31', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('G31', "='[1]5. Monthly Rep Det'!G115", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('H31', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('I31', '=(G31-D31)*100/D31', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J31', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B32', 'LIQUID (JJLTPL)', ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('C32', None, ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (None, None, None, None), (None, None), 'General'),
+    ('D32', 283589.208, ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (None, None, None, None), ('center', None), '0.000'),
+    ('E32', None, ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (None, None, None, None), (None, None), 'General'),
+    ('F32', None, ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (('thin', None), None, None, None), (None, None), 'General'),
+    ('G32', 279990.995, ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (None, None, None, None), ('center', None), '0.000'),
+    ('H32', None, ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (None, ('thin', None), None, None), (None, None), 'General'),
+    ('I32', '=(G32-D32)*100/D32', ('Arial', 10.0, False, False, None, None), 'FFFFFF00', (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J32', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('K32', None, ('Verdana', 10.0, False, False, None, None), None, (None, None, None, None), (None, 'center'), '#,##0.00'),
+    ('L32', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), (None, None), '#,##0.000'),
+    ('B33', 'TOTAL LIQUID', ('Arial', 10.0, True, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D33', '=SUM(D30:D31)', ('Arial', 10.0, True, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('F33', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('G33', '=SUM(G29:G32)', ('Arial', 10.0, True, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('H33', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('I33', '=(G33-D33)*100/D33', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J33', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B34', 'CEMENT', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D34', "='[1]5. Monthly Rep Det'!D118", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('F34', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('G34', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('H34', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('I34', '=(G34-D34)*100/D34', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J34', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B35', 'BREAK BULK', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D35', "='[1]5. Monthly Rep Det'!D119", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('E35', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('F35', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('G35', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('H35', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('I35', '=(G35-D35)*100/D35', ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J35', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B36', 'OTHERS', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D36', "='[1]5. Monthly Rep Det'!D120", ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('F36', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('G36', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.000'),
+    ('H36', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), (None, None), 'General'),
+    ('I36', 0, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), None, None), ('center', None), '0.00'),
+    ('J36', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('B37', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
+    ('C37', None, ('Arial', 10.0, False, False, None, None), None, (None, None, ('thin', None), ('thin', None)), (None, None), 'General'),
+    ('D37', '=D29+D30+D31+D34+D35+D36+D32', ('Arial', 10.0, True, False, None, None), None, (None, None, ('thin', None), ('thin', None)), ('center', None), '0.000'),
+    ('E37', None, ('Arial', 10.0, False, False, None, None), None, (None, None, ('thin', None), ('thin', None)), (None, None), 'General'),
+    ('F37', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, ('thin', None), ('thin', None)), (None, None), 'General'),
+    ('G37', '=G29+G30+G31+G34+G35+G36+G32', ('Arial', 10.0, True, False, None, None), None, (None, None, ('thin', None), ('thin', None)), ('center', None), '0.000'),
+    ('H37', None, ('Arial', 10.0, False, False, None, None), None, (None, ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
+    ('I37', '=I29+I30+I31+I34+I35+I36+I32', ('Arial', 10.0, True, False, None, None), None, (None, None, ('thin', None), ('thin', None)), ('center', None), '0.000'),
+    ('J37', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
+    ('D38', None, ('Arial', 10.0, True, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('G38', None, ('Arial', 10.0, True, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('I38', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), '0.00'),
+    ('B39', 'Commoditiwise Average Turn around Time(Berthing to sailing) & parcel size', ('Arial', 12.0, True, False, None, None), None, (None, None, None, None), (None, None), 'General'),
+    ('B40', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, ('thin', None), None), (None, None), 'General'),
+    ('C40', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), None), (None, None), 'General'),
+    ('D40', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, ('thin', None), None), (None, None), 'General'),
+    ('E40', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('B41', 'Commodity', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('C41', 'Av. Turn around', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), (None, None), 'General'),
+    ('D41', 'Av. Parcel size', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('E41', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('B42', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, ('thin', None)), (None, None), 'General'),
+    ('C42', '(days)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), None, None), ('center', None), 'General'),
+    ('D42', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), '0'),
+    ('E42', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, None), (None, None), 'General'),
+    ('B43', 'Liquid (current)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, ('thin', None), None), ('right', None), 'General'),
+    ('C43', 1.2638888888899, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0.00'),
+    ('D43', 7723.064416666667, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0'),
+    ('B44', '(previous)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, ('thin', None)), ('right', None), 'General'),
+    ('C44', 1.3906067251461394, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0.00'),
+    ('D44', 5351.805578947369, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0'),
+    ('B45', 'Cement (current)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, ('thin', None), None), (None, None), 'General'),
+    ('C45', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0.00'),
+    ('D45', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0'),
+    ('B46', '(previous)', ('Arial', 10.0, False, False, None, None), None, (('thin', None), None, None, ('thin', None)), ('right', None), 'General'),
+    ('C46', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0.00'),
+    ('D46', None, ('Arial', 10.0, False, False, None, None), None, (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('center', None), '0'),
+   
+    
+    
+    ('E50', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('F50', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('G50', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+    ('H50', None, ('Arial', 10.0, False, False, None, None), None, (None, None, None, None), ('center', None), 'General'),
+
+]
+
+def _apply_export_layout(ws):
+    # Column widths
+    for col, width in EXPORT_SUM_COLUMN_WIDTHS.items():
+        ws.column_dimensions[col].width = width
+
+    # Row heights
+    for row, height in EXPORT_SUM_ROW_HEIGHTS.items():
+        ws.row_dimensions[row].height = height
+
+    # Merged cells
+    for rng in EXPORT_SUM_MERGES:
+        ws.merge_cells(rng)
+
+    # Apply all captured cells
+    for coord, value, font, fill, border, align, number_format in EXPORT_SUM_CELLS:
+        cell = ws[coord]
+
+        # Skip merged cells except the master cell
+        if isinstance(cell, MergedCell):
+            continue
+
+        if isinstance(value, str) and value.startswith("="):
+            value = value.replace("'[1]5. Monthly Rep Det'!", "'5. Monthly Rep Det'!")
+            value = value.replace("[1]", "")
+
+        cell.value = value
+
+        if font:
+            cell.font = Font(
+                name=font[0],
+                size=font[1],
+                bold=font[2],
+                italic=font[3],
+                underline=font[4],
+                color=font[5]
+            )
+
+        if fill:
+            cell.fill = PatternFill(
+                fill_type="solid",
+                fgColor=fill.replace("#", "")
+            )
+
+        if border:
+            def mk(side):
+                if side is None:
+                    return Side()
+                return Side(style=side[0], color=side[1])
+
+            cell.border = Border(
+                left=mk(border[0]),
+                right=mk(border[1]),
+                top=mk(border[2]),
+                bottom=mk(border[3])
+            )
+
+        if align:
+            cell.alignment = Alignment(
+                horizontal=align[0],
+                vertical=align[1]
+            )
+
+        if number_format:
+            cell.number_format = number_format
 
 
 class ReportDataError(Exception):
@@ -538,32 +871,7 @@ def compute_fiscal_year_comparison(fin_year_start: int, month_abbrev: str, calen
 # ---------------------------------------------------------------------
 # BERTH OCCUPANCY
 # ---------------------------------------------------------------------
-# ASSUMPTIONS THAT STILL NEED CONFIRMATION (see ASSUMPTION 4 at top of
-# file — please verify/correct):
-#
-#   1. MIS_ALONGSIDE_COLUMN / MIS_CASTOFF_COLUMN / LDUD_ALONGSIDE_COLUMN /
-#      LDUD_CASTOFF_COLUMN are GUESSES. Update to match your real schema.
-#   2. Both columns are assumed free-text date/time values (same
-#      situation as entry_date / created_date elsewhere in this file),
-#      parsed in Python via dateutil rather than filtered in SQL. If
-#      they're real TIMESTAMP columns, this still works, but you could
-#      simplify to a SQL WHERE/EXTRACT instead.
-#   3. "Divide by 2" in your formula is assumed to mean 2 physical
-#      berths, i.e. total available berth-hours in a month = days*24*2.
-#   4. A vessel's occupancy hours are attributed to the month based on
-#      its ALONGSIDE date (not castoff date). If a vessel comes
-#      alongside in one month and casts off in the next, this version
-#      books all its hours to the alongside month rather than splitting
-#      across months. Flag if you need split-month handling.
-#   5. Rows where castoff <= alongside, or either value fails to parse,
-#      are skipped (bad data shouldn't silently corrupt the sum).
-#
-# DEBUG NOTE: both fetch_berth_hours_from_* functions below now return
-# (total_hours, debug_rows) instead of a bare float. debug_rows is a
-# list of {"vessel_name", "alongside", "castoff", "hours"} dicts, one
-# per row actually counted in the sum, so the exact set of vessels
-# behind a given occupancy % can be checked directly instead of by
-# comparing two numbers and guessing where they diverge.
+
 
 def fetch_berth_hours_from_mis_vessel_master(month_abbrev: str, calendar_year: int):
     """Total alongside-hours (sum of castoff - alongside, in hours) for
@@ -1264,6 +1572,122 @@ def compute_commodity_turnaround_report(commodity: str, month_abbrev: str, calen
 
 
 # ---------------------------------------------------------------------
+# EXPORT TO EXCEL — fills the fixed template, doesn't rebuild it
+# ---------------------------------------------------------------------
+# The template (REPORT5_TEMPLATE_PATH) is the exact workbook the report
+# is expected to look like: same two sheets, same merges, same borders/
+# fills/fonts/number-formats, and the same live formulas for every
+# derived cell (row totals, increase-%, TOTAL LIQUID, etc.).
+#
+# Only the handful of cells below — the ones that already hold
+# hand-typed numbers in that file rather than a formula — get
+# overwritten per request. Everything else in the workbook (both
+# sheets) is copied through untouched, so "Export Excel" always
+# produces a file in the exact same format/columns/cells as the
+# original, just re-computed for whichever month/year was requested.
+
+def build_report5_export_workbook(month_abbrev: str, calendar_year: int):
+    """Returns (BytesIO, filename) for the filled-in export workbook."""
+
+    month_str_to_idx(month_abbrev)  # validates month_abbrev
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = EXPORT_SUMMARY_SHEET
+
+    # Column widths
+    for col, width in EXPORT_SUM_COLUMN_WIDTHS.items():
+        ws.column_dimensions[col].width = width
+
+    # Row heights
+    for row, height in EXPORT_SUM_ROW_HEIGHTS.items():
+        ws.row_dimensions[row].height = height
+
+    # Merged cells
+    for rng in EXPORT_SUM_MERGES:
+        ws.merge_cells(rng)
+
+    # Draw the complete layout
+    _apply_export_layout(ws)
+
+    # ---- Same data the /report, /berth-occupancy and
+    # /commodity-turnaround endpoints already compute -- reused as-is
+    # so the export always matches what's on screen. ----
+    fin_year_start = fiscal_year_start_for(month_abbrev, calendar_year)
+    report = compute_fiscal_year_comparison(fin_year_start, month_abbrev, calendar_year)
+    occupancy = compute_berth_occupancy(month_abbrev, calendar_year)
+    liquid_turn = compute_commodity_turnaround_report("Liquid", month_abbrev, calendar_year)
+    cement_turn = compute_commodity_turnaround_report("Cement", month_abbrev, calendar_year)
+
+
+    if EXPORT_SUMMARY_SHEET not in wb.sheetnames:
+        raise ReportDataError(
+            f"Export template is missing the '{EXPORT_SUMMARY_SHEET}' sheet."
+        )
+    ws = wb[EXPORT_SUMMARY_SHEET]
+
+    full_month = MONTH_ABBREV_TO_FULL.get(month_abbrev, month_abbrev)
+    curr_yy = str(calendar_year)[-2:]
+    prev_yy = str(calendar_year - 1)[-2:]
+
+    # ---- Title + Table 1 column headers (B3 merged B3:I3, F6, G6) ----
+    ws["B3"] = f"Performance Report for the Month of {full_month}-{calendar_year}"
+    ws["F6"] = f"{full_month}-{prev_yy}(Previous)"
+    ws["G6"] = f"{full_month}-{curr_yy}(Current)"
+
+    # ---- Table 1 : only the "Liquid (LB-03&LB-04)" row (row 9) is a
+    # real input row -- Total Liquid (row 11), TOTAL LIQUID (row 22)
+    # and Total (row 23) are existing SUM()/formula rows in the
+    # template and recompute themselves from row 9 automatically. ----
+    current = report["current"]
+    previous = report["previous"]
+    ws["D9"] = current.get("vessel_count")
+    ws["E9"] = (
+        occupancy["occupancy_pct"] / 100
+        if occupancy.get("occupancy_pct") is not None else None
+    )
+    ws["F9"] = previous.get("quantity")
+    ws["G9"] = current.get("quantity")
+    # H9 ( ="(G9-F9)/F23" increase % ) is an existing formula -- left as-is.
+
+    # ---- Table 2 : fiscal-year labels + the one real input row,
+    # "LIQUID (JJLTPL)" (row 32). TOTAL LIQUID (row 33) and the grand
+    # total (row 37) are existing formulas in the template. ----
+    fy_prev_start = fin_year_start - 1
+    fy_curr_start = fin_year_start
+    ws["C27"] = f"{fy_prev_start}-{str(fy_prev_start + 1)[-2:]}"
+    ws["F27"] = f"{fy_curr_start}-{str(fy_curr_start + 1)[-2:]}"
+    ws["C28"] = f"APR'{fy_prev_start} \u2013 MAR-{fy_prev_start + 1}"
+    ws["F28"] = f"APR'{fy_curr_start} \u2013 MAR-{fy_curr_start + 1}"
+    ws["D32"] = report.get("previous_jjltpl")
+    ws["G32"] = report.get("current_jjltpl")
+    # I32 ( ="(G32-D32)*100/D32" ) is an existing formula -- left as-is.
+
+    # ---- Table 3 : Liquid (rows 43-44) + Cement (rows 45-46). Cement
+    # stays blank (avg_turnaround_days/avg_parcel_size are always None
+    # for Cement, per fetch_commodity_turnaround()'s current
+    # "don't display anything for Cement" behaviour), matching the
+    # template's own blank Cement cells. ----
+    def _fill_turnaround_rows(current_row, previous_row, turnaround_report):
+        cur = turnaround_report["current"]
+        prev = turnaround_report["previous"]
+        ws[f"C{current_row}"] = cur.get("avg_turnaround_days")
+        ws[f"D{current_row}"] = cur.get("avg_parcel_size")
+        ws[f"C{previous_row}"] = prev.get("avg_turnaround_days")
+        ws[f"D{previous_row}"] = prev.get("avg_parcel_size")
+
+    _fill_turnaround_rows(43, 44, liquid_turn)
+    _fill_turnaround_rows(45, 46, cement_turn)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"Report5_{month_abbrev}-{calendar_year}.xlsx"
+    return buf, filename
+
+
+# ---------------------------------------------------------------------
 # ROUTES
 # ---------------------------------------------------------------------
 
@@ -1418,3 +1842,47 @@ def report5_berth_occupancy():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"Unexpected server error: {e}"}), 500
+
+
+@bp.route("/report5/export", methods=["GET"])
+@login_required
+def report5_export():
+    try:
+        month = request.args.get("month")
+        if not month:
+            return jsonify({"error": "Missing required parameter: month"}), 400
+
+        year_param = request.args.get("year")
+
+        if year_param:
+            try:
+                calendar_year = int(year_param)
+            except ValueError:
+                return jsonify({"error": "Invalid year parameter"}), 400
+        else:
+            fin_year_start = fetch_latest_fin_year_start()
+            calendar_year = calendar_year_for_month(fin_year_start, month)
+
+        buf, filename = build_report5_export_workbook(
+            month,
+            calendar_year
+        )
+
+        buf.seek(0)
+
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    except ReportDataError as e:
+        return jsonify({"error": str(e)}), 400
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+    except ValueError as e:
+        return jsonify({"error": f"Invalid parameter: {e}"}), 400

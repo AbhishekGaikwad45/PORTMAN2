@@ -950,10 +950,11 @@ function buildTurnaroundTable(){
         EXPORT EXCEL
 ================================== */
 
-function exportExcel(){
+function exportExcel() {
     const month = document.getElementById("monthSelect").value;
     const year = document.getElementById("yearSelect").value;
-    window.location = `/api/module/RP01/report5/export?month=${month}&year=${year}`;
+
+    window.location.href = `/report5/export?month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}`;
 }
 
 /* ==================================
