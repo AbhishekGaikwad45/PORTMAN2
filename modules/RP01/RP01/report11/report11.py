@@ -172,6 +172,7 @@ def _fetch_live_rows(cur):
             vh.berth_name AS berth_no,
             vh.operation_type AS import_export,
             po.cargo_name AS cargo,
+            vc.cargo_type AS vc_broad_category,
             COALESCE(actual.real_qty, po.quantity::numeric) AS quantity,
             lh.nor_tendered AS nor_tendered,
             lh.nor_accepted AS nor_accepted,
@@ -190,6 +191,8 @@ def _fetch_live_rows(cur):
             GROUP BY parcel_op_id
         ) actual
             ON actual.parcel_op_id = po.id
+        LEFT JOIN vessel_cargo vc
+            ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(po.cargo_name))
         WHERE to_char(current_date, 'Mon-YY') = to_char(current_date, 'Mon-YY')
     """)
     raw = cur.fetchall()
@@ -222,6 +225,7 @@ def _fetch_live_rows(cur):
             "berth_no": r["berth_no"],
             "import_export": r["import_export"],
             "cargo": r["cargo"],
+            "broad_category": r["vc_broad_category"],
             "quantity": r["quantity"],
             "pre_berthing_waiting": waiting_port + waiting_non_port,
             "waiting_port": waiting_port,
@@ -398,7 +402,18 @@ def load_data() -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
     df["direction"] = df["import_export"].apply(_direction)
-    df["broad_category"] = df["cargo"].apply(classify_broad_category)
+
+        # Historical mis_vessel_master rows never had a "broad_category" column
+        # at all, and live rows where the cargo wasn't found in vessel_cargo
+        # come back as None/NaN from the join above -- both cases fall back to
+        # the keyword classifier. Live rows that DID match vessel_cargo keep
+        # the DB-sourced cargo_type as-is, no guessing involved.
+    if "broad_category" not in df.columns:
+        df["broad_category"] = None
+    df["broad_category"] = df["broad_category"].where(
+        df["broad_category"].notna(),
+        df["cargo"].apply(classify_broad_category)
+    )
 
     unmapped = sorted(df.loc[df["broad_category"].isna(), "cargo"].dropna().unique().tolist())
     if unmapped:
@@ -520,7 +535,7 @@ def compute_section_b_month(a):
     )
     vs = a["Vessels Sailed"]
     berth_stay_hrs = a["Total Berth Stay of all vessels (For Berth Productivity)"]
-
+    total_berth_stay_days = berth_stay_hrs / 24
     b = {
         "Vessels Sailed": vs,
         "Total Traffic Throughputs (TEUs)": a["Vessel Discharge (Including Restow)"] + a["Vessel Load (Including Restow)"],
@@ -554,13 +569,18 @@ def compute_section_b_month(a):
         "% wrt to Total Thoughput": None,
     }
     b["Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c."] = b["Avg. Turn around time - Pilot Boarding to De-boarding-Total"]
-    b["Ship Output per Day (Tonnes)"] = round(_safe_div(b["Total traffic throughputs (Tons)"], b["Avg. Berth stay"]), 3) if b["Avg. Berth stay"] else 0.0
+    import_tons = a["Dry Bulk traffic - Import"] + a["Break Bulk traffic - Import"] + a["Liquid - Import"]
+    b["Ship Output per Day (Tonnes)"] = round(
+        _safe_div(import_tons, total_berth_stay_days),
+        3
+    ) if total_berth_stay_days else 0.0
     return b
 
 
 def compute_section_c_month(a, b):
     vs = a["Vessels Sailed"]
     berth_stay_hrs = a["Total Berth Stay of all vessels (For Berth Productivity)"]
+    total_berth_stay_days = berth_stay_hrs / 24
 
     c = {
         "Avg. Pre-berthing Waiting Time-Total": round(_safe_div(
