@@ -263,8 +263,15 @@ def _fetch_live_rows(year_str, month_str):
             vh.vessel_run_type   AS overseas_coastal,
             vh.operation_type    AS import_export,
             vh.cargo_type        AS cargo_type_raw,
-            COALESCE(vc_exact.cargo_category, vc_fuzzy.cargo_category) AS category,
-            SUM(lpl.quantity)    AS quantity
+            COALESCE(vc_exact.cargo_sub_category_2, vc_fuzzy.cargo_sub_category_2) AS category,
+            SUM(
+                CASE
+                    WHEN COALESCE(lpl.is_deleted,false) = false
+                    AND COALESCE(lpl.is_shortclose,false) = false
+                    THEN COALESCE(lpl.quantity,0)
+                    ELSE 0
+                END
+            ) AS quantity
         FROM vcn_header vh
         JOIN ldud_header ldh         ON ldh.vcn_id = vh.id
         JOIN ldud_parcel_ops lpo     ON lpo.ldud_id = ldh.id
@@ -274,9 +281,15 @@ def _fetch_live_rows(year_str, month_str):
         LEFT JOIN vessel_cargo vc_fuzzy
                ON vc_exact.id IS NULL
               AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
-        WHERE vh.doc_date >= %s AND vh.doc_date < %s
+        WHERE
+            ldh.cast_off_datetime IS NOT NULL
+            AND ldh.cast_off_datetime::timestamp >= %s
+            AND ldh.cast_off_datetime::timestamp < %s
         GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
-                 vc_exact.cargo_category, vc_fuzzy.cargo_category
+                COALESCE(
+                    vc_exact.cargo_sub_category_2,
+                    vc_fuzzy.cargo_sub_category_2
+                )
     """, [start, end])
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
