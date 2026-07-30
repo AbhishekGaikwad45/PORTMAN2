@@ -89,7 +89,12 @@ CATEGORY_MAP = {
     'POL BLACK': 'POL-PRODUCTS',
     'EDIBLE OIL': 'EDIBLE OIL',
     'OTHER LIQUID': 'OTHER LIQUIDS',
+    'OTHER LIQUIDS': 'OTHER LIQUIDS',
     'CHEMICAL': 'OTHER LIQUIDS',
+
+    'FARM LIQUID': 'FARM LIQUIDS',
+    'FARM LIQUIDS': 'FARM LIQUIDS',
+
     'PH.ACID': 'FARM LIQUIDS',
     'PHOSPHORIC ACID': 'FARM LIQUIDS',
     'PH ACID [E]': 'FARM LIQUIDS',
@@ -348,10 +353,8 @@ def _fetch_live_rows(year_str, month_str):
         LEFT JOIN vessel_cargo vc_fuzzy
                ON vc_exact.id IS NULL
               AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
-        WHERE
-            ldh.cast_off_datetime IS NOT NULL
-            AND ldh.cast_off_datetime::timestamp >= %s
-            AND ldh.cast_off_datetime::timestamp < %s
+  
+            
         GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
                 COALESCE(
                     vc_exact.cargo_sub_category_2,
