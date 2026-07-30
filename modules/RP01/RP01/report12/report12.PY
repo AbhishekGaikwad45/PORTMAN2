@@ -369,29 +369,40 @@ def load_data() -> pd.DataFrame:
             print("REPORT12: Loading live VCN data...")
 
             cur.execute("""
+                WITH po_actual AS (
+                    SELECT
+                        po.ldud_id,
+                        UPPER(TRIM(po.cargo_name)) AS cargo_key,
+                        SUM(COALESCE(act.real_qty, po.quantity)) AS total_qty
+                    FROM ldud_parcel_ops po
+                    LEFT JOIN (
+                        SELECT parcel_op_id, SUM(quantity) AS real_qty
+                        FROM lueu_parcel_log
+                        WHERE is_deleted = false
+                        AND is_shortclose = false
+                        GROUP BY parcel_op_id
+                    ) act
+                        ON act.parcel_op_id = po.id
+                    GROUP BY po.ldud_id, UPPER(TRIM(po.cargo_name))
+                )
                 SELECT
                     to_char(current_date,'YYYY')||'-'||right(to_char(current_date + interval '1 year','YYYY'),2) AS fin_year,
                     to_char(current_date,'Mon-YY') AS month,
                     h.vessel_run_type AS overseas_coastal,
                     'Import' AS import_export,
                     c.cargo_name AS cargo,
-                    COALESCE(actual.real_qty, c.quantity::numeric) AS quantity
+                    vc.cargo_sub_category_2 AS category1,
+                    COALESCE(poa.total_qty, c.quantity::numeric) AS quantity
                 FROM vcn_header h
                 JOIN vcn_consigners c
                     ON c.vcn_id = h.id
                 LEFT JOIN ldud_header lh
                     ON lh.vcn_id = h.id
-                LEFT JOIN ldud_parcel_ops po
-                    ON po.ldud_id = lh.id
-                    AND UPPER(TRIM(po.cargo_name)) = UPPER(TRIM(c.cargo_name))
-                LEFT JOIN (
-                    SELECT parcel_op_id, SUM(quantity) AS real_qty
-                    FROM lueu_parcel_log
-                    WHERE is_deleted = false
-                    AND is_shortclose = false
-                    GROUP BY parcel_op_id
-                ) actual
-                    ON actual.parcel_op_id = po.id
+                LEFT JOIN po_actual poa
+                    ON poa.ldud_id = lh.id
+                    AND poa.cargo_key = UPPER(TRIM(c.cargo_name))
+                LEFT JOIN vessel_cargo vc
+                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(c.cargo_name))
 
                 UNION ALL
 
@@ -401,23 +412,18 @@ def load_data() -> pd.DataFrame:
                     h.vessel_run_type,
                     'Export',
                     e.cargo_name,
-                    COALESCE(actual.real_qty, e.quantity::numeric)
+                    vc.cargo_sub_category_2,
+                    COALESCE(poa.total_qty, e.quantity::numeric)
                 FROM vcn_header h
                 JOIN vcn_export_cargo_declaration e
                     ON e.vcn_id = h.id
                 LEFT JOIN ldud_header lh
                     ON lh.vcn_id = h.id
-                LEFT JOIN ldud_parcel_ops po
-                    ON po.ldud_id = lh.id
-                    AND UPPER(TRIM(po.cargo_name)) = UPPER(TRIM(e.cargo_name))
-                LEFT JOIN (
-                    SELECT parcel_op_id, SUM(quantity) AS real_qty
-                    FROM lueu_parcel_log
-                    WHERE is_deleted = false
-                    AND is_shortclose = false
-                    GROUP BY parcel_op_id
-                ) actual
-                    ON actual.parcel_op_id = po.id
+                LEFT JOIN po_actual poa
+                    ON poa.ldud_id = lh.id
+                    AND poa.cargo_key = UPPER(TRIM(e.cargo_name))
+                LEFT JOIN vessel_cargo vc
+                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(e.cargo_name))
             """)
 
             live_rows = cur.fetchall()
@@ -455,75 +461,43 @@ def load_data() -> pd.DataFrame:
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
     # Map cargo to report category
+ 
+
+    # Map category1 (from mis_vessel_master history, or vessel_cargo for live rows) to report row
     def get_report_category(category1):
-        value = str(category1 or "").strip().upper()
+        key = str(category1 or "").strip().upper()
 
         mapping = {
-            "EDIBLE OIL": "Edible Oil (In MMT)",
-            "PH.ACID": "FRM-Liquid (In MMT)",
-            "CHEMICAL": "Chemicals (In MMT)",
-            "OTHER": "Other Liquids (In MMT)",
-            "POL": "POL-Products (In MMT)",   # <-- add this
-            
+            # mis_vessel_master spelling (historical, June and earlier)
+            "EDIBLE OIL":   "Edible Oil (In MMT)",
+            "PH.ACID":      "FRM-Liquid (In MMT)",
+            "CHEMICAL":     "Chemicals (In MMT)",
+            "OTHER":        "Other Liquids (In MMT)",
+            "POL":          "POL-Products (In MMT)",
+            # vessel_cargo spelling (live, current month)
+            "OTHER LIQUID": "Other Liquids (In MMT)",
+            "FARM LIQUIDS": "FRM-Liquid (In MMT)",
         }
 
-        return mapping.get(value)
+        row = mapping.get(key)
+        if row is None and key:
+            print(f"REPORT12 WARNING: unrecognized category1 value '{category1}' — check vessel_cargo/mis_vessel_master")
+        return row
 
-    def get_report_category(cargo, category1):
-        cargo_u = str(cargo or "").strip().upper()
-        cat1_u = str(category1 or "").strip().upper()
-
-        # 1) mis_vessel_master rows already have a curated Category-1 — trust it
-        mapping = {
-            "EDIBLE OIL": "Edible Oil (In MMT)",
-            "PH.ACID":    "FRM-Liquid (In MMT)",
-            "CHEMICAL":   "Chemicals (In MMT)",
-            "OTHER":      "Other Liquids (In MMT)",
-            "POL":        "POL-Products (In MMT)",
-        }
-        if cat1_u in mapping:
-            return mapping[cat1_u]
-
-        # 2) Live VCN rows have no category1 at all — fall back to cargo keywords
-        if cargo_u in ("FO", "FO [E]", "CBFS", "FURNACE OIL"):
-            return "POL-Products (In MMT)"
-        if cargo_u == "POL CRUDE":
-            return "POL-Crude (In MMT)"
-        if "LPG" in cargo_u or "LNG" in cargo_u:
-            return "LPG or LNG (In MMT)"
-        if any(x in cargo_u for x in ("CPO", "CPKO", "RBD PALM OLEIN", "EDIBLE OIL",
-                                    "SUNFLOWER OIL", "CDSBO", "CSBO", "CSFO")):
-            return "Edible Oil (In MMT)"
-        chemical_keywords = ["CHEMICAL", "CHEMICALS", "IPA", "SM", "VAM", "PHENOL",
-                            "ACETONE", "AACID", "A.ACID", "A. ACID", "ACETIC ACID",
-                            "MDC", "MEK", "ISOPROPYL ALCOHOL", "METHYLENE",
-                            "METHELENE", "CHOLORIDE", "CHLORIDE", "STRENE MONOMER",
-                            "STYRENE MONOMER", "N BUTONAL", "TOLUNE", "NITRIC ACID"]
-        if any(k in cargo_u for k in chemical_keywords):
-            return "Chemicals (In MMT)"
-        if cargo_u in ("PHOSPHORIC ACID", "PH.ACID", "PH ACID"):
-            return "FRM-Liquid (In MMT)"
-        if any(x in cargo_u for x in ("BASE OIL", "LUBE", "SHELL")):
-            return "Other Liquids (In MMT)"
-
-        return None
-
-    df["row_key"] = df.apply(
-        lambda r: get_report_category(r["cargo"], r["category1"]),
-        axis=1
-    )
+    df["row_key"] = df["category1"].apply(get_report_category)
 
 
     # Show unmapped cargo values
+# Show unmapped category1 values (this is what actually decides row_key now)
     unmapped = sorted(
-        df.loc[df["row_key"].isna(), "cargo"]
+        df.loc[df["row_key"].isna(), "category1"]
         .dropna()
         .unique()
         .tolist()
     )
 
     if unmapped:
-        print("REPORT12 WARNING: Unmapped cargo values:")
+        print("REPORT12 WARNING: Unmapped category1 values:")
         for c in unmapped:
             print("   ", c)
 
@@ -596,16 +570,7 @@ def _get_df_and_years():
 def compute_table(df, sheet, fin_year, month_idx):
     sdef = SHEET_DEFS[sheet]
     subset = df[(df["sheet"] == sheet) & (df["fin_year"] == fin_year) & (df["fy_month_idx"] == month_idx)]
-    print("\n========== MONTH DEBUG ==========")
-    print("Month Index:", month_idx)
 
-    print(
-        subset.groupby("row_key")["value"]
-            .sum()
-            .sort_values(ascending=False)
-    )
-
-    print("=================================\n")
 
     values = {}
     for grp in sdef["groups"]:
