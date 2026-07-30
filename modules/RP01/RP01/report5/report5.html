@@ -393,16 +393,17 @@ function formatPercent(value){
 
 /* ==================================
    MAP API RESPONSE -> PERFORMANCE_DATA
-   This is the piece that was previously missing entirely.
    The backend gives us, per month:
      { month, year,
        current:  { quantity, vessel_count },
        previous: { quantity, vessel_count },
-       increase_pct }
+       increase_pct,
+       occupancy_pct }   <-- now supplied by the backend (compute_berth_occupancy),
+                              folded into the /report response so this one fetch
+                              covers everything the table needs.
    We only have ONE combined total from the backend (no
    per-berth breakdown), so we populate total_liquid/total
-   with it. occupancy isn't returned by the backend at all
-   yet, so it stays blank until that's added server-side.
+   with it.
 ================================== */
 
 function applyReportToPerformanceData(report){
@@ -421,13 +422,28 @@ function applyReportToPerformanceData(report){
         ? report.increase_pct / 100   // buildPerformanceTable() multiplies by 100 again for display
         : null;
 
+    // occupancy_pct comes back as a plain percent (e.g. 62.5 for 62.5%).
+    // formatPercent() in buildPerformanceTable() does row.occupancy*100,
+    // so store it here as a fraction (0.625) to match how `increase` is
+    // already handled just above.
+    const occupancy = (report.occupancy_pct !== null && report.occupancy_pct !== undefined)
+        ? report.occupancy_pct / 100
+        : null;
+
+    console.log(
+        "[report5] applyReportToPerformanceData: report.occupancy_pct =", report.occupancy_pct,
+        "-> stored fraction =", occupancy
+    );
+
     const combined = {
         vessels: vessels,
-        occupancy: null, // not supplied by backend yet
+        occupancy: occupancy,
         prev: prev,
         curr: curr,
         increase: increase
     };
+
+    console.log("[report5] combined row data (used for TOTAL LIQUID / Total rows):", combined);
 
     PERFORMANCE_DATA.total_liquid = { ...combined };
     PERFORMANCE_DATA.total = { ...combined };
@@ -546,6 +562,15 @@ function loadReport(){
 
             REPORT = data;
 
+            // DEBUG: confirm what actually arrived from the backend.
+            // Check occupancy_pct specifically - if it's undefined here,
+            // the backend response doesn't include it (server not
+            // restarted with the latest report5.py, or an exception was
+            // swallowed server-side). If it's a number here but the table
+            // still shows blank, the bug is downstream in this JS instead.
+            console.log("[report5] /report response:", REPORT);
+            console.log("[report5] occupancy_pct =", REPORT.occupancy_pct, "| occupancy_detail =", REPORT.occupancy_detail);
+
             applyReportToPerformanceData(REPORT);
             applyReportToVolumeComparisonData(REPORT);
 
@@ -557,6 +582,15 @@ function loadReport(){
             buildTurnaroundTable();
 
             showStatus("");
+
+            // Table 3 (turnaround/parcel size) comes from a separate
+            // endpoint, one commodity at a time, so it's fetched here
+            // rather than folded into /report. Uses REPORT.month/REPORT.year
+            // (the calendar month/year the server actually resolved -
+            // matters when the ?year= param was omitted from the request
+            // above) rather than the raw <select> values, so Table 3 always
+            // matches what Table 1/2 are showing.
+            loadTurnaroundData(REPORT.month, REPORT.year);
 
         })
         .catch(err => {
@@ -778,10 +812,13 @@ function buildVolumeComparisonTable(){
 }
 
 /* ==================================
-   HARD-CODED "Commodity" (row label) DATA
-   Numeric columns (turnaround/parcel) are intentionally
-   left null — they are NOT hard-coded and should be filled
-   in dynamically (e.g. from the API) later.
+   "Commodity" (row label) DATA for Table 3.
+   turnaround/parcel start null and are filled in by
+   loadTurnaroundData() -> applyTurnaroundResponse() below,
+   using /api/module/RP01/report5/commodity-turnaround.
+   Rows are addressed by fixed index (0/1 = Liquid curr/prev,
+   2/3 = Cement curr/prev) rather than by label, since the two
+   "(previous)" rows share the same label text.
 ================================== */
 
 const TURNAROUND_DATA = {
@@ -792,6 +829,86 @@ const TURNAROUND_DATA = {
         { commodity: "(previous)", turnaround: null, parcel: null }
     ]
 };
+
+const TURNAROUND_ROW_INDEX = {
+    Liquid: { current: 0, previous: 1 },
+    Cement: { current: 2, previous: 3 }
+};
+
+/* ==================================
+   LOAD TABLE 3 DATA (turnaround + parcel size)
+   One request per commodity, since the backend endpoint
+   (/commodity-turnaround) takes a single ?commodity= at a time.
+   Fetched in parallel; each response's current/previous
+   avg_turnaround_days & avg_parcel_size get written into
+   TURNAROUND_DATA by fixed row index, then the table is
+   re-rendered. Failures for one commodity don't block the other
+   (Promise.allSettled) - that row set just stays blank with a
+   console warning instead of blanking the whole table.
+================================== */
+
+function loadTurnaroundData(month, year){
+
+    const commodities = Object.keys(TURNAROUND_ROW_INDEX); // ["Liquid", "Cement"]
+
+    const requests = commodities.map(commodity =>
+        fetch(`/api/module/RP01/report5/commodity-turnaround?commodity=${encodeURIComponent(commodity)}&month=${month}&year=${year}`)
+            .then(r => r.json())
+            .then(data => ({ commodity, data }))
+            .catch(err => ({ commodity, error: err }))
+    );
+
+    Promise.allSettled(requests).then(results => {
+
+        results.forEach(result => {
+
+            if(result.status !== "fulfilled"){
+                console.error("[report5] turnaround request rejected:", result.reason);
+                return;
+            }
+
+            const { commodity, data, error } = result.value;
+
+            if(error){
+                console.error(`[report5] turnaround fetch failed for ${commodity}:`, error);
+                return;
+            }
+
+            console.log(`[report5] commodity-turnaround response (${commodity}):`, data);
+
+            applyTurnaroundResponse(commodity, data);
+
+        });
+
+        buildTurnaroundTable();
+
+    });
+
+}
+
+function applyTurnaroundResponse(commodity, data){
+
+    const idx = TURNAROUND_ROW_INDEX[commodity];
+    if(!idx) return;
+
+    if(!data || data.error){
+        console.warn(`[report5] commodity-turnaround for ${commodity} returned an error:`, data && data.error);
+        return;
+    }
+
+    const rows = TURNAROUND_DATA.rows;
+
+    if(data.current){
+        rows[idx.current].turnaround = data.current.avg_turnaround_days;
+        rows[idx.current].parcel = data.current.avg_parcel_size;
+    }
+
+    if(data.previous){
+        rows[idx.previous].turnaround = data.previous.avg_turnaround_days;
+        rows[idx.previous].parcel = data.previous.avg_parcel_size;
+    }
+
+}
 
 /* ==================================
    TABLE 3 — TURNAROUND TIME
