@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 from functools import wraps
+import excel_export
 from . import model
 from database import get_user_permissions, get_db, get_cursor
 
@@ -52,6 +53,16 @@ def get_vessels():
 @login_required
 def get_parcels(vcn_id):
     return jsonify(model.get_started_parcels(vcn_id))
+
+
+@bp.route('/api/module/LUEU01/export')
+@login_required
+def export_master():
+    """Master export — every parcel operation, all vessels, one sheet."""
+    if not get_perms().get('can_read'):
+        return render_template('no_access.html'), 403
+    return excel_export.sheet_response(model.EXPORT_COLS, model.export_all_parcels(),
+                                       'Parcel Operations', 'LUEU01_Parcel_Operations')
 
 
 @bp.route('/api/module/LUEU01/parcel/times', methods=['POST'])

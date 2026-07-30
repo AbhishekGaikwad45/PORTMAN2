@@ -27,7 +27,10 @@
   <div class="lueu-parcels">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;">
       <h3 id="vesselTitle" style="margin:0;">Select a vessel</h3>
-      <button class="lueu-btn secondary" onclick="refreshInPlace()">&#8635; Refresh</button>
+      <div style="display:flex;gap:6px;">
+        <button class="lueu-btn" onclick="window.location='/api/module/LUEU01/export'" title="Download every parcel operation, all vessels">&#8681; Export Master</button>
+        <button class="lueu-btn secondary" onclick="refreshInPlace()">&#8635; Refresh</button>
+      </div>
     </div>
     <div id="parcelList"></div>
   </div>
@@ -176,11 +179,18 @@
     rows.forEach(r => cum += parseFloat(r.getData().quantity || 0) || 0);
     let end = '';
     if (target > 0 && cum >= target - 1e-6) {
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const d = rows[i].getData();
-        if (d.entry_date && d.to_time) {
-          const hhmm = String(d.to_time).length === 5 ? d.to_time : String(d.to_time).padStart(5, '0');
-          end = `${d.entry_date}T${hhmm}`;
+      // End is the row where the running total first reaches target — the
+      // moment the parcel actually finished. Rows after that (delays etc.)
+      // carry no quantity and must not push End further out.
+      let running = 0;
+      for (const r of rows) {
+        const d = r.getData();
+        running += parseFloat(d.quantity || 0) || 0;
+        if (running >= target - 1e-6) {
+          if (d.entry_date && d.to_time) {
+            const hhmm = String(d.to_time).length === 5 ? d.to_time : String(d.to_time).padStart(5, '0');
+            end = `${d.entry_date}T${hhmm}`;
+          }
           break;
         }
       }

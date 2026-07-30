@@ -355,6 +355,7 @@
     {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
     {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
     {% if permissions.can_edit or permissions.can_add %}<button id="editModeBtn" class="btn" style="font-size:12px;padding:4px 12px;background:#805ad5;color:white;border:none;" onclick="toggleEditMode()">✏️ Edit</button>{% endif %}
+    <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="window.location='/api/module/VCN01/parcels/export'" title="Download every parcel on every VCN">⬇ Export Parcels Master</button>
     <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="toggleFilterPanel()">⚙ Filters <span id="filterBadge" style="display:none;background:#3182ce;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
     <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
 </div>
@@ -458,6 +459,7 @@
     let defaultDocSeries = '';
     let runTypes = [];   // VRT01 Vessel Run Type Master
     let delayTypes = [];
+    const delayWindows = {};   // vcn_id -> {anchored, pilot_pickup} from LDUD01 (bounds delay entry)
     let cargoNames = [];
     let quantityUoms = [];
     let defaultUom = '';
@@ -967,6 +969,9 @@
         const _hStatus = _hRow ? (_hRow.getData().doc_status || '') : '';
         const isUnlocked = isDraftRow(_hStatus) || (editMode && (_hRow?.isSelected() ?? false));
         const canAct = (permissions.can_edit || permissions.can_add) && isUnlocked;
+        // Delays are logged whenever they're discovered — often after the VCN is
+        // closed/approved — so they're gated on permission only, never on the lock.
+        const canDelays = !!(permissions.can_edit || permissions.can_add);
 
         // Lock banner in modal header
         const lockBanner = document.getElementById('modalLockBanner');
@@ -1019,13 +1024,16 @@
             ${parcelsSection}
             <div class="sub-section">
                 <div class="sub-section-header" data-section="delays">
-                    <span>Pre Berthing/Anchoring Delays</span>
+                    <span>Pre Berthing/Anchoring Delays${(!isUnlocked && canDelays) ? ` <span style="font-weight:400;font-size:11px;color:#2f855a;">· always editable</span>` : ''}</span>
                     <div class="sub-section-actions">
-                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('delays', ${vcnId})">+ Add</button>` : ''}
-                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('delays', ${vcnId})">Save</button>` : ''}
+                        ${canDelays ? `<button class="btn-sub-add" onclick="addSubRow('delays', ${vcnId})">+ Add</button>` : ''}
+                        ${canDelays ? `<button class="btn-sub-save" onclick="saveSubTable('delays', ${vcnId})">Save</button>` : ''}
                     </div>
                 </div>
-                <div class="sub-section-content"><div id="delays-table-${vcnId}" class="sub-tabulator"></div></div>
+                <div class="sub-section-content">
+                    <div id="delay-window-${vcnId}" style="padding:5px 10px;font-size:11px;color:#4a5568;"></div>
+                    <div id="delays-table-${vcnId}" class="sub-tabulator"></div>
+                </div>
             </div>
             `;
 
@@ -1081,12 +1089,50 @@
 
     // datetimeEditor and dateEditor are now global (defined in base.html)
 
+    // ── Pre-berthing delay window (LDUD01 Anchorage → Pilot Pickup) ─────────────
+    function _dtVal(v) { const d = v ? new Date(String(v).replace(' ', 'T')) : null; return (d && !isNaN(d)) ? d : null; }
+
+    function renderDelayWindow(vcnId) {
+        const el = document.getElementById(`delay-window-${vcnId}`);
+        if (!el) return;
+        const w = delayWindows[vcnId] || {};
+        if (!w.anchored && !w.pilot_pickup) {
+            el.innerHTML = '<span style="color:#a0aec0;">No Anchorage / Pilot Pickup time in LDUD01 yet — delay times are unbounded.</span>';
+            return;
+        }
+        const chip = (label, v) => `<span style="display:inline-block;background:#edf2f7;border-radius:10px;padding:1px 9px;margin-right:6px;">`
+            + `${label}: <b>${v ? formatDateTime(v) : '—'}</b></span>`;
+        el.innerHTML = chip('Anchorage', w.anchored) + chip('Pilot Pickup', w.pilot_pickup)
+            + '<span style="color:#718096;">delays must fall inside this window</span>';
+    }
+
+    // Delay times must sit inside the LDUD window, and End must follow Start.
+    let _delayGuard = false;   // stops the revert's setValue re-entering this handler
+    function validateDelayTime(cell) {
+        if (_delayGuard) return;
+        const d = cell.getRow().getData();
+        const val = _dtVal(cell.getValue());
+        if (!val) return;
+        const w = delayWindows[d.vcn_id || currentVcnId] || {};
+        const title = cell.getColumn().getDefinition().title;
+        const revert = (msg) => {
+            alert(msg);
+            _delayGuard = true; cell.setValue(cell.getOldValue() || ''); _delayGuard = false;
+        };
+        const anc = _dtVal(w.anchored), pil = _dtVal(w.pilot_pickup);
+        if (anc && val < anc) return revert(`${title} cannot be before the Anchorage time (${formatDateTime(w.anchored)}).`);
+        if (pil && val > pil) return revert(`${title} cannot be after the Pilot Pickup time (${formatDateTime(w.pilot_pickup)}).`);
+        const s = _dtVal(d.delay_start), e = _dtVal(d.delay_end);
+        if (s && e && e < s) return revert('End Time cannot be before Start Time.');
+    }
+
     async function initSubTables(vcnId, operationType = 'Import') {
         const _vcnRow = table.getRows().find(r => r.getData().id === vcnId);
         const _vcnData = _vcnRow ? _vcnRow.getData() : {};
         const _isApproved = _vcnData.doc_status === 'Approved';
         const _isUnlocked = isDraftRow(_vcnData.doc_status) || (editMode && (_vcnRow?.isSelected() ?? false));
         const canEdit = (permissions.can_edit || permissions.can_add) && _isUnlocked;
+        const canDelays = !!(permissions.can_edit || permissions.can_add);  // delays ignore the lock
         const isDark = localStorage.getItem('theme') === 'dark';
 
         // Delay type options
@@ -1187,6 +1233,12 @@
         if (isDark) document.querySelector(`#consigners-table-${vcnId}`).classList.add('tabulator-dark');
         }
 
+        // Delays sit between LDUD01's Anchorage and Pilot Pickup times — fetch that
+        // window so the grid can bound entry (and show operators what the bounds are).
+        delayWindows[vcnId] = await fetch(`/api/module/VCN01/delay_window/${vcnId}`)
+            .then(r => r.json()).catch(() => ({anchored: '', pilot_pickup: ''}));
+        renderDelayWindow(vcnId);
+
         // Delays table
         subTables[vcnId].delays = new Tabulator(`#delays-table-${vcnId}`, {
             layout: "fitColumns",
@@ -1195,14 +1247,14 @@
             columnDefaults: { headerSort: false },
             cellEdited: () => markDirty('delays'),
             columns: [
-                {title: "Delay Name", field: "delay_name", widthGrow: 1, editor: canEdit ? "list" : false,
+                {title: "Delay Name", field: "delay_name", widthGrow: 1, editor: canDelays ? "list" : false,
                     editorParams: {values: delayOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                 },
-                {title: "Start Time", field: "delay_start", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
-                    formatter: datetimeCellFormatter
+                {title: "Start Time", field: "delay_start", widthGrow: 1, editor: canDelays ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter, cellEdited: validateDelayTime
                 },
-                {title: "End Time", field: "delay_end", widthGrow: 1, editor: canEdit ? datetimeEditor : false,
-                    formatter: datetimeCellFormatter
+                {title: "End Time", field: "delay_end", widthGrow: 1, editor: canDelays ? datetimeEditor : false,
+                    formatter: datetimeCellFormatter, cellEdited: validateDelayTime
                 },
                 {title: "Total Time", field: "total_time", widthGrow: 1, hozAlign: "center", headerSort: false, editable: false,
                     formatter: function(cell) {
@@ -1223,7 +1275,7 @@
                         return `<span style="font-weight:500;color:#2d3748">${parts.join(' ')}</span>`;
                     }
                 },
-                canEdit ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 60, widthGrow: 0, hozAlign: "center", headerSort: false,
+                canDelays ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 60, widthGrow: 0, hozAlign: "center", headerSort: false,
                     cellClick: function(e, cell) { deleteSubRow('delays', cell.getRow().getData().id, vcnId); }
                 } : null
             ].filter(Boolean)
@@ -1339,6 +1391,17 @@
     async function addSubRow(type, vcnId) {
         const seed = {vcn_id: vcnId};
         if (type === 'consigners') seed.toll_applicable = true;   // Toll on by default
+        if (type === 'delays') {
+            // First delay line spans the whole LDUD window (Anchorage -> Pilot
+            // Pickup); later ones chain their Start off the previous End and keep
+            // the same Pilot Pickup End, so the operator only trims what changed.
+            const w = delayWindows[vcnId] || {};
+            const t = subTables[vcnId] && subTables[vcnId].delays;
+            const rows = t ? t.getRows() : [];
+            const prevEnd = rows.length ? rows[rows.length - 1].getData().delay_end : '';
+            seed.delay_start = prevEnd || w.anchored || '';
+            seed.delay_end = w.pilot_pickup || '';
+        }
         const res = await fetch(`/api/module/VCN01/${type}/save`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1352,6 +1415,10 @@
         if (data.id && subTables[vcnId] && subTables[vcnId][type]) {
             const newRow = {id: data.id, vcn_id: vcnId};
             if (type === 'consigners') newRow.toll_applicable = true;
+            if (type === 'delays') {
+                if (seed.delay_start) newRow.delay_start = seed.delay_start;
+                if (seed.delay_end) newRow.delay_end = seed.delay_end;
+            }
             if (type === 'export_cargo' && defaultUom) {
                 newRow.quantity_uom = defaultUom;
             }

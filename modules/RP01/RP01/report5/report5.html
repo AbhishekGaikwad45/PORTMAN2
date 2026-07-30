@@ -1,0 +1,973 @@
+{% extends "base.html" %}
+
+{% block title %}Report-5 — RP01{% endblock %}
+
+{% block head %}
+<style>
+
+:root{
+    --rp-green:#2E7D32;
+    --rp-green-header:#D9EAD3;
+    --rp-green-total:#B6D7A8;
+    --rp-blue-total:#C9DAF8;
+    --rp-yellow:#FFFF00;
+    --rp-gray:#D9D9D9;
+    --rp-red-label:#B22222;
+    --rp-border:#999999;
+    --rp-ink:#1F2937;
+    --rp-muted:#6B7280;
+}
+
+.rp01-wrap *{
+    box-sizing:border-box;
+}
+
+.rp01-wrap{
+    font-family:Calibri,Arial,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,sans-serif;
+}
+
+/* ==========================
+        HEADER
+========================== */
+
+.module-header{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:20px;
+    padding-bottom:16px;
+    border-bottom:1px solid #DDE3EA;
+}
+
+.module-header h2{
+    margin:0;
+    font-size:22px;
+    font-weight:700;
+    color:var(--rp-ink);
+}
+
+.rp-badge{
+    background:var(--rp-green);
+    color:#fff;
+    padding:4px 12px;
+    border-radius:20px;
+    font-size:12px;
+    font-weight:700;
+}
+
+.rp-back{
+    margin-left:auto;
+    color:var(--rp-green);
+    text-decoration:none;
+}
+
+.rp-back:hover{
+    text-decoration:underline;
+}
+
+/* ==========================
+        TOOLBAR
+========================== */
+
+.report-toolbar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    padding:15px;
+    margin-bottom:15px;
+    background:#fff;
+    border:1px solid #DDE3EA;
+    border-radius:10px;
+}
+
+.report-toolbar label{
+    font-weight:600;
+    color:#555;
+}
+
+.report-toolbar select{
+    padding:8px 12px;
+    border-radius:6px;
+    border:1px solid #DDE3EA;
+    min-width:140px;
+    background:white;
+}
+
+.report-toolbar button{
+    padding:8px 18px;
+    border:none;
+    border-radius:6px;
+    color:white;
+    cursor:pointer;
+}
+
+.load-btn{
+    background:#2F6FED;
+}
+
+.export-btn{
+    background:var(--rp-green);
+    margin-left:auto;
+}
+
+.status{
+    margin-bottom:15px;
+    color:#666;
+}
+
+/* ==========================
+      REPORT CARD / SHEET
+========================== */
+
+.report-card{
+    background:white;
+    border:1px solid #DDE3EA;
+    border-radius:10px;
+    padding:24px;
+    overflow:auto;
+}
+
+.report-title{
+    font-size:16px;
+    font-weight:700;
+    text-align:center;
+    text-decoration:underline;
+    margin-bottom:16px;
+}
+
+.section-title{
+    font-size:14px;
+    font-weight:700;
+    text-decoration:underline;
+    margin:26px 0 10px;
+}
+
+.footnote{
+    font-size:12px;
+    color:var(--rp-muted);
+    margin-top:8px;
+    font-style:italic;
+}
+
+/* ==========================
+      GENERIC TABLE (Excel look)
+========================== */
+
+.rp-table{
+    width:100%;
+    border-collapse:collapse;
+    margin-bottom:6px;
+    font-size:13px;
+}
+
+.rp-table th,
+.rp-table td{
+    border:1px solid var(--rp-border);
+    padding:5px 8px;
+}
+
+.rp-table thead th{
+    background:var(--rp-green-header);
+    font-weight:700;
+    text-align:left;
+}
+
+.rp-table tbody td.num,
+.rp-table thead th.num{
+    text-align:right;
+}
+
+.rp-table tbody td.center{
+    text-align:center;
+}
+
+/* ---- Table 1 : Performance Report ---- */
+
+.berth-cell{
+    color:var(--rp-red-label);
+    font-weight:700;
+    vertical-align:top;
+}
+
+.commodity-cell{
+    white-space:nowrap;
+}
+
+.row-total-liquid td{
+    background:var(--rp-blue-total);
+    font-weight:700;
+}
+
+.row-grand-total td{
+    background:var(--rp-green-total);
+    font-weight:700;
+}
+
+/* ---- Table 2 : Volume comparison ---- */
+
+.vol-header-range{
+    font-weight:400;
+    font-size:12px;
+}
+
+.row-highlight-gray td{
+    background:var(--rp-gray);
+}
+
+.row-highlight-yellow td{
+    background:var(--rp-yellow);
+}
+
+.row-bold td{
+    font-weight:700;
+}
+
+.row-final-total td{
+    font-weight:700;
+    border-top:2px solid var(--rp-ink);
+}
+
+/* ---- Table 3 : Turnaround time ---- */
+
+.turnaround-table{
+    max-width:480px;
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="rp01-wrap">
+
+<div class="module-header">
+    <h2>Report-5</h2>
+    <span class="rp-badge">RP01</span>
+    <a href="/module/RP01/" class="rp-back">← Back to Reports</a>
+</div>
+
+<div class="report-toolbar">
+    <label>Month</label>
+    <select id="monthSelect"></select>
+    <label>Year</label>
+    <select id="yearSelect"></select>
+    <button class="load-btn" onclick="loadReport()">Load</button>
+    <button class="export-btn" onclick="exportExcel()">Export Excel</button>
+</div>
+
+<div id="status" class="status"></div>
+
+<div class="report-card">
+
+    <div id="reportTitle" class="report-title"></div>
+
+    <!-- ===================== TABLE 1 : PERFORMANCE REPORT ===================== -->
+    <table class="rp-table" id="perfTable">
+        <thead id="perfHead"></thead>
+        <tbody id="perfBody"></tbody>
+    </table>
+    <div id="perfFootnote" class="footnote"></div>
+
+    <!-- ===================== TABLE 2 : VOLUME COMPARISON ===================== -->
+    <div class="section-title">COMPARISON OF VOLUME HANDLED IN THE CURRENT YEAR VIS-À-VIS LAST YEAR</div>
+    <table class="rp-table" id="volTable">
+        <thead id="volHead"></thead>
+        <tbody id="volBody"></tbody>
+    </table>
+
+    <!-- ===================== TABLE 3 : TURNAROUND TIME ===================== -->
+    <div class="section-title">Commoditywise Average Turn around Time (Berthing to sailing) &amp; parcel size</div>
+    <table class="rp-table turnaround-table" id="turnTable">
+        <thead id="turnHead"></thead>
+        <tbody id="turnBody"></tbody>
+    </table>
+
+</div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+let REPORT = {};
+let MONTHS = [];
+
+const MONTH_ABBREV_TO_FULL = {
+    Jan: "January", Feb: "February", Mar: "March", Apr: "April",
+    May: "May", Jun: "June", Jul: "July", Aug: "August",
+    Sep: "September", Oct: "October", Nov: "November", Dec: "December"
+};
+
+/* ==================================
+   HARD-CODED BERTH & COMMODITY DATA
+   (Table 1 — from June-2026 report)
+   NOTE: vessels/occupancy/prev/curr/increase for
+   individual berth rows are NOT provided by the API
+   (backend only supplies one total quantity + vessel
+   count per month) so those stay null by design.
+   The TOTAL LIQUID / Total rows ARE filled dynamically
+   from the API response inside applyReportToPerformanceData().
+================================== */
+
+const PERFORMANCE_DATA = {
+    month: "June",
+    year: "2026",
+    prev_label: "June-25(Previous)",
+    curr_label: "June-26(Current)",
+    occupancy_note: "Berth Occupancy   == Total sum of nos of hours (Cast off -All fast)/ No of day in month/ 2",
+    berths: [
+        {
+            name: "Liquid Berth",
+            rows: [
+                { commodity: "Liquid (LB-01&LB-02)", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "Liquid (LB-03&LB-04)", vessels: null, occupancy: null, prev: null, curr: null, increase: null }
+            ]
+        },
+        {
+            name: "ANCHORAGE",
+            rows: [
+                { commodity: "INN ANCH", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "Total Liquid", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "Others", vessels: null, occupancy: null, prev: null, curr: null, increase: null }
+            ]
+        },
+        {
+            name: "Shallow Berth",
+            rows: [
+                { commodity: "cement", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "others", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "Container", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "liquid", vessels: null, occupancy: null, prev: null, curr: null, increase: null }
+            ]
+        },
+        {
+            name: "Anchorage",
+            rows: [
+                { commodity: "Liquid", vessels: null, occupancy: null, prev: null, curr: null, increase: null }
+            ]
+        },
+        {
+            name: "Coastal Berth",
+            rows: [
+                { commodity: "cement", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "Others", vessels: null, occupancy: null, prev: null, curr: null, increase: null }
+            ]
+        },
+        {
+            name: "CB01/CB-02",
+            rows: [
+                { commodity: "CEMENT", vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+                { commodity: "Others", vessels: null, occupancy: null, prev: null, curr: null, increase: null }
+            ]
+        }
+    ],
+    total_liquid: { vessels: null, occupancy: null, prev: null, curr: null, increase: null },
+    total: { vessels: null, occupancy: null, prev: null, curr: null, increase: null }
+};
+
+function showStatus(msg){
+    document.getElementById("status").textContent = msg || "";
+}
+
+function formatNumber(value, decimals){
+    if(value===null || value===undefined || value==="") return "";
+    if(typeof value === "string") return value; // e.g. "#DIV/0!"
+    decimals = decimals===undefined ? 3 : decimals;
+    return Number(value).toLocaleString(undefined,{
+        minimumFractionDigits:decimals,
+        maximumFractionDigits:decimals
+    });
+}
+
+function formatPercent(value){
+    if(value===null || value===undefined || value==="") return "";
+    if(typeof value === "string") return value; // e.g. "#DIV/0!"
+    return Number(value).toLocaleString(undefined,{
+        minimumFractionDigits:2,
+        maximumFractionDigits:2
+    }) + "%";
+}
+
+/* ==================================
+   MAP API RESPONSE -> PERFORMANCE_DATA
+   The backend gives us, per month:
+     { month, year,
+       current:  { quantity, vessel_count },
+       previous: { quantity, vessel_count },
+       increase_pct,
+       occupancy_pct }   <-- now supplied by the backend (compute_berth_occupancy),
+                              folded into the /report response so this one fetch
+                              covers everything the table needs.
+   We only have ONE combined total from the backend (no
+   per-berth breakdown), so we populate total_liquid/total
+   with it.
+================================== */
+
+function applyReportToPerformanceData(report){
+
+    if(!report || !report.current || !report.previous){
+        // No data came back - leave everything blank rather than crash
+        PERFORMANCE_DATA.total_liquid = { vessels: null, occupancy: null, prev: null, curr: null, increase: null };
+        PERFORMANCE_DATA.total = { vessels: null, occupancy: null, prev: null, curr: null, increase: null };
+        return;
+    }
+
+    const vessels = report.current.vessel_count;
+    const curr = report.current.quantity;
+    const prev = report.previous.quantity;
+    const increase = (report.increase_pct !== null && report.increase_pct !== undefined)
+        ? report.increase_pct / 100   // buildPerformanceTable() multiplies by 100 again for display
+        : null;
+
+    // occupancy_pct comes back as a plain percent (e.g. 62.5 for 62.5%).
+    // formatPercent() in buildPerformanceTable() does row.occupancy*100,
+    // so store it here as a fraction (0.625) to match how `increase` is
+    // already handled just above.
+    const occupancy = (report.occupancy_pct !== null && report.occupancy_pct !== undefined)
+        ? report.occupancy_pct / 100
+        : null;
+
+    console.log(
+        "[report5] applyReportToPerformanceData: report.occupancy_pct =", report.occupancy_pct,
+        "-> stored fraction =", occupancy
+    );
+
+    const combined = {
+        vessels: vessels,
+        occupancy: occupancy,
+        prev: prev,
+        curr: curr,
+        increase: increase
+    };
+
+    console.log("[report5] combined row data (used for TOTAL LIQUID / Total rows):", combined);
+
+    PERFORMANCE_DATA.total_liquid = { ...combined };
+    PERFORMANCE_DATA.total = { ...combined };
+
+    // These specific commodity rows carry the same figures as the totals
+    // (matching the source Excel: Liquid (LB-03&LB-04) and Total Liquid
+    // under ANCHORAGE are the only two commodity rows with real data this
+    // month — everything else genuinely has no volume). Find them by name
+    // rather than hardcoding array positions, so this keeps working if the
+    // berth list is reordered.
+    const rowsToFill = ["Liquid (LB-03&LB-04)", "Total Liquid"];
+    PERFORMANCE_DATA.berths.forEach(berth => {
+        berth.rows.forEach(row => {
+            if(rowsToFill.includes(row.commodity)){
+                Object.assign(row, combined);
+            }
+        });
+    });
+
+    // Keep the printed title AND the "Handling <Month-YY>" column headers
+    // in sync with whatever month/year was actually loaded, instead of the
+    // hardcoded "June-25/June-26" labels.
+    PERFORMANCE_DATA.month = MONTHS.find(m => m.abbrev === report.month)?.label || report.month;
+    PERFORMANCE_DATA.year = String(report.year);
+
+    const fullMonth = MONTH_ABBREV_TO_FULL[report.month] || report.month;
+    const currYY = String(report.year).slice(-2);
+    const prevYY = String(report.year - 1).slice(-2);
+    PERFORMANCE_DATA.prev_label = `${fullMonth}-${prevYY}(Previous)`;
+    PERFORMANCE_DATA.curr_label = `${fullMonth}-${currYY}(Current)`;
+}
+
+/* ==================================
+        LOAD MONTH LIST
+================================== */
+
+function populateYearSelect(centerYear){
+    const yearSelect = document.getElementById("yearSelect");
+    yearSelect.innerHTML = "";
+    // Offer a small sensible window around whatever year we're centering on
+    for(let y = centerYear + 1; y >= centerYear - 4; y--){
+        yearSelect.innerHTML += `<option value="${y}">${y}</option>`;
+    }
+    yearSelect.value = String(centerYear);
+}
+
+function loadMeta(){
+
+    showStatus("Loading...");
+
+    fetch("/api/module/RP01/report5/meta")
+        .then(r => r.json())
+        .then(data => {
+
+            if(data.error){
+                showStatus(data.error);
+                return;
+            }
+
+            MONTHS = data.months || [];
+
+            const monthSelect = document.getElementById("monthSelect");
+            monthSelect.innerHTML = "";
+
+            MONTHS.forEach(m => {
+                monthSelect.innerHTML += `<option value="${m.abbrev}">${m.label}</option>`;
+            });
+
+            // Both "current month" and "current year" now come from the
+            // server's /meta response (computed via the server's own
+            // date.today()) - the same clock the backend uses when a
+            // request omits ?year=. This keeps month and year in sync and
+            // avoids mismatches from the browser's local timezone.
+            const currentMonth = data.current_month;
+            const currentYear = data.current_year;
+
+            populateYearSelect(currentYear || new Date().getFullYear());
+
+            const current = MONTHS.find(m => m.abbrev === currentMonth);
+
+            if(current){
+                monthSelect.value = current.abbrev;
+            } else if(MONTHS.length){
+                monthSelect.value = MONTHS[MONTHS.length - 1].abbrev;
+            }
+
+            loadReport();
+
+        })
+        .catch(err => {
+            console.error(err);
+            showStatus("Unable to load month list.");
+        });
+
+}
+
+/* ==================================
+        LOAD REPORT DATA
+================================== */
+
+function loadReport(){
+
+    const month = document.getElementById("monthSelect").value;
+    const year = document.getElementById("yearSelect").value;
+
+    showStatus("Loading report...");
+
+    fetch(`/api/module/RP01/report5/report?month=${month}&year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+
+            if(data.error){
+                showStatus(data.error);
+                return;
+            }
+
+            REPORT = data;
+
+            // DEBUG: confirm what actually arrived from the backend.
+            // Check occupancy_pct specifically - if it's undefined here,
+            // the backend response doesn't include it (server not
+            // restarted with the latest report5.py, or an exception was
+            // swallowed server-side). If it's a number here but the table
+            // still shows blank, the bug is downstream in this JS instead.
+            console.log("[report5] /report response:", REPORT);
+            console.log("[report5] occupancy_pct =", REPORT.occupancy_pct, "| occupancy_detail =", REPORT.occupancy_detail);
+
+            applyReportToPerformanceData(REPORT);
+            applyReportToVolumeComparisonData(REPORT);
+
+            document.getElementById("reportTitle").textContent =
+                `Performance Report for the Month of ${PERFORMANCE_DATA.month}-${PERFORMANCE_DATA.year}`;
+
+            buildPerformanceTable();
+            buildVolumeComparisonTable();
+            buildTurnaroundTable();
+
+            showStatus("");
+
+            // Table 3 (turnaround/parcel size) comes from a separate
+            // endpoint, one commodity at a time, so it's fetched here
+            // rather than folded into /report. Uses REPORT.month/REPORT.year
+            // (the calendar month/year the server actually resolved -
+            // matters when the ?year= param was omitted from the request
+            // above) rather than the raw <select> values, so Table 3 always
+            // matches what Table 1/2 are showing.
+            loadTurnaroundData(REPORT.month, REPORT.year);
+
+        })
+        .catch(err => {
+            console.error(err);
+            showStatus("Unable to load report.");
+        });
+
+}
+
+document.getElementById("monthSelect").addEventListener("change", loadReport);
+document.getElementById("yearSelect").addEventListener("change", loadReport);
+
+/* ==================================
+   TABLE 1 — PERFORMANCE REPORT
+================================== */
+
+function buildPerformanceTable(){
+
+    const head = `
+        <tr>
+            <th>Berth</th>
+            <th>Commodity</th>
+            <th class="num">No. of<br>Vessels sailed</th>
+            <th class="num">Berth<br>Occupancy</th>
+            <th class="num">Handling<br>${PERFORMANCE_DATA.prev_label || ""}</th>
+            <th class="num">Handling<br>${PERFORMANCE_DATA.curr_label || ""}</th>
+            <th class="num">Increase<br>%</th>
+        </tr>
+    `;
+    document.getElementById("perfHead").innerHTML = head;
+
+    const berths = PERFORMANCE_DATA.berths || [];
+    let body = "";
+
+    berths.forEach(berth => {
+
+        const rows = berth.rows || [];
+
+        rows.forEach((row, idx) => {
+
+            body += "<tr>";
+
+            if(idx === 0){
+                body += `<td class="berth-cell" rowspan="${rows.length}">${berth.name}</td>`;
+            }
+
+            body += `
+                <td class="commodity-cell">${row.commodity || ""}</td>
+                <td class="num">${row.vessels !== undefined && row.vessels !== null ? row.vessels : ""}</td>
+                <td class="num">${row.occupancy !== undefined && row.occupancy !== null ? formatPercent(row.occupancy*100) : ""}</td>
+                <td class="num">${formatNumber(row.prev)}</td>
+                <td class="num">${formatNumber(row.curr)}</td>
+                <td class="num">${row.increase !== undefined && row.increase !== null ? formatPercent((row.increase*100).toFixed(2)) : ""}</td>
+            `;
+
+            body += "</tr>";
+
+        });
+
+    });
+
+    const tl = PERFORMANCE_DATA.total_liquid || {};
+    body += `
+        <tr class="row-total-liquid">
+            <td colspan="2">TOTAL LIQUID</td>
+            <td class="num">${tl.vessels !== undefined && tl.vessels !== null ? tl.vessels : ""}</td>
+            <td class="num">${tl.occupancy !== undefined && tl.occupancy !== null ? formatPercent((tl.occupancy*100).toFixed(2)) : ""}</td>
+            <td class="num">${formatNumber(tl.prev)}</td>
+            <td class="num">${formatNumber(tl.curr)}</td>
+            <td class="num">${tl.increase !== undefined && tl.increase !== null ? formatPercent((tl.increase*100).toFixed(2)) : ""}</td>
+        </tr>
+    `;
+
+    const gt = PERFORMANCE_DATA.total || {};
+    body += `
+        <tr class="row-grand-total">
+            <td colspan="2">Total</td>
+            <td class="num">${gt.vessels !== undefined && gt.vessels !== null ? gt.vessels : ""}</td>
+            <td class="num">${gt.occupancy !== undefined && gt.occupancy !== null ? formatPercent((gt.occupancy*100).toFixed(2)) : ""}</td>
+            <td class="num">${formatNumber(gt.prev)}</td>
+            <td class="num">${formatNumber(gt.curr)}</td>
+            <td class="num">${gt.increase !== undefined && gt.increase !== null ? formatPercent((gt.increase*100).toFixed(2)) : ""}</td>
+        </tr>
+    `;
+
+    document.getElementById("perfBody").innerHTML = body;
+
+    document.getElementById("perfFootnote").textContent = PERFORMANCE_DATA.occupancy_note || "";
+
+}
+
+/* ==================================
+   DERIVE FISCAL-YEAR LABELS FROM THE LOADED REPORT
+   "2025-26" / "APR'2025 – MAR-2026" etc. were hardcoded before;
+   now computed from whichever month/year was actually requested,
+   using the same Apr-Mar fiscal year convention as the backend
+   (calendar_year_for_month in report5.py).
+================================== */
+
+function applyReportToVolumeComparisonData(report){
+
+    if(!report || !report.month || !report.year){
+        return;
+    }
+
+    const isJanFebMar = ["Jan", "Feb", "Mar"].includes(report.month);
+
+    const finYearStart = isJanFebMar ? report.year - 1 : report.year;
+
+    const prevStart = finYearStart - 1;
+    const currStart = finYearStart;
+
+    VOLUME_COMPARISON_DATA.fy_prev_label = `${prevStart}-${String(prevStart + 1).slice(-2)}`;
+    VOLUME_COMPARISON_DATA.fy_curr_label = `${currStart}-${String(currStart + 1).slice(-2)}`;
+
+    VOLUME_COMPARISON_DATA.fy_prev_range = `APR'${prevStart} – MAR-${prevStart + 1}`;
+    VOLUME_COMPARISON_DATA.fy_curr_range = `APR'${currStart} – MAR-${currStart + 1}`;
+
+    // ===========================
+    // LIQUID (JJLTPL)
+    // ===========================
+
+    const jjltpl = VOLUME_COMPARISON_DATA.rows.find(
+        r => r.label === "LIQUID (JJLTPL)"
+    );
+
+    if (jjltpl) {
+
+        jjltpl.prev = report.previous_jjltpl ?? 0;
+        jjltpl.curr = report.current_jjltpl ?? 0;
+
+        if (jjltpl.prev > 0) {
+            jjltpl.increase = (
+                ((jjltpl.curr - jjltpl.prev) / jjltpl.prev) * 100
+            ).toFixed(2);
+        } else {
+            jjltpl.increase = "";
+        }
+    }
+}
+
+const VOLUME_COMPARISON_DATA = {
+    fy_prev_label: "2025-26",
+    fy_prev_range: "APR'2025 – MAR-2026",
+    fy_curr_label: "2026-27",
+    fy_curr_range: "APR'2026 – MAR-2027",
+    rows: [
+        { label: "LIQUID JNPT (INN ANCH)", prev: null, curr: null, increase: null },
+        { label: "LIQUID JNPT ( SWB)", prev: null, curr: null, increase: null },
+        { label: "LIQUID (BPCL)", prev: null, curr: null, increase: null, highlight: "gray" },
+        { label: "LIQUID (JJLTPL)", prev: null, curr: null, increase: null, highlight: "yellow" },
+        { label: "TOTAL LIQUID", prev: null, curr: null, increase: null, bold: true },
+        { label: "CEMENT", prev: null, curr: null, increase: null },
+        { label: "BREAK BULK", prev: null, curr: null, increase: null },
+        { label: "OTHERS", prev: null, curr: null, increase: null }
+    ],
+    grand_total: {
+        prev: null,
+        curr: null,
+        increase: null
+    }
+};
+
+/* ==================================
+   TABLE 2 — VOLUME COMPARISON
+================================== */
+
+function buildVolumeComparisonTable(){
+
+    const vc = VOLUME_COMPARISON_DATA;
+
+    const head = `
+        <tr>
+            <th rowspan="2">TOTAL HANDLING</th>
+            <th class="center">${vc.fy_prev_label || ""}</th>
+            <th class="center">${vc.fy_curr_label || ""}</th>
+            <th rowspan="2" class="num">INCREASE<br>%</th>
+        </tr>
+        <tr>
+            <th class="center vol-header-range">${vc.fy_prev_range || ""}</th>
+            <th class="center vol-header-range">${vc.fy_curr_range || ""}</th>
+        </tr>
+    `;
+    document.getElementById("volHead").innerHTML = head;
+
+    const rows = vc.rows || [];
+    let body = "";
+
+    rows.forEach(row => {
+
+        let rowClass = "";
+        if(row.highlight === "gray") rowClass = "row-highlight-gray";
+        if(row.highlight === "yellow") rowClass = "row-highlight-yellow";
+        if(row.bold) rowClass += " row-bold";
+
+        body += `
+            <tr class="${rowClass.trim()}">
+                <td>${row.label || ""}</td>
+                <td class="num">${formatNumber(row.prev)}</td>
+                <td class="num">${formatNumber(row.curr)}</td>
+                <td class="num">${row.increase !== undefined && row.increase !== null ? formatNumber(row.increase, 2) : ""}</td>
+            </tr>
+        `;
+
+    });
+
+    const gt = vc.grand_total || {};
+    body += `
+        <tr class="row-final-total">
+            <td></td>
+            <td class="num">${formatNumber(gt.prev)}</td>
+            <td class="num">${formatNumber(gt.curr)}</td>
+            <td class="num">${gt.increase !== undefined && gt.increase !== null ? formatNumber(gt.increase, 2) : ""}</td>
+        </tr>
+    `;
+
+    document.getElementById("volBody").innerHTML = body;
+
+}
+
+/* ==================================
+   "Commodity" (row label) DATA for Table 3.
+   turnaround/parcel start null and are filled in by
+   loadTurnaroundData() -> applyTurnaroundResponse() below,
+   using /api/module/RP01/report5/commodity-turnaround.
+   Rows are addressed by fixed index (0/1 = Liquid curr/prev,
+   2/3 = Cement curr/prev) rather than by label, since the two
+   "(previous)" rows share the same label text.
+================================== */
+
+const TURNAROUND_DATA = {
+    rows: [
+        { commodity: "Liquid (current)", turnaround: null, parcel: null, highlight: "gray" },
+        { commodity: "(previous)", turnaround: null, parcel: null },
+        { commodity: "Cement (current)", turnaround: null, parcel: null },
+        { commodity: "(previous)", turnaround: null, parcel: null }
+    ]
+};
+
+const TURNAROUND_ROW_INDEX = {
+    Liquid: { current: 0, previous: 1 },
+    Cement: { current: 2, previous: 3 }
+};
+
+/* ==================================
+   LOAD TABLE 3 DATA (turnaround + parcel size)
+   One request per commodity, since the backend endpoint
+   (/commodity-turnaround) takes a single ?commodity= at a time.
+   Fetched in parallel; each response's current/previous
+   avg_turnaround_days & avg_parcel_size get written into
+   TURNAROUND_DATA by fixed row index, then the table is
+   re-rendered. Failures for one commodity don't block the other
+   (Promise.allSettled) - that row set just stays blank with a
+   console warning instead of blanking the whole table.
+================================== */
+
+function loadTurnaroundData(month, year){
+
+    const commodities = Object.keys(TURNAROUND_ROW_INDEX); // ["Liquid", "Cement"]
+
+    const requests = commodities.map(commodity =>
+        fetch(`/api/module/RP01/report5/commodity-turnaround?commodity=${encodeURIComponent(commodity)}&month=${month}&year=${year}`)
+            .then(r => r.json())
+            .then(data => ({ commodity, data }))
+            .catch(err => ({ commodity, error: err }))
+    );
+
+    Promise.allSettled(requests).then(results => {
+
+        results.forEach(result => {
+
+            if(result.status !== "fulfilled"){
+                console.error("[report5] turnaround request rejected:", result.reason);
+                return;
+            }
+
+            const { commodity, data, error } = result.value;
+
+            if(error){
+                console.error(`[report5] turnaround fetch failed for ${commodity}:`, error);
+                return;
+            }
+
+            console.log(`[report5] commodity-turnaround response (${commodity}):`, data);
+
+            applyTurnaroundResponse(commodity, data);
+
+        });
+
+        buildTurnaroundTable();
+
+    });
+
+}
+
+function applyTurnaroundResponse(commodity, data){
+
+    const idx = TURNAROUND_ROW_INDEX[commodity];
+    if(!idx) return;
+
+    if(!data || data.error){
+        console.warn(`[report5] commodity-turnaround for ${commodity} returned an error:`, data && data.error);
+        return;
+    }
+
+    const rows = TURNAROUND_DATA.rows;
+
+    if(data.current){
+        rows[idx.current].turnaround = data.current.avg_turnaround_days;
+        rows[idx.current].parcel = data.current.avg_parcel_size;
+    }
+
+    if(data.previous){
+        rows[idx.previous].turnaround = data.previous.avg_turnaround_days;
+        rows[idx.previous].parcel = data.previous.avg_parcel_size;
+    }
+
+}
+
+/* ==================================
+   TABLE 3 — TURNAROUND TIME
+================================== */
+
+function buildTurnaroundTable(){
+
+    const head = `
+        <tr>
+            <th>Commodity</th>
+            <th class="num">Av. Turn around<br>(days)</th>
+            <th class="num">Av. Parcel size</th>
+        </tr>
+    `;
+    document.getElementById("turnHead").innerHTML = head;
+
+    const rows = TURNAROUND_DATA.rows || [];
+    let body = "";
+
+    rows.forEach(row => {
+
+        const rowClass = row.highlight === "gray" ? "row-highlight-gray" : "";
+
+        body += `
+            <tr class="${rowClass}">
+                <td>${row.commodity || ""}</td>
+                <td class="num">${formatNumber(row.turnaround, 2)}</td>
+                <td class="num">${formatNumber(row.parcel, 0)}</td>
+            </tr>
+        `;
+
+    });
+
+    document.getElementById("turnBody").innerHTML = body;
+
+}
+
+/* ==================================
+        EXPORT EXCEL
+================================== */
+
+function exportExcel() {
+    const month = document.getElementById("monthSelect").value;
+    const year = document.getElementById("yearSelect").value;
+
+    window.location.href = `/report5/export?month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}`;
+}
+
+/* ==================================
+        INITIAL LOAD
+================================== */
+
+// Table 1 header/labels render immediately; real numbers arrive after loadMeta() -> loadReport()
+document.getElementById("reportTitle").textContent =
+    `Performance Report for the Month of ${PERFORMANCE_DATA.month}-${PERFORMANCE_DATA.year}`;
+buildPerformanceTable();
+
+loadMeta();
+
+</script>
+
+{% endblock %}

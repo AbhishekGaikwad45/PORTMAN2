@@ -159,6 +159,33 @@ def get_started_parcels(vcn_id):
     return out
 
 
+# Master export layout: (Excel header, field). 'dt:' fields split into Date + Time
+# columns — see excel_export.
+EXPORT_COLS = [
+    ('Vessel', 'vessel_name'), ('VCN', 'vcn_doc_num'), ('Berth', 'berth_name'),
+    ('Parcel No', 'parcel_no'), ('Cargo', 'cargo_name'), ('Terminal', 'terminal_name'),
+    ('Equipment', 'equipment_names'), ('Pipeline', 'pipeline_name'),
+    ('Target Qty', 'target_qty'), ('Logged Qty', 'logged_qty'), ('Remaining Qty', 'remaining_qty'),
+    ('UOM', 'uom'), ('Expected Start', 'dt:expected_start'), ('Expected Rate (MT/Hr)', 'expected_flow_rate'),
+    ('Start', 'dt:start_dt'), ('End', 'dt:end_dt'), ('Run Hours', 'op_hours'),
+    ('Avg Rate (MT/Hr)', 'avg_rate'), ('Status', 'status'), ('Short-closed', 'is_shortclosed'),
+    ('LDUD Status', 'ldud_status'),
+]
+
+
+def export_all_parcels():
+    """Every parcel-op across all vessels, flattened for the master export.
+    ponytail: loops get_started_parcels per vessel rather than one hand-tuned
+    query — same numbers as the screen, no second source of truth. Fold into a
+    single query if the vessel list ever grows past a few hundred."""
+    rows = []
+    for v in get_vessels_with_started_parcels():
+        for p in get_started_parcels(v['vcn_id']):
+            rows.append({**p, 'vessel_name': v['vessel_name'],
+                         'vcn_doc_num': v['vcn_doc_num'], 'berth_name': v['berth_name']})
+    return rows
+
+
 def ops_locked(parcel_op_ids):
     """True if any parcel op belongs to a fully Closed LDUD — LUEU01 entry is
     then locked. (Partial Close is a billing cut-off; ops may continue.)"""

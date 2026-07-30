@@ -2,6 +2,7 @@ import io
 import json as _json
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_file
 from functools import wraps
+import excel_export
 from . import model
 from database import get_user_permissions, get_module_config
 from modules.FIN01 import model as fin_model
@@ -235,11 +236,26 @@ def delete_consigner():
     vcn_id = model.delete_consigner(request.json.get('id'))
     return jsonify({'success': True, 'cargo_type': model.get_header_cargo_type(vcn_id)})
 
+@bp.route('/api/module/VCN01/parcels/export')
+@login_required
+def export_parcels_master():
+    """Master export — every parcel on every VCN, import and export, one sheet."""
+    if not get_perms().get('can_read'):
+        return render_template('no_access.html'), 403
+    return excel_export.sheet_response(model.EXPORT_PARCEL_COLS, model.export_all_parcels(),
+                                       'Parcels', 'VCN01_Parcels_Master')
+
 # Delays endpoints
 @bp.route('/api/module/VCN01/delays/<int:vcn_id>')
 @login_required
 def get_delays(vcn_id):
     return jsonify(model.get_delays(vcn_id))
+
+@bp.route('/api/module/VCN01/delay_window/<int:vcn_id>')
+@login_required
+def delay_window(vcn_id):
+    """Anchorage -> Pilot Pickup window from LDUD01, bounding the delay entries."""
+    return jsonify(model.get_delay_window(vcn_id))
 
 @bp.route('/api/module/VCN01/delays/save', methods=['POST'])
 @login_required
