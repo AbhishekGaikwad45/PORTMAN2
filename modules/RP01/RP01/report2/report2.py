@@ -339,12 +339,104 @@ def load_data() -> pd.DataFrame:
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT fin_year, month, category, cargo AS cargo_type, import_export, quantity
-            FROM mis_vessel_master
-            WHERE fin_year IS NOT NULL
-              AND month IS NOT NULL
-              AND category IS NOT NULL
-        """)
+SELECT
+    fin_year,
+    month,
+    category,
+    cargo AS cargo_type,
+    import_export,
+    quantity
+FROM mis_vessel_master
+
+UNION ALL
+
+SELECT
+    CASE
+        WHEN EXTRACT(MONTH FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')) >= 4
+        THEN CONCAT(
+            EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')),
+            '-',
+            RIGHT((EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')) + 1)::text,2)
+        )
+        ELSE CONCAT(
+            EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')) - 1,
+            '-',
+            RIGHT(EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD'))::text,2)
+        )
+    END AS fin_year,
+
+    TO_CHAR(
+        TO_DATE(lp.entry_date,'YYYY-MM-DD'),
+        'Mon-YY'
+    ) AS month,
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category, '')) = 'POL'
+            THEN 'POL'
+        ELSE COALESCE(vc.cargo_category, 'OTHERS')
+    END AS category,
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category, '')) = 'POL'
+            THEN 'PRODUCT'
+        ELSE lpo.cargo_name
+    END AS cargo_type,
+
+    lh.operation_type AS import_export,
+    SUM(lpo.quantity) AS quantity
+
+FROM ldud_parcel_ops lpo
+
+JOIN ldud_header lh
+    ON lh.id = lpo.ldud_id
+
+JOIN (
+    SELECT
+        parcel_op_id,
+        MIN(entry_date) AS entry_date
+    FROM lueu_parcel_log
+    WHERE is_deleted IS NOT TRUE
+    GROUP BY parcel_op_id
+) lp
+    ON lp.parcel_op_id = lpo.id
+
+LEFT JOIN vessel_cargo vc
+    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(lpo.cargo_name))
+
+GROUP BY
+    CASE
+        WHEN EXTRACT(MONTH FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')) >= 4
+        THEN CONCAT(
+            EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')),
+            '-',
+            RIGHT((EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')) + 1)::text,2)
+        )
+        ELSE CONCAT(
+            EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD')) - 1,
+            '-',
+            RIGHT(EXTRACT(YEAR FROM TO_DATE(lp.entry_date,'YYYY-MM-DD'))::text,2)
+        )
+    END,
+
+    TO_CHAR(
+        TO_DATE(lp.entry_date,'YYYY-MM-DD'),
+        'Mon-YY'
+    ),
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category, '')) = 'POL'
+            THEN 'POL'
+        ELSE COALESCE(vc.cargo_category, 'OTHERS')
+    END,
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category, '')) = 'POL'
+            THEN 'PRODUCT'
+        ELSE lpo.cargo_name
+    END,
+
+    lh.operation_type;
+""")
         rows = cur.fetchall()
     finally:
         conn.close()
