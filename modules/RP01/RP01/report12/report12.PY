@@ -435,7 +435,7 @@ def load_data() -> pd.DataFrame:
                         UPPER(TRIM(cargo_name))
                 ) e
                 ON e.vcn_id = h.id
-                    ON e.vcn_id = h.id
+                    
                 LEFT JOIN ldud_header lh
                     ON lh.vcn_id = h.id
                 LEFT JOIN po_actual poa
