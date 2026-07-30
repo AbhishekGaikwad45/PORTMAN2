@@ -394,13 +394,22 @@ def load_data() -> pd.DataFrame:
                     vc.cargo_sub_category_2 AS category1,
                     COALESCE(poa.total_qty, c.quantity::numeric) AS quantity
                 FROM vcn_header h
-                JOIN vcn_consigners c
-                    ON c.vcn_id = h.id
+                JOIN (
+                    SELECT
+                        vcn_id,
+                        UPPER(TRIM(cargo_name)) AS cargo_name,
+                        SUM(quantity::numeric) AS quantity
+                    FROM vcn_consigners
+                    GROUP BY
+                        vcn_id,
+                        UPPER(TRIM(cargo_name))
+                ) c
+                ON c.vcn_id = h.id
                 LEFT JOIN ldud_header lh
                     ON lh.vcn_id = h.id
                 LEFT JOIN po_actual poa
                     ON poa.ldud_id = lh.id
-                    AND poa.cargo_key = UPPER(TRIM(c.cargo_name))
+                    AND poa.cargo_key = c.cargo_name
                 LEFT JOIN vessel_cargo vc
                     ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(c.cargo_name))
 
@@ -415,7 +424,17 @@ def load_data() -> pd.DataFrame:
                     vc.cargo_sub_category_2,
                     COALESCE(poa.total_qty, e.quantity::numeric)
                 FROM vcn_header h
-                JOIN vcn_export_cargo_declaration e
+                JOIN (
+                    SELECT
+                        vcn_id,
+                        UPPER(TRIM(cargo_name)) AS cargo_name,
+                        SUM(quantity::numeric) AS quantity
+                    FROM vcn_export_cargo_declaration
+                    GROUP BY
+                        vcn_id,
+                        UPPER(TRIM(cargo_name))
+                ) e
+                ON e.vcn_id = h.id
                     ON e.vcn_id = h.id
                 LEFT JOIN ldud_header lh
                     ON lh.vcn_id = h.id
@@ -558,6 +577,7 @@ def load_data() -> pd.DataFrame:
         df.groupby(["fin_year", "fy_month_idx", "sheet", "row_key", "direction", "bucket"], as_index=False)["value"]
         .sum()
     )
+    
     return combined
 
 
