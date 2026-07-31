@@ -43,6 +43,14 @@ below if that's wrong.
    hours are booked entirely to its ALONGSIDE month (no splitting
    across a month boundary), and "divide by 2" in the occupancy
    formula means 2 physical berths (NUM_BERTHS = 2).
+5. SHORT CLOSE (added 31-Jul-2026, CONFIRMED same day): lueu_parcel_log
+   has a column flagging a parcel as "short closed". Per user
+   instruction, any row where this flag is true has its quantity
+   SUBTRACTED from the running total instead of added, everywhere
+   lueu_parcel_log.quantity is summed. PARCEL_LOG_SHORT_CLOSE_COLUMN
+   below is CONFIRMED via information_schema.columns to be
+   `is_shortclose`, a real Postgres boolean column (not a text
+   'Y'/'N'/flag-string) -- no special truthiness handling needed.
 
 ======================================================================
  DEBUGGING NOTE (added)
@@ -57,6 +65,13 @@ applied server-side. This is threaded through fetch_berth_hours() and
 surfaced in compute_berth_occupancy()'s result under "debug_rows", and
 therefore also under result["occupancy_detail"]["debug_rows"] in the
 /report endpoint response.
+
+fetch_quantity_from_parcel_log() now also returns per-row debug info
+(see "debug_rows" in its return value) showing, for every matched row,
+its quantity, whether short_close was true, and how much it
+contributed (positive or negative) to the total — so a short-close
+subtraction can be checked against a manual list the same way berth
+hours can.
 
 ======================================================================
  EXPORT-TO-EXCEL (added)
@@ -157,6 +172,11 @@ NUM_BERTHS = 2  # per formula: divide by 2 -> 2 physical berths
 MIS_COMMODITY_COLUMN = "cargo"            # CONFIRMED: real column on mis_vessel_master
 LDUD_COMMODITY_COLUMN = None              # N/A: no commodity column on ldud_header; new-system data assumed Liquid-only
 PARCEL_LOG_COMMODITY_COLUMN = None        # N/A: no commodity column on lueu_parcel_log; new-system data assumed Liquid-only
+
+# CONFIRMED 31-Jul-2026 via information_schema.columns: real column is
+# is_shortclose, type boolean (not a text flag) -- no truthiness
+# workaround needed. See ASSUMPTION (5) at the top of this file.
+PARCEL_LOG_SHORT_CLOSE_COLUMN = "is_shortclose"
 
 
 MIS_HISTORY_MONTH_COLUMN = "month_jsw"
@@ -686,15 +706,20 @@ def fetch_from_mis_vessel_master(month_abbrev: str, calendar_year: int):
 
 def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
     """Sum of lueu_parcel_log.quantity for rows whose entry_date falls in
-    the given calendar month/year, excluding soft-deleted rows."""
+    the given calendar month/year, excluding soft-deleted rows.
+
+    SHORT CLOSE (added 31-Jul-2026, per user instruction): rows flagged
+    short_close have their quantity SUBTRACTED instead of added. See
+    ASSUMPTION (5) at the top of this file re: PARCEL_LOG_SHORT_CLOSE_COLUMN
+    being confirmed as `is_shortclose`, a real boolean column."""
     month_num = MONTH_NUM[month_abbrev]
 
     conn = get_db()
     try:
         cur = get_cursor(conn)
         cur.execute(
-            """
-            SELECT entry_date, quantity
+            f"""
+            SELECT entry_date, quantity, {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
             FROM lueu_parcel_log
             WHERE COALESCE(is_deleted, false) = false
               AND quantity IS NOT NULL
@@ -705,10 +730,46 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
         conn.close()
 
     total = 0.0
+    matched_rows = 0
+    short_close_rows = 0
+    debug_rows = []
+
     for r in rows:
         d = _parse_text_date(r["entry_date"])
-        if d and d.year == calendar_year and d.month == month_num:
-            total += float(r["quantity"] or 0)
+        if not (d and d.year == calendar_year and d.month == month_num):
+            continue
+
+        matched_rows += 1
+        qty = float(r["quantity"] or 0)
+        is_short_close = bool(r["short_close"])
+
+        if is_short_close:
+            short_close_rows += 1
+            total -= qty
+            contribution = -qty
+        else:
+            total += qty
+            contribution = qty
+
+        debug_rows.append({
+            "entry_date": d.isoformat(),
+            "quantity": qty,
+            "short_close": is_short_close,
+            "contribution": round(contribution, 3),
+        })
+
+        if DEBUG_BERTH_OCCUPANCY:
+            logger.debug(
+                "fetch_quantity_from_parcel_log: row date=%s qty=%.3f short_close=%s "
+                "-> contribution=%.3f (running total=%.3f)",
+                d, qty, is_short_close, contribution, total,
+            )
+
+    logger.debug(
+        "fetch_quantity_from_parcel_log: month=%s year=%s -> TOTAL=%.3f "
+        "(%d matched rows, %d short-close rows subtracted)",
+        month_abbrev, calendar_year, total, matched_rows, short_close_rows,
+    )
 
     return round(total, 3)
 
@@ -777,13 +838,16 @@ def fetch_jjltpl_from_mis(month_abbrev: str, calendar_year: int) -> float:
 
 
 def fetch_jjltpl_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
+    """SHORT CLOSE (added 31-Jul-2026): rows flagged short_close have
+    their quantity SUBTRACTED instead of added. See ASSUMPTION (5) at
+    the top of this file."""
     month_num = MONTH_NUM[month_abbrev]
 
     conn = get_db()
     cur = get_cursor(conn)
 
-    cur.execute("""
-        SELECT entry_date, quantity
+    cur.execute(f"""
+        SELECT entry_date, quantity, {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
         FROM lueu_parcel_log
         WHERE COALESCE(is_deleted,false)=false
           AND terminal='JJLTPL'
@@ -792,12 +856,16 @@ def fetch_jjltpl_from_parcel_log(month_abbrev: str, calendar_year: int) -> float
     rows = cur.fetchall()
     conn.close()
 
-    total = 0
+    total = 0.0
 
     for r in rows:
         d = _parse_text_date(r["entry_date"])
         if d and d.year == calendar_year and d.month == month_num:
-            total += float(r["quantity"] or 0)
+            qty = float(r["quantity"] or 0)
+            if r["short_close"]:
+                total -= qty
+            else:
+                total += qty
 
     return round(total, 3)
 
@@ -1207,6 +1275,11 @@ def compute_berth_occupancy(month_abbrev: str, calendar_year: int):
 #      are excluded from BOTH the turnaround sum and the vessel_count
 #      denominator (a vessel with bad data shouldn't silently drag the
 #      average down by counting in the denominator but not the numerator).
+#   5. SHORT CLOSE: same subtraction rule applies to lueu_parcel_log
+#      quantity here as everywhere else it's summed (see ASSUMPTION 5
+#      at the top of the file). The averaging denominator (parcel_count)
+#      still counts short-close rows -- see note in
+#      fetch_commodity_turnaround_from_new_system's docstring below.
 
 def fetch_commodity_turnaround_from_mis(commodity: str, month_abbrev: str, calendar_year: int):
     """Turnaround + vessel_count for one commodity, one month, from
@@ -1230,6 +1303,10 @@ def fetch_commodity_turnaround_from_mis(commodity: str, month_abbrev: str, calen
     mis_history.cargo_type, by contrast, DOES literally hold "LIQUID"
     (confirmed via SELECT DISTINCT), so that filter is left as an ILIKE
     commodity match, unchanged.
+
+    NOTE: mis_history has no short_close-style column and isn't part of
+    the lueu_parcel_log short-close change -- this function's parcel-size
+    figure is unaffected by ASSUMPTION (5).
     """
     yy = str(calendar_year)[-2:]
     month_str = f"{month_abbrev}-{yy}"
@@ -1334,6 +1411,14 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         approach.
       - There was no commodity filter on the parcel-size query either.
 
+    SHORT CLOSE (added 31-Jul-2026): the parcel-size query now also
+    subtracts quantity for rows flagged short_close, matching
+    fetch_quantity_from_parcel_log. The averaging denominator
+    (parcel_count) still counts a short-close row -- it contributed a
+    real (negative) amount to total_qty, so excluding it from the count
+    would double-penalize the average. Flag if you'd rather exclude
+    short-close rows from the denominator entirely.
+
     ASSUMPTION (per user instruction, 30-Jul-2026): ldud_header and
     lueu_parcel_log are used only for the Liquid berths/commodity, so
     there's no commodity filter applied here -- every row in these two
@@ -1383,8 +1468,8 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         # convention for entry_date (free-text, not a trustworthy real
         # date/timestamp column -- see docstring assumption 2).
         cur.execute(
-            """
-            SELECT entry_date, quantity
+            f"""
+            SELECT entry_date, quantity, {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
             FROM lueu_parcel_log
             WHERE COALESCE(is_deleted, false) = false
               AND quantity IS NOT NULL
@@ -1420,13 +1505,20 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         if vessel_count else None
     )
 
-    # --- Parcel size: filter to this calendar month/year by entry_date ---
+    # --- Parcel size: filter to this calendar month/year by entry_date,
+    # subtracting short-close rows instead of adding them ---
     total_qty = 0.0
     parcel_count = 0
+    short_close_rows = 0
     for r in parcel_rows:
         d = _parse_text_date(r["entry_date"])
         if d and d.year == calendar_year and d.month == month_num:
-            total_qty += float(r["quantity"] or 0)
+            qty = float(r["quantity"] or 0)
+            if r["short_close"]:
+                total_qty -= qty
+                short_close_rows += 1
+            else:
+                total_qty += qty
             parcel_count += 1
 
     avg_parcel_size = round(total_qty / parcel_count, 2) if parcel_count else None
@@ -1434,9 +1526,9 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
     logger.debug(
         "fetch_commodity_turnaround_from_new_system: commodity=%r month=%s year=%s -> "
         "avg_turnaround_days=%s vessel_count=%d avg_parcel_size=%s "
-        "(from %d matched parcel rows)",
+        "(from %d matched parcel rows, %d short-close rows subtracted)",
         commodity, month_abbrev, calendar_year, avg_turnaround_days, vessel_count,
-        avg_parcel_size, parcel_count,
+        avg_parcel_size, parcel_count, short_close_rows,
     )
 
     return avg_turnaround_days, avg_parcel_size, vessel_count, debug_rows
