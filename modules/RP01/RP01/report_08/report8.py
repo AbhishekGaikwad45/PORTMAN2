@@ -401,9 +401,26 @@ def _period_stats(df_rows, df_vessels, fin_year, month_idx, cumulative):
     container_v = vessels[vessels["is_container"]]
     other_v = vessels[~vessels["is_container"]]
 
-    coastal_qty = round(float(rows.loc[rows["overseas_coastal_norm"] == "Coastal", "quantity_000t"].sum()), 3)
-    overseas_qty = round(float(rows.loc[rows["overseas_coastal_norm"] == "Overseas", "quantity_000t"].sum()), 3)
-    total_qty = round(float(rows["quantity_000t"].sum()), 3)
+    coastal_qty = round(
+        float(rows.loc[
+            rows["overseas_coastal_norm"] == "Coastal",
+            "quantity_000t"
+        ].sum()),
+        6
+    )
+
+    overseas_qty = round(
+        float(rows.loc[
+            rows["overseas_coastal_norm"] == "Overseas",
+            "quantity_000t"
+        ].sum()),
+        6
+    )
+
+    total_qty = round(
+        float(rows["quantity_000t"].sum()),
+        6
+    )
 
     return {
         "avg_turnround_container": _avg(container_v["turnround_days"]),
