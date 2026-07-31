@@ -1520,7 +1520,7 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
                 total_qty += qty
             parcel_count += 1
 
-    avg_parcel_size = round(total_qty / parcel_count, 2) if parcel_count else None
+    avg_parcel_size = round(total_qty / vessel_count, 2) if vessel_count else None
 
     logger.debug(
         "fetch_commodity_turnaround_from_new_system: commodity=%r month=%s year=%s -> "
