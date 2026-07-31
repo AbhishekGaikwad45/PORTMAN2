@@ -107,14 +107,30 @@ def _load_live_pipeline_data():
  
         # ---- per-log-entry quantity rows (for Coastal / Overseas / Total Traffic) ----
         cur.execute("""
-            SELECT l.entry_date, h.id AS vcn_id, h.vessel_run_type, l.quantity
+            SELECT
+                NULLIF(TRIM(l.entry_date),'') AS entry_date,
+                h.id AS vcn_id,
+                h.vessel_run_type,
+                SUM(
+                    CASE
+                        WHEN COALESCE(l.is_deleted,false)=false
+                        AND COALESCE(l.is_shortclose,false)=false
+                        THEN COALESCE(l.quantity,0)
+                        ELSE 0
+                    END
+                ) AS quantity
             FROM lueu_parcel_log l
-            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
-            JOIN ldud_header ld ON ld.id = po.ldud_id
-            JOIN vcn_header h ON h.id = ld.vcn_id
-            WHERE l.is_deleted IS NOT TRUE
-              AND l.entry_date IS NOT NULL
-              AND l.quantity IS NOT NULL
+            JOIN ldud_parcel_ops po
+                ON po.id = l.parcel_op_id
+            JOIN ldud_header ld
+                ON ld.id = po.ldud_id
+            JOIN vcn_header h
+                ON h.id = ld.vcn_id
+            WHERE NULLIF(TRIM(l.entry_date),'') IS NOT NULL
+            GROUP BY
+                NULLIF(TRIM(l.entry_date),''),
+                h.id,
+                h.vessel_run_type;
         """)
         log_rows = cur.fetchall()
  
@@ -146,14 +162,24 @@ def _load_live_pipeline_data():
         ldf["quantity_000t"] = ldf["quantity"] / 1000.0
         ldf["overseas_coastal_norm"] = ldf["vessel_run_type"].apply(_norm_overseas_coastal)
  
-        fy_list, idx_list = [], []
-        for d in ldf["entry_date"]:
-            dt = d if isinstance(d, date) else datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
-            fy, idx = _dt_to_fy_month(dt)
-            fy_list.append(fy)
-            idx_list.append(idx)
-        ldf["fin_year"] = fy_list
-        ldf["fy_month_idx"] = idx_list
+        # Convert entry_date safely
+        ldf["entry_date"] = pd.to_datetime(
+            ldf["entry_date"],
+            errors="coerce"
+        )
+
+        # Remove invalid/blank dates
+        ldf = ldf.dropna(subset=["entry_date"]).copy()
+
+        # Financial year and month
+        ldf["fin_year"] = ldf["entry_date"].apply(
+            lambda d: _dt_to_fy_month(d)[0]
+        )
+
+        ldf["fy_month_idx"] = ldf["entry_date"].apply(
+            lambda d: _dt_to_fy_month(d)[1]
+        )
+
         ldf["vcn_no"] = ldf["vcn_id"].astype(str)
  
         df_rows = ldf[["fin_year", "fy_month_idx", "vcn_no", "quantity_000t", "overseas_coastal_norm"]].copy()
