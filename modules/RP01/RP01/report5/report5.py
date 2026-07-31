@@ -876,19 +876,18 @@ def fiscal_year_start_for(month_abbrev: str, calendar_year: int) -> int:
     return calendar_year - 1 if month_abbrev in ("Jan", "Feb", "Mar") else calendar_year
 
 
-def fetch_fiscal_year_quantity_total(fin_year_start: int) -> float:
-    """Sum of quantity across all 12 months of one fiscal year (Apr..Mar),
-    pulling each month from whichever source it belongs to (legacy
-    mis_vessel_master or the new lueu_parcel_log/ldud_header tables). This
-    is how a fiscal year that straddles CUTOVER_DATE (e.g. 2026-27, where
-    Apr-Jun is legacy and Jul-Mar is new-system) gets a single combined
-    total: mis_vessel_master's months + lueu_parcel_log's months, added
-    together."""
+def fetch_fiscal_year_quantity_total(fin_year_start: int, upto_month: str) -> float:
     total = 0.0
+
     for month_abbrev in MONTH_NAMES:
         calendar_year = calendar_year_for_month(fin_year_start, month_abbrev)
         figures = fetch_month_figures(month_abbrev, calendar_year)
         total += figures["quantity"]
+
+        # Stop once the selected month is reached
+        if month_abbrev == upto_month:
+            break
+
     return round(total, 3)
 
 
@@ -916,8 +915,8 @@ def compute_fiscal_year_comparison(fin_year_start: int, month_abbrev: str, calen
     """Current fiscal year vs the prior fiscal year, each summed across
     its own 12 months (mis + lueu combined per month, per year), plus the
     month-over-month report for the requested month."""
-    current_total = fetch_fiscal_year_quantity_total(fin_year_start)
-    previous_total = fetch_fiscal_year_quantity_total(fin_year_start - 1)
+    current_total = fetch_fiscal_year_quantity_total(fin_year_start, month_abbrev)
+    previous_total = fetch_fiscal_year_quantity_total(fin_year_start - 1, month_abbrev)
 
     result = compute_report(month_abbrev, calendar_year)
 
