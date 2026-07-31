@@ -163,12 +163,24 @@ def _aggregate(lines, debug=False, month_label=None, foreign_indian_placeholder=
         lines_with_qty += 1
         qty_k = qty_mt / 1000.0   # tonnes -> '000 Tonnes
 
-        cat_raw = (ln.get('category') or '').strip().upper()
-        commodity = CATEGORY_MAP.get(cat_raw)
-        if commodity is None:
-            if cat_raw:
-                unmapped_categories.add(ln.get('category'))
-            commodity = 'OTHER BULK'
+        # Historical MIS
+        if "category" in ln:
+
+            cat_raw = str(ln.get("category") or "").strip().upper()
+
+            commodity = CATEGORY_MAP.get(cat_raw)
+
+        # Live data
+        else:
+
+            commodity = (
+                ln.get("cargo_sub_category_2")
+                or ln.get("cargo_sub_category")
+                or ln.get("cargo_category")
+            )
+
+        if commodity not in COMMODITIES:
+            commodity = "OTHER BULK"
 
         oc = (ln.get('overseas_coastal') or '').strip().lower()
         is_coastal = oc.startswith('cost') or oc.startswith('coast')  # 'Costal' typo-safe
@@ -332,34 +344,46 @@ def _fetch_live_rows(year_str, month_str):
     cur = get_cursor(conn)
     cur.execute("""
         SELECT
-            vh.vessel_run_type   AS overseas_coastal,
-            vh.operation_type    AS import_export,
-            vh.cargo_type        AS cargo_type_raw,
-            COALESCE(vc_exact.cargo_sub_category_2, vc_fuzzy.cargo_sub_category_2) AS category,
+            vh.vessel_run_type AS overseas_coastal,
+            vh.operation_type AS import_export,
+
+            vc.cargo_category,
+            vc.cargo_sub_category,
+            vc.cargo_sub_category_2,
+
             SUM(
                 CASE
-                    WHEN COALESCE(lpl.is_deleted,false) = false
-                    AND COALESCE(lpl.is_shortclose,false) = false
+                    WHEN COALESCE(lpl.is_deleted,false)=false
+                    AND COALESCE(lpl.is_shortclose,false)=false
                     THEN COALESCE(lpl.quantity,0)
                     ELSE 0
                 END
             ) AS quantity
+
         FROM vcn_header vh
-        JOIN ldud_header ldh         ON ldh.vcn_id = vh.id
-        JOIN ldud_parcel_ops lpo     ON lpo.ldud_id = ldh.id
-        JOIN lueu_parcel_log lpl     ON lpl.parcel_op_id = lpo.id
-        LEFT JOIN vessel_cargo vc_exact
-               ON UPPER(vc_exact.cargo_name) = UPPER(vh.cargo_type)
-        LEFT JOIN vessel_cargo vc_fuzzy
-               ON vc_exact.id IS NULL
-              AND UPPER(vh.cargo_type) LIKE '%%' || UPPER(vc_fuzzy.cargo_name) || '%%'
-  
-            
-        GROUP BY vh.id, vh.vessel_run_type, vh.operation_type, vh.cargo_type,
-                COALESCE(
-                    vc_exact.cargo_sub_category_2,
-                    vc_fuzzy.cargo_sub_category_2
-                )
+
+        JOIN ldud_header ldh
+            ON ldh.vcn_id = vh.id
+
+        JOIN ldud_parcel_ops lpo
+            ON lpo.ldud_id = ldh.id
+
+        JOIN lueu_parcel_log lpl
+            ON lpl.parcel_op_id = lpo.id
+
+        LEFT JOIN vessel_cargo vc
+            ON UPPER(TRIM(vc.cargo_name))
+            = UPPER(TRIM(lpo.cargo_name))
+
+        WHERE lpl.is_deleted = false
+        AND lpl.is_shortclose = false
+
+        GROUP BY
+            vh.vessel_run_type,
+            vh.operation_type,
+            vc.cargo_category,
+            vc.cargo_sub_category,
+            vc.cargo_sub_category_2
     """, [start, end])
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
@@ -367,11 +391,15 @@ def _fetch_live_rows(year_str, month_str):
     lines = []
     for r in rows:
         lines.append({
-            'overseas_coastal': r.get('overseas_coastal'),
-            'foreign_indian': 'I',   # PLACEHOLDER — see module docstring
-            'import_export': r.get('import_export'),
-            'category': r.get('category') or r.get('cargo_type_raw'),
-            'quantity': r.get('quantity'),
+            "overseas_coastal": r["overseas_coastal"],
+            "foreign_indian": "I",
+            "import_export": r["import_export"],
+
+            "cargo_category": r["cargo_category"],
+            "cargo_sub_category": r["cargo_sub_category"],
+            "cargo_sub_category_2": r["cargo_sub_category_2"],
+
+            "quantity": r["quantity"]
         })
     return lines
 
