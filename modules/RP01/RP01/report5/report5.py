@@ -1389,67 +1389,14 @@ def fetch_commodity_turnaround_from_mis(commodity: str, month_abbrev: str, calen
 
 
 def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str, calendar_year: int):
-    """Turnaround (+ vessel_count) from ldud_header, parcel size from
-    lueu_parcel_log, both filtered by commodity and by calendar
-    month/year, joined only at the "same commodity + same month"
-    aggregate level (no confirmed shared row key between the two
-    tables -- see module note above).
 
-    FIXED vs. the previous version:
-      - Turnaround query had no commodity filter at all.
-      - Parcel-size query filtered lueu_parcel_log with
-        `entry_date::date >= ... AND entry_date::date < ...` in SQL.
-        Everywhere else in this file, entry_date is treated as
-        untrustworthy free text and parsed in Python with dateutil
-        specifically to survive inconsistent formats (see module
-        docstring, assumption 2) -- filtering it with a SQL cast risks
-        a hard query failure (Postgres raising on a single unparsable
-        entry_date value would fail the whole query, not just that
-        row). This version fetches broadly and parses/filters in
-        Python instead, matching fetch_quantity_from_parcel_log's
-        approach.
-      - There was no commodity filter on the parcel-size query either.
-
-    SHORT CLOSE (added 31-Jul-2026): the parcel-size query now also
-    subtracts quantity for rows flagged short_close, matching
-    fetch_quantity_from_parcel_log. The averaging denominator
-    (parcel_count) still counts a short-close row -- it contributed a
-    real (negative) amount to total_qty, so excluding it from the count
-    would double-penalize the average. Flag if you'd rather exclude
-    short-close rows from the denominator entirely.
-
-    ASSUMPTION (per user instruction, 30-Jul-2026): ldud_header and
-    lueu_parcel_log are used only for the Liquid berths/commodity, so
-    there's no commodity filter applied here -- every row in these two
-    tables for the given month/year is treated as Liquid. This was
-    confirmed to be necessary because neither table has any commodity
-    column (see LDUD_COMMODITY_COLUMN / PARCEL_LOG_COMMODITY_COLUMN
-    comments above for the full confirmed column lists), and the one
-    candidate column, lueu_parcel_log.medium, was checked and only
-    contains handling-method values ('Direct Pipe', 'Equipment'), not
-    commodity/cargo type.
-
-    If the new system ever handles a non-Liquid commodity through these
-    same tables, this function will need a real commodity source (a
-    join to another table, most likely) to stay correct -- right now it
-    will attribute ALL rows to whatever commodity is requested, which is
-    only safe under the "Liquid-only" assumption above.
-    """
     month_num = MONTH_NUM[month_abbrev]
-
-    logger.debug(
-        "fetch_commodity_turnaround_from_new_system: commodity=%r (no commodity "
-        "filter applied -- see Liquid-only assumption in docstring) month=%s year=%s "
-        "using ldud columns alongside=%r castoff=%r",
-        commodity, month_abbrev, calendar_year,
-        LDUD_ALONGSIDE_COLUMN, LDUD_CASTOFF_COLUMN,
-    )
 
     conn = get_db()
     try:
         cur = get_cursor(conn)
 
-        # ---------------- Turnaround (+ vessel_count) ----------------
+        # ---------------- Turnaround ----------------
         cur.execute(
             f"""
             SELECT
@@ -1457,107 +1404,153 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
                 {LDUD_ALONGSIDE_COLUMN} AS alongside_raw,
                 {LDUD_CASTOFF_COLUMN} AS castoff_raw
             FROM ldud_header
-            WHERE COALESCE(is_deleted, false) = false
+            WHERE COALESCE(is_deleted, false)=false
+              AND {LDUD_ALONGSIDE_COLUMN} IS NOT NULL
+              AND {LDUD_CASTOFF_COLUMN} IS NOT NULL
             """
         )
         turnaround_rows = cur.fetchall()
 
-        # ---------------- Average Parcel Size ----------------
-        # Fetched broadly and filtered/parsed in Python, per module
-        # convention for entry_date (free-text, not a trustworthy real
-        # date/timestamp column -- see docstring assumption 2).
+        # ---------------- Parcel Size ----------------
         cur.execute(
             f"""
-            SELECT entry_date, quantity, {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
+            SELECT
+                entry_date,
+                quantity,
+                {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
             FROM lueu_parcel_log
-            WHERE COALESCE(is_deleted, false) = false
+            WHERE COALESCE(is_deleted,false)=false
               AND quantity IS NOT NULL
             """
         )
         parcel_rows = cur.fetchall()
+
     except Exception:
         logger.exception(
-            "fetch_commodity_turnaround_from_new_system: query FAILED for "
-            "commodity=%r month=%s year=%s",
-            commodity, month_abbrev, calendar_year,
+            "fetch_commodity_turnaround_from_new_system failed"
         )
         raise
     finally:
         conn.close()
 
-    logger.debug(
-        "fetch_commodity_turnaround_from_new_system: commodity=%r -> "
-        "%d ldud_header row(s), %d lueu_parcel_log row(s) (before month/year filtering)",
-        commodity, len(turnaround_rows), len(parcel_rows),
-    )
-
-    # --- Turnaround: filter to this calendar month/year by alongside date ---
+    # ---------- Filter turnaround ----------
     matched_turnaround_rows = []
+
     for r in turnaround_rows:
         alongside = _parse_text_datetime(r["alongside_raw"])
-        if alongside and alongside.year == calendar_year and alongside.month == month_num:
+        castoff = _parse_text_datetime(r["castoff_raw"])
+
+        if not alongside or not castoff:
+            continue
+
+        if alongside.year == calendar_year and alongside.month == month_num:
             matched_turnaround_rows.append(r)
 
-    avg_turnaround_days, vessel_count, debug_rows = _sum_turnaround_hours(matched_turnaround_rows)
+    avg_turnaround_days, vessel_count, debug_rows = _sum_turnaround_hours(
+        matched_turnaround_rows
+    )
+
     avg_turnaround_days = (
-        round(avg_turnaround_days / 24.0 / vessel_count, 2)
+        round(avg_turnaround_days / 24 / vessel_count, 2)
         if vessel_count else None
     )
 
-    # --- Parcel size: filter to this calendar month/year by entry_date,
-    # subtracting short-close rows instead of adding them ---
-    total_qty = 0.0
-    parcel_count = 0
-    short_close_rows = 0
+    # ---------- Parcel Size ----------
+    total_qty = 0
+
     for r in parcel_rows:
+
         d = _parse_text_date(r["entry_date"])
-        if d and d.year == calendar_year and d.month == month_num:
-            qty = float(r["quantity"] or 0)
-            if r["short_close"]:
-                total_qty -= qty
-                short_close_rows += 1
-            else:
-                total_qty += qty
-            parcel_count += 1
 
-    avg_parcel_size = round(total_qty / vessel_count, 2) if vessel_count else None
+        if not d:
+            continue
 
-    logger.debug(
-        "fetch_commodity_turnaround_from_new_system: commodity=%r month=%s year=%s -> "
-        "avg_turnaround_days=%s vessel_count=%d avg_parcel_size=%s "
-        "(from %d matched parcel rows, %d short-close rows subtracted)",
-        commodity, month_abbrev, calendar_year, avg_turnaround_days, vessel_count,
-        avg_parcel_size, parcel_count, short_close_rows,
+        if d.year != calendar_year or d.month != month_num:
+            continue
+
+        qty = float(r["quantity"] or 0)
+
+        if r["short_close"]:
+            total_qty -= qty
+        else:
+            total_qty += qty
+
+    avg_parcel_size = (
+        round(total_qty / vessel_count, 2)
+        if vessel_count else None
     )
 
-    return avg_turnaround_days, avg_parcel_size, vessel_count, debug_rows
+    logger.debug(
+        "Commodity=%s Month=%s-%s Qty=%s Vessel=%s AvgTA=%s AvgParcel=%s",
+        commodity,
+        month_abbrev,
+        calendar_year,
+        total_qty,
+        vessel_count,
+        avg_turnaround_days,
+        avg_parcel_size,
+    )
+
+    return (
+        avg_turnaround_days,
+        avg_parcel_size,
+        vessel_count,
+        debug_rows,
+    )
 
 
 def _sum_turnaround_hours(rows):
-    """Shared helper: given rows with vessel_name/alongside_raw/castoff_raw,
-    return (total_hours, vessel_count, debug_rows). Rows with unparsable
-    or out-of-order dates are excluded from both the sum and the count."""
+    """
+    Returns:
+        total_hours,
+        vessel_count,
+        debug_rows
+    """
+
     total_hours = 0.0
     vessel_count = 0
     debug_rows = []
 
     for r in rows:
-        vessel_name = r["vessel_name"]
-        alongside = _parse_text_datetime(r["alongside_raw"])
-        castoff = _parse_text_datetime(r["castoff_raw"])
+        vessel_name = r.get("vessel_name")
 
-        if not alongside or not castoff or castoff <= alongside:
+        alongside = _parse_text_datetime(r.get("alongside_raw"))
+        castoff = _parse_text_datetime(r.get("castoff_raw"))
+
+        if alongside is None or castoff is None:
+            logger.debug(
+                "Skipping %s : Invalid date (Alongside=%s Castoff=%s)",
+                vessel_name,
+                r.get("alongside_raw"),
+                r.get("castoff_raw"),
+            )
+            continue
+
+        if castoff <= alongside:
+            logger.debug(
+                "Skipping %s : Castoff <= Alongside",
+                vessel_name,
+            )
             continue
 
         hours = (castoff - alongside).total_seconds() / 3600.0
+
         total_hours += hours
         vessel_count += 1
+
         debug_rows.append({
             "vessel_name": vessel_name,
-            "alongside": alongside.isoformat(),
-            "castoff": castoff.isoformat(),
+            "alongside": alongside.strftime("%d-%b-%Y %H:%M"),
+            "castoff": castoff.strftime("%d-%b-%Y %H:%M"),
             "hours": round(hours, 2),
         })
+
+    logger.debug(
+        "Total Hours = %.2f | Vessel Count = %d | Average Days = %.2f",
+        total_hours,
+        vessel_count,
+        (total_hours / 24 / vessel_count) if vessel_count else 0,
+    )
 
     return total_hours, vessel_count, debug_rows
 
