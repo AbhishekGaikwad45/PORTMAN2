@@ -218,10 +218,14 @@
 <script>
 let META3 = { years: [], months: {} };
 
-function fmtVal(v) {
+function fmtVal(v, unit) {
     if (v === null || v === undefined) return "";
 
     const num = Number(v);
+
+    if (unit === "000 Tonnes") {
+        return num.toFixed(6);
+    }
 
     if (Number.isInteger(num)) {
         return num.toString();
@@ -348,7 +352,7 @@ function renderRow(r) {
         } else if (v) {
             cls += " highlight-cell";
         }
-        return `<td class="${cls}">${fmtVal(v)}</td>`;
+        return `<td class="${cls}">${fmtVal(v, r.unit)}</td>`;
     }).join("");
 
     return `
