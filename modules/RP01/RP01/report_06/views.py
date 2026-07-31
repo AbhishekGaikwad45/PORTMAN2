@@ -167,20 +167,16 @@ def _aggregate(lines, debug=False, month_label=None, foreign_indian_placeholder=
         if "category" in ln:
 
             cat_raw = str(ln.get("category") or "").strip().upper()
-
-            commodity = CATEGORY_MAP.get(cat_raw)
+            commodity = CATEGORY_MAP.get(cat_raw, "OTHER BULK")
 
         # Live data
         else:
 
-            commodity = (
-                ln.get("cargo_sub_category_2")
-                or ln.get("cargo_sub_category")
-                or ln.get("cargo_category")
-            )
+            cat_raw = str(
+                ln.get("cargo_sub_category_2") or ""
+            ).strip().upper()
 
-        if commodity not in COMMODITIES:
-            commodity = "OTHER BULK"
+            commodity = CATEGORY_MAP.get(cat_raw, "OTHER BULK")
 
         oc = (ln.get('overseas_coastal') or '').strip().lower()
         is_coastal = oc.startswith('cost') or oc.startswith('coast')  # 'Costal' typo-safe
