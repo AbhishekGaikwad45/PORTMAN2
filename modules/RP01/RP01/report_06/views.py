@@ -375,8 +375,11 @@ def _fetch_live_rows(year_str, month_str):
             ON UPPER(TRIM(vc.cargo_name))
             = UPPER(TRIM(lpo.cargo_name))
 
-        WHERE lpl.is_deleted = false
-        AND lpl.is_shortclose = false
+        WHERE COALESCE(lpl.is_deleted,false)=false
+        AND COALESCE(lpl.is_shortclose,false)=false
+        AND NULLIF(TRIM(lpl.entry_date),'') IS NOT NULL
+        AND NULLIF(TRIM(lpl.entry_date),'')::date >= %s::date
+        AND NULLIF(TRIM(lpl.entry_date),'')::date < %s::date
 
         GROUP BY
             vh.vessel_run_type,
