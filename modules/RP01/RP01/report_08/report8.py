@@ -602,7 +602,12 @@ def report8_api_export():
                     pass  # leave blank, matching reference template
                 elif row["available"]:
                     cell.value = v
-                    cell.number_format = "0.00"
+                    if row["unit"] == "000 Tonnes":
+                        cell.number_format = "0.000000"
+                    elif row["unit"] == "Days":
+                        cell.number_format = "0.00"
+                    else:
+                        cell.number_format = "0"
                     if row.get("split_unavailable"):
                         cell.font = red_font
                     elif v:
