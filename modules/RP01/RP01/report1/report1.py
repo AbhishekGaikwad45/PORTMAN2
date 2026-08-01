@@ -229,13 +229,23 @@ def _load_live_pipeline_data():
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT l.entry_date, po.cargo_name, l.quantity
-            FROM lueu_parcel_log l
-            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
-            WHERE l.is_deleted IS NOT TRUE
-              AND l.entry_date IS NOT NULL
-              AND l.quantity IS NOT NULL
-        """)
+                SELECT
+                    l.entry_date,
+                    po.cargo_name,
+                    l.quantity
+                FROM lueu_parcel_log l
+
+                JOIN ldud_parcel_ops po
+                    ON po.id = l.parcel_op_id
+
+                JOIN ldud_header h
+                    ON h.id = po.ldud_id
+
+                WHERE l.is_deleted IS NOT TRUE
+                AND NOT COALESCE(l.is_shortclose, FALSE)
+                AND l.quantity IS NOT NULL
+                AND h.cast_off_datetime IS NOT NULL
+            """)
         rows = cur.fetchall()
     finally:
         conn.close()
@@ -332,12 +342,20 @@ def load_data() -> pd.DataFrame:
 
     # ---- which (fin_year, month) periods does mis_vessel_master actually
     # cover? Only periods with ZERO rows there fall back to the live pipeline. ----
-    covered_periods = set(zip(mv_df["fin_year"], mv_df["fy_month_idx"]))
+    covered_periods = {
+        (fy, idx)
+        for fy, idx in zip(mv_df["fin_year"], mv_df["fy_month_idx"])
+        if idx <= 2      # Apr=0, May=1, Jun=2
+    }
 
     live_df = _load_live_pipeline_data()
+
     if not live_df.empty:
         live_df = live_df[
-            ~live_df.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+            ~live_df.apply(
+                lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods,
+                axis=1
+            )
         ]
 
     combined = pd.concat([mv_df, live_df], ignore_index=True)
