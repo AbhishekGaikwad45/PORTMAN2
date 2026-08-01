@@ -552,6 +552,7 @@ def report1_export_excel():
             t['co_imp_if'], t['co_imp_ff'], t['co_exp_if'], t['co_exp_ff'], t['co_total'], t['grand_total']]
     for ci, v in enumerate(vals, start=1):
         cell = ws.cell(r, ci, v)
+        cell.number_format = '0.000000'
         cell.font = bold
         cell.border = border
         cell.alignment = center
