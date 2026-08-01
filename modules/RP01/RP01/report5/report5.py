@@ -1409,7 +1409,6 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
                 ON ldh.id = lpo.ldud_id
             WHERE COALESCE(lpl.is_deleted, false) = false
             AND COALESCE(lpl.is_shortclose, false) = false
-            AND lpl.entry_date IS NOT NULL
             AND lpl.quantity IS NOT NULL
             AND NULLIF(TRIM(ldh.cast_off_datetime), '') IS NOT NULL
         """)
