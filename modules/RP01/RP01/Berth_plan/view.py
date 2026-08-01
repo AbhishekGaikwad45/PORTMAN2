@@ -149,7 +149,7 @@ def get_expected_waiting_vessels(window_start, window_end):
     out = []
 
     for r in rows:
-        tank_terminal = r.get("ops_terminal_name") or r.get("declared_terminal_name")
+        tank_terminal = r.get("ops_terminal_name") or r.get("declared_terminal_name") or "JJLTPL"
         load_port = r.get("load_port")
 
         # Waiting vessels haven't started ops yet — base CONS purely on
@@ -366,23 +366,76 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
 
     cargo_completed = cur.fetchone()['completed']
     
-    cur.execute("""
-        SELECT l.remarks
-        FROM ldud_parcel_ops po
-        JOIN lueu_parcel_log l
-            ON l.parcel_op_id = po.id
-        WHERE po.ldud_id = %s
-        AND l.is_deleted IS NOT TRUE
-        ORDER BY
-            po.id DESC,
-            NULLIF(l.entry_date,'')::date DESC,
-            NULLIF(l.to_time,'')::time DESC,
-            l.id DESC
-        LIMIT 1
-    """, [ldud_id])
+    # ── Remarks: last remark of every IN-PROGRESS parcel (balance > 0).
+    #    If every parcel is complete, fall back to a shortclose remark if
+    #    one exists, else the last parcel's last remark. ──
+    cur.execute('''
+        SELECT id, quantity
+        FROM ldud_parcel_ops
+        WHERE ldud_id = %s
+        ORDER BY id ASC
+    ''', [ldud_id])
+    remark_pos = cur.fetchall()
 
-    remark_row = cur.fetchone()
-    remarks = remark_row["remarks"] if remark_row else ""
+    parcel_remarks = []       # last remark text for each in-progress parcel
+    last_parcel_remark = ""   # last remark of the last parcel (any status)
+    shortclose_remark = ""    # most recent shortclose remark, if any
+
+    for idx, po in enumerate(remark_pos, start=1):
+        po_id = po['id']
+        target = float(po['quantity'] or 0)
+
+        cur.execute('''
+            SELECT COALESCE(SUM(quantity), 0) AS qty
+            FROM lueu_parcel_log
+            WHERE parcel_op_id = %s
+              AND is_deleted IS NOT TRUE
+              AND is_shortclose IS NOT TRUE
+        ''', [po_id])
+        logged_qty = float(cur.fetchone()['qty'] or 0)
+        in_progress = (target - logged_qty) > 0
+
+        cur.execute('''
+            SELECT remarks
+            FROM lueu_parcel_log
+            WHERE parcel_op_id = %s
+              AND is_deleted IS NOT TRUE
+            ORDER BY
+                NULLIF(entry_date,'')::date DESC,
+                NULLIF(to_time,'')::time DESC,
+                id DESC
+            LIMIT 1
+        ''', [po_id])
+        last_row = cur.fetchone()
+        last_remark = (last_row['remarks'] if last_row else '') or ''
+
+        if in_progress and last_remark:
+            parcel_remarks.append(last_remark)
+        if idx == len(remark_pos):
+            last_parcel_remark = last_remark
+
+        cur.execute('''
+            SELECT remarks
+            FROM lueu_parcel_log
+            WHERE parcel_op_id = %s
+              AND is_deleted IS NOT TRUE
+              AND is_shortclose IS TRUE
+            ORDER BY
+                NULLIF(entry_date,'')::date DESC,
+                NULLIF(to_time,'')::time DESC,
+                id DESC
+            LIMIT 1
+        ''', [po_id])
+        sc_row = cur.fetchone()
+        if sc_row and sc_row['remarks']:
+            shortclose_remark = sc_row['remarks']
+
+    if parcel_remarks:
+        remarks = ', '.join(parcel_remarks)
+    elif shortclose_remark:
+        remarks = shortclose_remark
+    else:
+        remarks = last_parcel_remark
 
     # target_qty comes from the live VCN parcel quantities (via get_started_parcels) —
     # this is a "current truth" number and is NOT date-dependent.
