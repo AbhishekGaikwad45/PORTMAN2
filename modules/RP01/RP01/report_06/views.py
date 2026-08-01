@@ -543,6 +543,8 @@ def report1_export_excel():
             cell = ws.cell(r, ci, v if v else (row['commodity'] if ci == 1 else 0.00))
             cell.border = border
             cell.alignment = center
+            if ci != 1:
+                cell.number_format = '0.000000'
             if ci == 6 or ci == 11:
                 cell.fill = grey
         r += 1
