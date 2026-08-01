@@ -543,6 +543,8 @@ def report1_export_excel():
             cell = ws.cell(r, ci, v if v else (row['commodity'] if ci == 1 else 0.00))
             cell.border = border
             cell.alignment = center
+            if ci != 1:
+                cell.number_format = '0.000000'
             if ci == 6 or ci == 11:
                 cell.fill = grey
         r += 1
@@ -552,6 +554,7 @@ def report1_export_excel():
             t['co_imp_if'], t['co_imp_ff'], t['co_exp_if'], t['co_exp_ff'], t['co_total'], t['grand_total']]
     for ci, v in enumerate(vals, start=1):
         cell = ws.cell(r, ci, v)
+        cell.number_format = '0.000000'
         cell.font = bold
         cell.border = border
         cell.alignment = center
