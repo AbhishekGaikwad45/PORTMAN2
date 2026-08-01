@@ -373,9 +373,9 @@ def _fetch_live_rows(year_str, month_str):
 
         WHERE COALESCE(lpl.is_deleted,false)=false
         AND COALESCE(lpl.is_shortclose,false)=false
-        AND NULLIF(TRIM(lpl.entry_date),'') IS NOT NULL
-        AND NULLIF(TRIM(lpl.entry_date),'')::date >= %s::date
-        AND NULLIF(TRIM(lpl.entry_date),'')::date < %s::date
+        AND NULLIF(TRIM(ldh.cast_off_datetime),'') IS NOT NULL
+        AND NULLIF(TRIM(ldh.cast_off_datetime),'')::timestamp::date >= %s::date
+        AND NULLIF(TRIM(ldh.cast_off_datetime),'')::timestamp::date < %s::date
 
         GROUP BY
             vh.vessel_run_type,
