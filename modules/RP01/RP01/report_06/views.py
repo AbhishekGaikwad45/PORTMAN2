@@ -198,13 +198,17 @@ def _aggregate(lines, debug=False, month_label=None, foreign_indian_placeholder=
         co_total = b['co_imp_if'] + b['co_imp_ff'] + b['co_exp_if'] + b['co_exp_ff']
         rows.append({
             'commodity': c,
-            'ov_imp_if': round(b['ov_imp_if'], 2), 'ov_imp_ff': round(b['ov_imp_ff'], 2),
-            'ov_exp_if': round(b['ov_exp_if'], 2), 'ov_exp_ff': round(b['ov_exp_ff'], 2),
-            'ov_total': round(ov_total, 2),
-            'co_imp_if': round(b['co_imp_if'], 2), 'co_imp_ff': round(b['co_imp_ff'], 2),
-            'co_exp_if': round(b['co_exp_if'], 2), 'co_exp_ff': round(b['co_exp_ff'], 2),
-            'co_total': round(co_total, 2),
-            'grand_total': round(ov_total + co_total, 2),
+            'ov_imp_if': round(b['ov_imp_if'], 6),
+            'ov_imp_ff': round(b['ov_imp_ff'], 6),
+            'ov_exp_if': round(b['ov_exp_if'], 6),
+            'ov_exp_ff': round(b['ov_exp_ff'], 6),
+            'ov_total': round(ov_total, 6),
+            'co_imp_if': round(b['co_imp_if'], 6),
+            'co_imp_ff': round(b['co_imp_ff'], 6),
+            'co_exp_if': round(b['co_exp_if'], 6),
+            'co_exp_ff': round(b['co_exp_ff'], 6),
+            'co_total': round(co_total, 6),
+            'grand_total': round(ov_total + co_total, 6),
         })
         for k in grand:
             grand[k] += b[k]
@@ -212,13 +216,17 @@ def _aggregate(lines, debug=False, month_label=None, foreign_indian_placeholder=
     gov_total = grand['ov_imp_if'] + grand['ov_imp_ff'] + grand['ov_exp_if'] + grand['ov_exp_ff']
     gco_total = grand['co_imp_if'] + grand['co_imp_ff'] + grand['co_exp_if'] + grand['co_exp_ff']
     totals = {
-        'ov_imp_if': round(grand['ov_imp_if'], 3), 'ov_imp_ff': round(grand['ov_imp_ff'], 3),
-        'ov_exp_if': round(grand['ov_exp_if'], 3), 'ov_exp_ff': round(grand['ov_exp_ff'], 3),
-        'ov_total': round(gov_total, 3),
-        'co_imp_if': round(grand['co_imp_if'], 3), 'co_imp_ff': round(grand['co_imp_ff'], 3),
-        'co_exp_if': round(grand['co_exp_if'], 3), 'co_exp_ff': round(grand['co_exp_ff'], 3),
-        'co_total': round(gco_total, 3),
-        'grand_total': round(gov_total + gco_total, 3),
+        'ov_imp_if': round(grand['ov_imp_if'], 6),
+        'ov_imp_ff': round(grand['ov_imp_ff'], 6),
+        'ov_exp_if': round(grand['ov_exp_if'], 6),
+        'ov_exp_ff': round(grand['ov_exp_ff'], 6),
+        'ov_total': round(gov_total, 6),
+        'co_imp_if': round(grand['co_imp_if'], 6),
+        'co_imp_ff': round(grand['co_imp_ff'], 6),
+        'co_exp_if': round(grand['co_exp_if'], 6),
+        'co_exp_ff': round(grand['co_exp_ff'], 6),
+        'co_total': round(gco_total, 6),
+        'grand_total': round(gov_total + gco_total, 6),
     }
 
     debug_block = None
