@@ -1366,16 +1366,22 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         cur = get_cursor(conn)
 
         # ---------------- Turnaround (+ vessel_count) ----------------
-        cur.execute(
-            f"""
+        cur.execute("""
             SELECT
-                vessel_name,
-                {LDUD_ALONGSIDE_COLUMN} AS alongside_raw,
-                {LDUD_CASTOFF_COLUMN} AS castoff_raw
-            FROM ldud_header
-            WHERE COALESCE(is_deleted, false) = false
-            """
-        )
+                lpl.entry_date,
+                lpl.quantity,
+                ldh.cast_off_datetime
+            FROM lueu_parcel_log lpl
+            JOIN ldud_parcel_ops lpo
+                ON lpo.id = lpl.parcel_op_id
+            JOIN ldud_header ldh
+                ON ldh.id = lpo.ldud_id
+            WHERE COALESCE(lpl.is_deleted, false) = false
+            AND COALESCE(lpl.is_shortclose, false) = false
+            AND lpl.entry_date IS NOT NULL
+            AND lpl.quantity IS NOT NULL
+            AND NULLIF(TRIM(ldh.cast_off_datetime), '') IS NOT NULL
+        """)
         turnaround_rows = cur.fetchall()
 
         # ---------------- Average Parcel Size ----------------
