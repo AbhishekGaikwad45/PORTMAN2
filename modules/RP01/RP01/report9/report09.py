@@ -160,14 +160,15 @@ def _load_live_pipeline_data() -> pd.DataFrame:
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT l.entry_date, h.id AS vcn_id, h.berth_name, h.operation_type, l.quantity
+            SELECT ld.cast_off_datetime, h.id AS vcn_id, h.berth_name, h.operation_type, l.quantity
             FROM lueu_parcel_log l
             JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
             JOIN ldud_header ld ON ld.id = po.ldud_id
             JOIN vcn_header h ON h.id = ld.vcn_id
             WHERE l.is_deleted IS NOT TRUE
-              AND l.entry_date IS NOT NULL
-              AND l.quantity IS NOT NULL
+            AND COALESCE(l.is_shortclose, FALSE) = FALSE
+            AND ld.cast_off_datetime IS NOT NULL
+            AND l.quantity IS NOT NULL
         """)
         log_rows = cur.fetchall()
     finally:
@@ -183,13 +184,13 @@ def _load_live_pipeline_data() -> pd.DataFrame:
     ldf["import_export"] = ldf["operation_type"].apply(_norm_import_export)
     ldf["vcn_no"] = ldf["vcn_id"].astype(str)
 
-    ldf["entry_dt"] = ldf["entry_date"].apply(_parse_dt)
-    ldf = ldf.dropna(subset=["entry_dt"])
+    ldf["cast_off_dt"] = ldf["cast_off_datetime"].apply(_parse_dt)
+    ldf = ldf.dropna(subset=["cast_off_dt"])
     if ldf.empty:
         return empty
 
     fy_list, idx_list = [], []
-    for dt in ldf["entry_dt"]:
+    for dt in ldf["cast_off_dt"]:
         fy, idx = _dt_to_fy_month(dt)
         fy_list.append(fy)
         idx_list.append(idx)
