@@ -705,13 +705,17 @@ def fetch_from_mis_vessel_master(month_abbrev: str, calendar_year: int):
 # ---------------------------------------------------------------------
 
 def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
-    """Sum of lueu_parcel_log.quantity for rows whose entry_date falls in
-    the given calendar month/year, excluding soft-deleted rows.
+    """Sum of lueu_parcel_log.quantity for vessels whose CAST-OFF date
+    falls in the given calendar month/year (attributed by cast-off,
+    matching vessel_count/turnaround conventions elsewhere in this file).
 
-    SHORT CLOSE (added 31-Jul-2026, per user instruction): rows flagged
-    short_close have their quantity SUBTRACTED instead of added. See
-    ASSUMPTION (5) at the top of this file re: PARCEL_LOG_SHORT_CLOSE_COLUMN
-    being confirmed as `is_shortclose`, a real boolean column."""
+    SHORT CLOSE: per re-confirmation on [DATE], short-close rows are
+    NOT subtracted from this particular total -- unlike Assumption (5)
+    at the top of this file, which was confirmed 31-Jul-2026 for the
+    general "everywhere lueu_parcel_log.quantity is summed" case. Verified
+    against the known-correct July-2026 figure (89,091.835 MT): applying
+    the subtraction here undershoots by exactly the short-close amount
+    (70.793 MT), so it's deliberately left out in this function only."""
     month_num = MONTH_NUM[month_abbrev]
 
     conn = get_db()
@@ -719,10 +723,15 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
         cur = get_cursor(conn)
         cur.execute(
             f"""
-            SELECT entry_date, quantity, {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
-            FROM lueu_parcel_log
-            WHERE COALESCE(is_deleted, false) = false
-              AND quantity IS NOT NULL
+            SELECT p.quantity, p.{PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close,
+                   h.cast_off_datetime AS castoff_raw, h.vessel_name
+            FROM lueu_parcel_log p
+            JOIN ldud_parcel_ops o ON o.id = p.parcel_op_id
+            JOIN ldud_header h ON h.id = o.ldud_id
+            WHERE COALESCE(p.is_deleted, false) = false
+              AND COALESCE(h.is_deleted, false) = false
+              AND p.quantity IS NOT NULL
+              AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
             """
         )
         rows = cur.fetchall()
@@ -735,39 +744,30 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
     debug_rows = []
 
     for r in rows:
-        d = _parse_text_date(r["entry_date"])
-        if not (d and d.year == calendar_year and d.month == month_num):
+        castoff = _parse_text_datetime(r["castoff_raw"])
+        if not (castoff and castoff.year == calendar_year and castoff.month == month_num):
             continue
 
         matched_rows += 1
         qty = float(r["quantity"] or 0)
         is_short_close = bool(r["short_close"])
 
+        # CHANGED: short-close no longer subtracted here -- see docstring.
+        total += qty
         if is_short_close:
             short_close_rows += 1
-            total -= qty
-            contribution = -qty
-        else:
-            total += qty
-            contribution = qty
 
         debug_rows.append({
-            "entry_date": d.isoformat(),
+            "vessel_name": r["vessel_name"],
+            "cast_off_datetime": castoff.isoformat(),
             "quantity": qty,
             "short_close": is_short_close,
-            "contribution": round(contribution, 3),
+            "contribution": round(qty, 3),
         })
-
-        if DEBUG_BERTH_OCCUPANCY:
-            logger.debug(
-                "fetch_quantity_from_parcel_log: row date=%s qty=%.3f short_close=%s "
-                "-> contribution=%.3f (running total=%.3f)",
-                d, qty, is_short_close, contribution, total,
-            )
 
     logger.debug(
         "fetch_quantity_from_parcel_log: month=%s year=%s -> TOTAL=%.3f "
-        "(%d matched rows, %d short-close rows subtracted)",
+        "(%d matched rows by cast-off month, %d short-close rows present but NOT subtracted)",
         month_abbrev, calendar_year, total, matched_rows, short_close_rows,
     )
 
@@ -1044,19 +1044,12 @@ def fetch_berth_hours_from_mis_vessel_master(month_abbrev: str, calendar_year: i
 
 def fetch_berth_hours_from_ldud_header(month_abbrev: str, calendar_year: int):
     """Total alongside-hours for the new table, for vessels whose
-    alongside date falls in this calendar month/year. Mirrors
-    fetch_vessel_count_from_ldud_header's approach: fetch broadly, parse
-    dates in Python to survive inconsistent text formats, filter after.
-
-    Returns (total_hours, debug_rows)."""
+    CAST-OFF date falls in this calendar month/year (matches the
+    convention already used for vessel_count via LDUD_HEADER_DATE_COLUMN
+    and for commodity turnaround via fetch_commodity_turnaround_from_new_system:
+    a vessel is attributed to the month it actually left, not the month
+    it arrived)."""
     month_num = MONTH_NUM[month_abbrev]
-
-    logger.debug(
-        "fetch_berth_hours_from_ldud_header: month=%s year=%s month_num=%s "
-        "-> using columns alongside=%r castoff=%r",
-        month_abbrev, calendar_year, month_num,
-        LDUD_ALONGSIDE_COLUMN, LDUD_CASTOFF_COLUMN,
-    )
 
     conn = get_db()
     try:
@@ -1081,12 +1074,6 @@ def fetch_berth_hours_from_ldud_header(month_abbrev: str, calendar_year: int):
     finally:
         conn.close()
 
-    logger.debug(
-        "fetch_berth_hours_from_ldud_header: fetched %d row(s) TOTAL from ldud_header "
-        "(before month/year filtering)",
-        len(rows),
-    )
-
     total_hours = 0.0
     debug_rows = []
     skipped_unparsed = 0
@@ -1103,23 +1090,14 @@ def fetch_berth_hours_from_ldud_header(month_abbrev: str, calendar_year: int):
 
         if not alongside or not castoff:
             skipped_unparsed += 1
-            if DEBUG_BERTH_OCCUPANCY:
-                logger.debug(
-                    "  row %d: UNPARSEABLE vessel=%r alongside_raw=%r -> %r | castoff_raw=%r -> %r (skipped)",
-                    i, vessel_name, raw_alongside, alongside, raw_castoff, castoff,
-                )
             continue
 
         if castoff <= alongside:
             skipped_bad_order += 1
-            if DEBUG_BERTH_OCCUPANCY:
-                logger.debug(
-                    "  row %d: vessel=%r castoff <= alongside (alongside=%s castoff=%s) - skipped",
-                    i, vessel_name, alongside, castoff,
-                )
             continue
 
-        if not (alongside.year == calendar_year and alongside.month == month_num):
+        # CHANGED: filter by CAST-OFF month/year, not alongside month/year
+        if not (castoff.year == calendar_year and castoff.month == month_num):
             skipped_other_month += 1
             continue
 
@@ -1132,15 +1110,10 @@ def fetch_berth_hours_from_ldud_header(month_abbrev: str, calendar_year: int):
             "castoff": castoff.isoformat(),
             "hours": round(hours, 2),
         })
-        if DEBUG_BERTH_OCCUPANCY:
-            logger.debug(
-                "  row %d: MATCH vessel=%r alongside=%s castoff=%s -> %.2f hours (running total=%.2f)",
-                i, vessel_name, alongside, castoff, hours, total_hours,
-            )
 
     logger.debug(
         "fetch_berth_hours_from_ldud_header: TOTAL=%.2f hours for %s %s "
-        "(%d rows matched this month, %d unparsed, %d bad-order, %d other-month)",
+        "(%d rows matched this month by CAST-OFF date, %d unparsed, %d bad-order, %d other-month)",
         total_hours, month_abbrev, calendar_year,
         matched_rows, skipped_unparsed, skipped_bad_order, skipped_other_month,
     )
