@@ -574,7 +574,8 @@ def load_lueu_data(fin_year: str, month_idx: int) -> pd.DataFrame:
             JOIN lueu_parcel_log lul
                 ON lul.parcel_op_id = lpo.id
             WHERE lh.vessel_name IS NOT NULL
-              AND (lul.is_deleted IS NULL OR lul.is_deleted = FALSE)
+            AND NOT COALESCE(lul.is_deleted, FALSE)
+            AND NOT COALESCE(lul.is_shortclose, FALSE)
         """)
 
         rows = cur.fetchall()
@@ -896,33 +897,32 @@ def compute_report4(df: pd.DataFrame, lueu_df: pd.DataFrame, fin_year: str,
     for c in CATEGORY_ORDER:
         bucket = c["key"]
 
-        rows.append({
-            "sr": c["sr"],
-            "label": bucket,
-            "rail": round(rail[bucket], 6),
-            "rail_pct": pct(rail[bucket], grand["rail"]),
-            "road": round(road[bucket], 6),
-            "road_pct": pct(road[bucket], grand["road"]),
-            "inland": round(inland[bucket], 6),
-            "inland_pct": pct(inland[bucket], grand["inland"]),
-            "pipeline": round(pipeline[bucket], 6),
-            "pipeline_pct": pct(pipeline[bucket], grand["pipeline"]),
-            "total": round(total_col[bucket], 6),
-            "total_pct": pct(total_col[bucket], grand["total"]),
-        })
+    rows.append({
+        "sr": c["sr"],
+        "label": bucket,
+        "rail": f"{rail[bucket]:.6f}",
+        "rail_pct": pct(rail[bucket], grand["rail"]),
+        "road": f"{road[bucket]:.6f}",
+        "road_pct": pct(road[bucket], grand["road"]),
+        "inland": f"{inland[bucket]:.6f}",
+        "inland_pct": pct(inland[bucket], grand["inland"]),
+        "pipeline": f"{pipeline[bucket]:.6f}",
+        "pipeline_pct": pct(pipeline[bucket], grand["pipeline"]),
+        "total": f"{total_col[bucket]:.6f}",
+        "total_pct": pct(total_col[bucket], grand["total"]),
+    })
 
     return {
         "rows": rows,
         "grand": {
-            "rail": round(grand["rail"], 6),
-            "road": round(grand["road"], 6),
-            "inland": round(grand["inland"], 6),
-            "pipeline": round(grand["pipeline"], 6),
-            "total": round(grand["total"], 6),
+            "rail": f"{grand['rail']:.6f}",
+            "road": f"{grand['road']:.6f}",
+            "inland": f"{grand['inland']:.6f}",
+            "pipeline": f"{grand['pipeline']:.6f}",
+            "total": f"{grand['total']:.6f}",
         },
-        total_key: round(sum(op_totals.values()), 6),
+        total_key: f"{sum(op_totals.values()):.6f}",
     }
-
 
 @bp.route("/module/RP01/report4/")
 @login_required
