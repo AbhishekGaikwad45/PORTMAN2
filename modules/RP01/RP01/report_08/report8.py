@@ -107,31 +107,31 @@ def _load_live_pipeline_data():
  
         # ---- per-log-entry quantity rows (for Coastal / Overseas / Total Traffic) ----
         cur.execute("""
-            SELECT
-                NULLIF(TRIM(l.entry_date),'') AS entry_date,
-                h.id AS vcn_id,
-                h.vessel_run_type,
-                SUM(
-                    CASE
-                        WHEN COALESCE(l.is_deleted,false)=false
-                        AND COALESCE(l.is_shortclose,false)=false
-                        THEN COALESCE(l.quantity,0)
-                        ELSE 0
-                    END
-                ) AS quantity
-            FROM lueu_parcel_log l
-            JOIN ldud_parcel_ops po
-                ON po.id = l.parcel_op_id
-            JOIN ldud_header ld
-                ON ld.id = po.ldud_id
-            JOIN vcn_header h
-                ON h.id = ld.vcn_id
-            WHERE NULLIF(TRIM(l.entry_date),'') IS NOT NULL
-            GROUP BY
-                NULLIF(TRIM(l.entry_date),''),
-                h.id,
-                h.vessel_run_type;
-        """)
+                    SELECT
+                        ld.cast_off_datetime,
+                        h.id AS vcn_id,
+                        h.vessel_run_type,
+                        SUM(
+                            CASE
+                                WHEN COALESCE(l.is_deleted,false)=false
+                                AND COALESCE(l.is_shortclose,false)=false
+                                THEN COALESCE(l.quantity,0)
+                                ELSE 0
+                            END
+                        ) AS quantity
+                    FROM lueu_parcel_log l
+                    JOIN ldud_parcel_ops po
+                        ON po.id = l.parcel_op_id
+                    JOIN ldud_header ld
+                        ON ld.id = po.ldud_id
+                    JOIN vcn_header h
+                        ON h.id = ld.vcn_id
+                    WHERE ld.cast_off_datetime IS NOT NULL
+                    GROUP BY
+                        ld.cast_off_datetime,
+                        h.id,
+                        h.vessel_run_type;
+                """)
         log_rows = cur.fetchall()
  
         # ---- per-vessel-call rows (for turn-round time, vessel counts, container flag) ----
@@ -162,21 +162,21 @@ def _load_live_pipeline_data():
         ldf["quantity_000t"] = ldf["quantity"] / 1000.0
         ldf["overseas_coastal_norm"] = ldf["vessel_run_type"].apply(_norm_overseas_coastal)
  
-        # Convert entry_date safely
-        ldf["entry_date"] = pd.to_datetime(
-            ldf["entry_date"],
+        # Convert Cast Off Date safely
+        ldf["cast_off_dt"] = pd.to_datetime(
+            ldf["cast_off_datetime"],
             errors="coerce"
         )
 
-        # Remove invalid/blank dates
-        ldf = ldf.dropna(subset=["entry_date"]).copy()
+        # Keep only completed vessels
+        ldf = ldf.dropna(subset=["cast_off_dt"]).copy()
 
-        # Financial year and month
-        ldf["fin_year"] = ldf["entry_date"].apply(
+        # Financial Year & Month from Cast Off Date
+        ldf["fin_year"] = ldf["cast_off_dt"].apply(
             lambda d: _dt_to_fy_month(d)[0]
         )
 
-        ldf["fy_month_idx"] = ldf["entry_date"].apply(
+        ldf["fy_month_idx"] = ldf["cast_off_dt"].apply(
             lambda d: _dt_to_fy_month(d)[1]
         )
 
@@ -191,7 +191,9 @@ def _load_live_pipeline_data():
         vdf = pd.DataFrame(vessel_rows)
         vdf["alongside_dt"] = vdf["alongside_datetime"].apply(_parse_dt)
         vdf["cast_off_dt"] = vdf["cast_off_datetime"].apply(_parse_dt)
-        vdf = vdf.dropna(subset=["alongside_dt"])  # need at least alongside to bucket the period
+
+        # Fetch only completed vessels
+        vdf = vdf.dropna(subset=["cast_off_dt"]) # need at least alongside to bucket the period
         if not vdf.empty:
             vdf["departure_dt"] = vdf["cast_off_dt"]
             vdf["is_container"] = vdf["cargo_names"].apply(_text_has_container_keyword)
@@ -199,7 +201,7 @@ def _load_live_pipeline_data():
             vdf["vcn_no"] = vdf["vcn_id"].astype(str)
  
             fy_list, idx_list = [], []
-            for dt in vdf["alongside_dt"]:
+            for dt in vdf["cast_off_dt"]:
                 fy, idx = _dt_to_fy_month(dt)
                 fy_list.append(fy)
                 idx_list.append(idx)
@@ -330,18 +332,32 @@ def load_data():
         df["fin_year"] = df["fin_year"].str.strip()
         df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
         df["quantity_000t"] = df["quantity"] / 1000.0
-        df["fy_month_idx"] = df["month"].apply(month_str_to_idx)
-        df["overseas_coastal_norm"] = df["overseas_coastal"].apply(_norm_overseas_coastal)
-        df["is_container"] = df["category"].apply(_is_container)
- 
-        mv_df_rows = df[[
-            "fin_year", "fy_month_idx", "vcn_no", "quantity_000t", "overseas_coastal_norm"
-        ]].copy()
- 
+
+        # Parse datetime columns
         df["alongside_dt"] = df["alongside"].apply(_parse_dt)
         df["cast_off_dt"] = df["cast_off"].apply(_parse_dt)
         df["sail_cast_off_dt"] = df["sail_cast_off"].apply(_parse_dt)
+
+        # Departure = Cast Off, otherwise Sail Cast Off
         df["departure_dt"] = df["cast_off_dt"].combine_first(df["sail_cast_off_dt"])
+
+        # Keep only completed vessels
+        df = df[df["departure_dt"].notna()].copy()
+
+        # Financial Year & Month from Cast Off Date
+        df["fin_year"] = df["departure_dt"].apply(lambda d: _dt_to_fy_month(d)[0])
+        df["fy_month_idx"] = df["departure_dt"].apply(lambda d: _dt_to_fy_month(d)[1])
+
+        df["overseas_coastal_norm"] = df["overseas_coastal"].apply(_norm_overseas_coastal)
+        df["is_container"] = df["category"].apply(_is_container)
+
+        mv_df_rows = df[[
+            "fin_year",
+            "fy_month_idx",
+            "vcn_no",
+            "quantity_000t",
+            "overseas_coastal_norm"
+        ]].copy()
  
         mv_df_vessels = df.groupby(["fin_year", "fy_month_idx", "vcn_no"], as_index=False).agg(
             alongside_dt=("alongside_dt", "min"),
