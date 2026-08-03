@@ -331,13 +331,13 @@ EXPORT_SUM_CELLS = [
     ('F22', '=F8+F9', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), ('thin', None), None, ('thin', None)), ('right', None), '0.000'),
     ('G22', '=G8+G9', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (('thin', None), ('thin', None), None, ('thin', None)), ('right', None), '0.000'),
     ('H22', '=(G22-F22)/F22', ('Arial', 10.0, False, False, None, None), 'FF66CCFF', (None, ('thin', None), None, None), ('right', None), '0.00%'),
-   ('B23', 'Total', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
-('C23', None, ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
-('D23', '=SUM(D8:D10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
-('E23', '=SUM(E8:E10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), '0.00%'),
-('F23', '=SUM(F7:F9)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), None, None, ('thin', None)), ('right', None), '0.000'),
-('G23', '=SUM(G7:G10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), None, None, ('thin', None)), ('right', None), '0.000'),
-('H23', '=(G23-F23)/F23', ('Arial', 10.0, False, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('right', None), '0.00%'),
+    ('B23', 'Total', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
+    ('C23', None, ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), (None, None), 'General'),
+    ('D23', '=SUM(D8:D10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), 'General'),
+    ('E23', '=SUM(E8:E10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), ('thin', None), None, ('thin', None)), ('center', None), '0.00%'),
+    ('F23', '=SUM(F7:F9)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), None, None, ('thin', None)), ('right', None), '0.000'),
+    ('G23', '=SUM(G7:G10)', ('Arial', 10.0, True, False, None, None), 'FF92D050', (('thin', None), None, None, ('thin', None)), ('right', None), '0.000'),
+    ('H23', '=(G23-F23)/F23', ('Arial', 10.0, False, False, None, None), 'FF92D050', (('thin', None), ('thin', None), ('thin', None), ('thin', None)), ('right', None), '0.00%'),
     ('B24', None, ('Arial', 10.0, True, False, None, None), None, (None, None, None, None), (None, None), 'General'),
     ('B25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
     ('C25', None, ('Arial', 10.0, False, False, None, 'FFFF0000'), None, (None, None, None, None), (None, None), 'General'),
@@ -1399,9 +1399,11 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         # ---------------- Turnaround (+ vessel_count) ----------------
         cur.execute("""
             SELECT
+                ldh.vessel_name,
+                ldh.alongside_datetime AS alongside_raw,
+                ldh.cast_off_datetime AS castoff_raw,
                 lpl.entry_date,
-                lpl.quantity,
-                ldh.cast_off_datetime
+                lpl.quantity
             FROM lueu_parcel_log lpl
             JOIN ldud_parcel_ops lpo
                 ON lpo.id = lpl.parcel_op_id
@@ -1440,13 +1442,14 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
     matched_turnaround_rows = []
 
     for r in turnaround_rows:
-        alongside = _parse_text_datetime(r["alongside_raw"])
         castoff = _parse_text_datetime(r["castoff_raw"])
 
-        if not alongside or not castoff:
+        # Ignore vessels whose cast off is not completed
+        if not castoff:
             continue
 
-        if alongside.year == calendar_year and alongside.month == month_num:
+        # Count vessel in the month when cast off happened
+        if castoff.year == calendar_year and castoff.month == month_num:
             matched_turnaround_rows.append(r)
 
     avg_turnaround_days, vessel_count, debug_rows = _sum_turnaround_hours(
@@ -1804,9 +1807,10 @@ def report5_meta():
             "current_year": current_year,
             "fin_year_start": fin_year_start,
         })
-    except Exception as e:
+    except Exception:
+        import traceback
         traceback.print_exc()
-        return jsonify({"error": f"Unexpected server error: {e}"}), 500
+        raise
 
 
 @bp.route("/api/module/RP01/report5/report")
