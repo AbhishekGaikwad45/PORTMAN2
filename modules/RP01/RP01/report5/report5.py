@@ -158,7 +158,7 @@ MONTH_ABBREV_TO_FULL = {
 
 CUTOVER_DATE = date(2026, 7, 1)
 
-LDUD_HEADER_DATE_COLUMN = "created_date"
+LDUD_HEADER_DATE_COLUMN = "cast_off_datetime"
 
 
 LIQUID_BERTH_CODES_MIS = ["LB-03", "LB-04"]  # <-- CONFIRM this is the full/correct set
@@ -786,8 +786,9 @@ def fetch_vessel_count_from_ldud_header(month_abbrev: str, calendar_year: int) -
             f"""
             SELECT vessel_name, {LDUD_HEADER_DATE_COLUMN} AS event_date
             FROM ldud_header
-            WHERE vessel_name IS NOT NULL
-              AND COALESCE(is_deleted, false) = false
+            WHERE
+                COALESCE(is_deleted,false)=false
+                AND cast_off_datetime IS NOT NULL
             """
         )
         rows = cur.fetchall()
