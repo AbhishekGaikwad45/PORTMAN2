@@ -725,8 +725,8 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
             """
             SELECT
                 CASE
-                    WHEN p.is_shortclose THEN -p.quantity
-                    ELSE p.quantity
+                    WHEN p.is_shortclose THEN -COALESCE(p.quantity, 0)
+                    ELSE COALESCE(p.quantity, 0)
                 END AS quantity,
                 h.cast_off_datetime AS castoff_raw,
                 h.vessel_name
@@ -1036,11 +1036,14 @@ def fetch_jjltpl_from_parcel_log(month_abbrev: str, calendar_year: int) -> float
     conn = get_db()
     cur = get_cursor(conn)
 
-    cur.execute(f"""
-        SELECT entry_date, quantity, {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
+    cur.execute("""
+        SELECT
+            entry_date,
+            quantity
         FROM lueu_parcel_log
-        WHERE COALESCE(is_deleted,false)=false
-          AND terminal='JJLTPL'
+        WHERE COALESCE(is_deleted, false) = false
+        AND terminal = 'JJLTPL'
+        AND COALESCE(is_shortclose, false) = false
     """)
 
     rows = cur.fetchall()
@@ -1581,14 +1584,15 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
 
         # ---------------- Parcel Size ----------------
         cur.execute(
-            f"""
+            """
             SELECT
                 entry_date,
                 quantity,
-                {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
+                is_shortclose AS short_close
             FROM lueu_parcel_log
-            WHERE COALESCE(is_deleted,false)=false
-              AND quantity IS NOT NULL
+            WHERE COALESCE(is_deleted, false) = false
+            AND COALESCE(is_shortclose, false) = false
+            AND quantity IS NOT NULL
             """
         )
         parcel_rows = cur.fetchall()
