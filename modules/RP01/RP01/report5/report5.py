@@ -722,16 +722,23 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
     try:
         cur = get_cursor(conn)
         cur.execute(
-            f"""
-            SELECT p.quantity, p.{PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close,
-                   h.cast_off_datetime AS castoff_raw, h.vessel_name
+            """
+            SELECT
+                CASE
+                    WHEN p.is_shortclose THEN -p.quantity
+                    ELSE p.quantity
+                END AS quantity,
+                h.cast_off_datetime AS castoff_raw,
+                h.vessel_name
             FROM lueu_parcel_log p
-            JOIN ldud_parcel_ops o ON o.id = p.parcel_op_id
-            JOIN ldud_header h ON h.id = o.ldud_id
+            JOIN ldud_parcel_ops o
+                ON o.id = p.parcel_op_id
+            JOIN ldud_header h
+                ON h.id = o.ldud_id
             WHERE COALESCE(p.is_deleted, false) = false
-              AND COALESCE(h.is_deleted, false) = false
-              AND p.quantity IS NOT NULL
-              AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
+            AND COALESCE(h.is_deleted, false) = false
+            AND p.quantity IS NOT NULL
+            AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
             """
         )
         rows = cur.fetchall()
@@ -805,17 +812,199 @@ def fetch_vessel_count_from_ldud_header(month_abbrev: str, calendar_year: int) -
 
 
 # ---------------------------------------------------------------------
-# UNIFIED FETCH — picks the right source per month
+# LIVE DATA FALLBACK (borrowed from Report-12's logic)
+#
+# Report-12 does this: before trusting mis_vessel_master, it checks
+# whether the CURRENT month is already sitting in that table. If it is
+# not there yet (i.e. nobody has finished migrating this month's data
+# into mis_vessel_master), it goes and pulls the numbers live from the
+# VCN tables (vcn_header / vcn_consigners / vcn_export_cargo_declaration)
+# joined through ldud_header, instead of showing a blank/zero report.
+#
+# The two functions below copy that same idea for Report-5, written in
+# a plain, beginner-friendly way: simple SQL, a normal Python "for"
+# loop, no pandas. Nothing below replaces any of the existing
+# fetch_from_mis_vessel_master / fetch_quantity_from_parcel_log /
+# fetch_vessel_count_from_ldud_header functions above -- those are
+# still used exactly as before, just called from a different place.
 # ---------------------------------------------------------------------
 
+def month_already_in_mis(month_abbrev: str, calendar_year: int) -> bool:
+    """Simple yes/no check: does mis_vessel_master already have at
+    least one row for this month? (Same idea as Report-12's
+    "current month already in mis_rows" check.)"""
+    yy = str(calendar_year)[-2:]
+    month_str = f"{month_abbrev}-{yy}"
+
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+        cur.execute(
+            "SELECT COUNT(*) AS cnt FROM mis_vessel_master WHERE month = %(month_str)s",
+            {"month_str": month_str},
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+
+    count = int(row["cnt"] or 0) if row else 0
+    logger.debug(
+        "month_already_in_mis: month=%s -> %d row(s) found in mis_vessel_master",
+        month_str, count,
+    )
+    return count > 0
+
+
+def fetch_live_month_figures(month_abbrev: str, calendar_year: int):
+    """Beginner-style version of Report-12's "live VCN" query, adapted
+    to Report-5's simpler quantity + vessel_count shape.
+
+    Steps:
+      1. Get every vessel call from vcn_header, joined to ldud_header
+         (for the real cast-off date/time) and to the vcn cargo tables
+         (for quantity).
+      2. Loop over the rows in plain Python.
+      3. Keep only the rows whose cast-off date falls in the month we
+         were asked about.
+      4. Add up the quantity and collect the distinct vessel names.
+
+    Returns the same shape as fetch_from_mis_vessel_master() /
+    fetch_month_figures():
+        {"quantity": <float>, "vessel_count": <int>}
+    """
+    month_num = MONTH_NUM[month_abbrev]
+
+    conn = get_db()
+    try:
+        cur = get_cursor(conn)
+        cur.execute(
+            """
+            SELECT
+                h.vessel_name AS vessel_name,
+                lh.cast_off_datetime AS castoff_raw,
+                COALESCE(imp.quantity, 0) + COALESCE(exp.quantity, 0) AS quantity
+            FROM vcn_header h
+            JOIN ldud_header lh
+                ON lh.vcn_id = h.id
+            LEFT JOIN (
+                SELECT vcn_id, SUM(quantity::numeric) AS quantity
+                FROM vcn_consigners
+                GROUP BY vcn_id
+            ) imp
+                ON imp.vcn_id = h.id
+            LEFT JOIN (
+                SELECT vcn_id, SUM(quantity::numeric) AS quantity
+                FROM vcn_export_cargo_declaration
+                GROUP BY vcn_id
+            ) exp
+                ON exp.vcn_id = h.id
+            WHERE lh.cast_off_datetime IS NOT NULL
+              AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL
+            """
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    # Step 2 & 3 & 4: plain loop, no pandas.
+    total_quantity = 0.0
+    vessel_names_seen = set()
+
+    for row in rows:
+        cast_off = _parse_text_datetime(row["castoff_raw"])
+
+        # Skip rows we can't parse a date from.
+        if cast_off is None:
+            continue
+
+        # Only keep rows that belong to the requested month/year.
+        if cast_off.year != calendar_year or cast_off.month != month_num:
+            continue
+
+        total_quantity += float(row["quantity"] or 0)
+        vessel_names_seen.add(row["vessel_name"])
+
+    result = {
+        "quantity": round(total_quantity, 3),
+        "vessel_count": len(vessel_names_seen),
+    }
+
+    logger.debug(
+        "fetch_live_month_figures: month=%s year=%s -> quantity=%.3f vessel_count=%d "
+        "(from %d live vcn_header rows)",
+        month_abbrev, calendar_year, result["quantity"], result["vessel_count"], len(rows),
+    )
+
+    return result
+
+
+# ---------------------------------------------------------------------
+# UNIFIED FETCH — picks the right source per month
+# ---------------------------------------------------------------------
+#
+# CHANGED: for new-system months (Jul onward), this now also checks
+# mis_vessel_master first (Report-12 style). Only when that month is
+# NOT yet present in mis_vessel_master does it go live via
+# fetch_live_month_figures(); if the live data also comes back empty,
+# it falls back to the original lueu_parcel_log/ldud_header source so
+# the report never goes completely blank. Apr-Jun (legacy) behaviour
+# is completely unchanged.
+
 def fetch_month_figures(month_abbrev: str, calendar_year: int):
+    """Decide where this month's numbers should come from.
+
+    Step 1 - Apr/May/Jun (before CUTOVER_DATE): always the legacy
+             mis_vessel_master table. Nothing changes here.
+
+    Step 2 - Jul onward (new system): first check if mis_vessel_master
+             already has this month (same check Report-12 does). If it
+             does, just use it - it's the "final" migrated data.
+
+    Step 3 - If mis_vessel_master does NOT have this month yet, that
+             means the month is still "live" / in progress, so pull the
+             numbers straight from the VCN tables instead of showing
+             zero.
+
+    Step 4 - If, for any reason, the live fetch comes back completely
+             empty (e.g. no VCN rows exist yet either), fall back to the
+             original lueu_parcel_log / ldud_header source so the report
+             still shows something instead of nothing.
+    """
+
+    # Step 1: legacy months never change.
     if uses_legacy_source(month_abbrev, calendar_year):
         return fetch_from_mis_vessel_master(month_abbrev, calendar_year)
 
-    return {
-        "quantity": fetch_quantity_from_parcel_log(month_abbrev, calendar_year),
-        "vessel_count": fetch_vessel_count_from_ldud_header(month_abbrev, calendar_year),
-    }
+    # Step 2: new-system month - is it already in mis_vessel_master?
+    if month_already_in_mis(month_abbrev, calendar_year):
+        logger.debug(
+            "fetch_month_figures: %s-%s already in mis_vessel_master, using it",
+            month_abbrev, calendar_year,
+        )
+        return fetch_from_mis_vessel_master(month_abbrev, calendar_year)
+
+    # Step 3: not migrated yet -> go live.
+    logger.debug(
+        "fetch_month_figures: %s-%s NOT yet in mis_vessel_master, "
+        "pulling live VCN data instead",
+        month_abbrev, calendar_year,
+    )
+    live_result = fetch_live_month_figures(month_abbrev, calendar_year)
+
+    # Step 4: live data came back empty -> fall back to the old source
+    # so we never show a completely blank report.
+    if live_result["vessel_count"] == 0 and live_result["quantity"] == 0:
+        logger.debug(
+            "fetch_month_figures: live data empty for %s-%s, "
+            "falling back to lueu_parcel_log/ldud_header",
+            month_abbrev, calendar_year,
+        )
+        return {
+            "quantity": fetch_quantity_from_parcel_log(month_abbrev, calendar_year),
+            "vessel_count": fetch_vessel_count_from_ldud_header(month_abbrev, calendar_year),
+        }
+
+    return live_result
 
 
 def fetch_jjltpl_from_mis(month_abbrev: str, calendar_year: int) -> float:
