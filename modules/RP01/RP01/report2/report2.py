@@ -206,6 +206,7 @@ CARGO_ALIAS = {
 
     # ---- FERT. RAW MAT. - LIQUID -> PH. ACID ----
     "Phosphoric Acid": ("FERT. RAW MAT. - LIQUID", "PH. ACID"),
+    "PH ACID": ("FERT. RAW MAT. - LIQUID", "PH. ACID"),
 
     # ---- POL -> PRODUCT (confirmed: CBFS and FO both roll up here) ----
     "CBFS": ("POL", "PRODUCT"),
@@ -299,6 +300,19 @@ def _apply_cargo_alias(df: pd.DataFrame) -> pd.DataFrame:
             return "OTHER LIQUID", _norm("OTHER LIQUID"), ""
 
         key = _norm(cargo)
+
+        if key not in CARGO_ALIAS_NORM:
+            return row["category"], row["category_norm"], row["cargo_norm"]
+        
+        key = _norm(cargo)
+
+        # ---- Business override for PH ACID ----
+        if key == _norm("PH ACID"):
+            return (
+                "FERT. RAW MAT. - LIQUID",
+                _norm("FERT. RAW MAT. - LIQUID"),
+                _norm("PH. ACID")
+            )
 
         if key not in CARGO_ALIAS_NORM:
             return row["category"], row["category_norm"], row["cargo_norm"]
