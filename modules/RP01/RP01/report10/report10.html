@@ -1,0 +1,456 @@
+{% extends "base.html" %}
+
+{% block title %}Report-10 — Export Performance{% endblock %}
+
+{% block head %}
+<style>
+
+:root {
+    --rp-blue:         #2F6FED;
+    --rp-blue-dark:    #1D4FB8;
+    --rp-green:        #2E7D32;
+    --rp-green-dark:   #1B5E20;
+    --rp-green-header: #D9EAD3;
+    --rp-green-total:  #B6D7A8;
+    --rp-yellow:       #FFFF00;
+    --rp-yellow-bg:    #FDFDE8;
+    --rp-gray:         #D9D9D9;
+    --rp-red-label:    #B22222;
+    --rp-border:       #DDE3EA;
+    --rp-ink:          #1F2937;
+    --rp-muted:        #6B7280;
+    --rp-card:         #FFFFFF;
+    --rp-bg:           #F6F8FA;
+}
+
+.rp10-wrap * { box-sizing: border-box; }
+
+.rp10-wrap {
+    font-family: Calibri, Arial, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, Helvetica, sans-serif;
+}
+
+/* ── Header ── */
+.module-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--rp-border);
+}
+.module-header h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--rp-ink);
+}
+.rp-badge {
+    background: var(--rp-green);
+    color: #fff;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+}
+.rp-back {
+    margin-left: auto;
+    color: var(--rp-green);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+}
+.rp-back:hover { text-decoration: underline; }
+
+/* ── Toolbar ── */
+.report-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    background: var(--rp-card);
+    border: 1px solid var(--rp-border);
+    border-radius: 10px;
+}
+.report-toolbar label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--rp-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.report-toolbar select {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--rp-ink);
+    background: var(--rp-bg);
+    border: 1px solid var(--rp-border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+    outline: none;
+    min-width: 120px;
+}
+.report-toolbar select:focus { border-color: var(--rp-blue); }
+.report-toolbar button {
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 8px 16px;
+    border: none;
+    cursor: pointer;
+    color: #fff;
+    transition: background 0.15s;
+}
+.report-toolbar button:active { transform: translateY(1px); }
+.load-btn  { background: var(--rp-blue); }
+.load-btn:hover  { background: var(--rp-blue-dark); }
+.export-btn { background: var(--rp-green); margin-left: auto; }
+.export-btn:hover { background: var(--rp-green-dark); }
+
+/* ── Status ── */
+#reportStatus {
+    font-size: 13px;
+    color: var(--rp-muted);
+    min-height: 18px;
+    margin-bottom: 14px;
+}
+
+/* ── Report card ── */
+.report-card {
+    background: var(--rp-card);
+    border: 1px solid var(--rp-border);
+    border-radius: 10px;
+    padding: 24px;
+    overflow-x: auto;
+}
+.report-title {
+    font-size: 16px;
+    font-weight: 700;
+    text-align: center;
+    text-decoration: underline;
+    margin-bottom: 20px;
+    color: var(--rp-ink);
+}
+
+/* ── Main report table ── */
+.rp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.rp-table th,
+.rp-table td {
+    border: 1px solid #999;
+    padding: 6px 8px;
+}
+.rp-table thead th {
+    background: var(--rp-green-header);
+    font-weight: 700;
+    text-align: center;
+    vertical-align: middle;
+    white-space: pre-line;
+    line-height: 1.35;
+}
+.rp-table thead th.period-month {
+    background: var(--rp-yellow);
+}
+.rp-table thead th.period-upto {
+    background: #C9DAF8;
+}
+.rp-table tbody td {
+    text-align: right;
+}
+.rp-table tbody td.label-cell {
+    text-align: left;
+    font-weight: 500;
+    color: var(--rp-red-label);
+    white-space: nowrap;
+}
+.rp-table tbody tr.total-row td {
+    background: var(--rp-green-total);
+    font-weight: 700;
+    border-top: 2px solid var(--rp-ink);
+}
+.rp-table tbody tr.data-row:hover td {
+    background: #F0F4FF;
+}
+.rp-table tbody tr.total-row:hover td {
+    background: var(--rp-green-total);
+}
+
+/* negative variance highlight */
+.neg-var { color: #B22222; }
+.pos-var { color: #155724; }
+.na-var  { color: var(--rp-muted); font-style: italic; }
+
+/* side tags (Import / Export) */
+.side-tag-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+}
+.side-tag {
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 3px;
+    background: var(--rp-yellow);
+    color: var(--rp-ink);
+    white-space: nowrap;
+}
+
+/* Period info under the title */
+.period-info {
+    font-size: 12px;
+    color: var(--rp-muted);
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp10-wrap">
+
+<div class="module-header">
+    <h2>Report-10</h2>
+    <span class="rp-badge">RP01</span>
+    <a href="/module/RP01/" class="rp-back">← Back to Reports</a>
+</div>
+
+<!-- ── Toolbar ── -->
+<div class="report-toolbar">
+    <label for="monthSelect">Month</label>
+    <select id="monthSelect"></select>
+
+    <label for="yearSelect">Year</label>
+    <select id="yearSelect" onchange="onYearChange()"></select>
+
+    <button class="load-btn" onclick="loadReport()">Load</button>
+    <button class="export-btn" onclick="exportExcel()">Export Excel</button>
+</div>
+
+<div id="reportStatus"></div>
+
+<!-- ── Report card ── -->
+<div class="report-card">
+    <div id="reportTitle"  class="report-title"></div>
+    <div id="periodInfo"   class="period-info"></div>
+
+    <!-- a) Export Performance section label -->
+    <div id="sectionLabel" style="font-weight:700;font-size:13px;margin-bottom:8px;display:none;">
+        a) Export Performance:
+    </div>
+
+    <table class="rp-table" id="perfTable">
+        <thead>
+            <tr id="thRow1">
+                <th rowspan="2" class="label-cell" style="text-align:center;"><!-- blank --></th>
+                <th id="thMonth"  class="period-month" colspan="2"><!-- month label --></th>
+                <th rowspan="2" class="period-month" id="thVarMonth">Var. (%)</th>
+                <th id="thUptoCurr" class="period-upto" colspan="1"><!-- year curr --></th>
+                <th id="thUtpoPrev" colspan="1"><!-- year prev --></th>
+                <th rowspan="2" id="thVarUpto">Var. (%)</th>
+            </tr>
+            <tr id="thRow2">
+                <th class="period-month" id="thCurrMonth">During the month</th>
+                <th class="period-month" id="thPrevMonth">Last year this month</th>
+                <th class="period-upto"  id="thCurrUpto" >(Up to current month)</th>
+                <th id="thPrevUpto">(Up to previous year current month)</th>
+            </tr>
+        </thead>
+        <tbody id="perfBody"></tbody>
+    </table>
+</div>
+
+</div><!-- rp10-wrap -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+/* ──────────────────────────────────────────────────────────────
+   Helpers
+────────────────────────────────────────────────────────────── */
+
+let META = { years: [], months: {} };
+let LAST_RESULT = null;
+
+function status(msg, isError) {
+    const el = document.getElementById("reportStatus");
+    el.textContent = msg || "";
+    el.style.color = isError ? "#B22222" : "#6B7280";
+}
+
+function fmtQty(val) {
+    if (val === null || val === undefined || val === "") return "";
+    const n = Number(val);
+    if (isNaN(n)) return val;
+    return n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
+function fmtVar(val) {
+    if (val === null || val === undefined || val === "") return "";
+    if (typeof val === "string") {
+        // e.g. "#DIV/0!"
+        return `<span class="na-var">${val}</span>`;
+    }
+    const n = Number(val);
+    if (isNaN(n)) return val;
+    const formatted = n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const cls = n < 0 ? "neg-var" : n > 0 ? "pos-var" : "";
+    return `<span class="${cls}">${formatted}%</span>`;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   FY helpers (mirrors server-side Python)
+────────────────────────────────────────────────────────────── */
+
+function getCurrentFinYear() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0=Jan
+    const fyStart = (m >= 3) ? y : y - 1;
+    return `${fyStart}-${String(fyStart + 1).slice(-2)}`;
+}
+
+function getCurrentFyMonthIdx() {
+    const m = new Date().getMonth(); // 0=Jan..11=Dec
+    return (m - 3 + 12) % 12;       // Apr=0..Mar=11
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Populate dropdowns
+────────────────────────────────────────────────────────────── */
+
+function populateYearSelect() {
+    const sel = document.getElementById("yearSelect");
+    sel.innerHTML = META.years.map(y => `<option value="${y}">${y}</option>`).join("");
+    if (!META.years.length) return;
+    const curFy = getCurrentFinYear();
+    sel.value = META.years.includes(curFy) ? curFy : META.years[META.years.length - 1];
+}
+
+function populateMonthSelect() {
+    const sel   = document.getElementById("monthSelect");
+    const year  = document.getElementById("yearSelect").value;
+    const months = META.months[year] || [];
+    sel.innerHTML = months.map(m => `<option value="${m.idx}">${m.label}</option>`).join("");
+    if (!months.length) return;
+    const isCurrentFy = (year === getCurrentFinYear());
+    const curIdx = getCurrentFyMonthIdx();
+    const hasCur = isCurrentFy && months.some(m => m.idx === curIdx);
+    sel.value = hasCur ? curIdx : months[months.length - 1].idx;
+}
+
+function onYearChange() { populateMonthSelect(); }
+
+/* ──────────────────────────────────────────────────────────────
+   Render table from API response
+────────────────────────────────────────────────────────────── */
+
+function renderReport(j) {
+    /* ── Title ── */
+    document.getElementById("reportTitle").textContent =
+        `Export Performance Report — ${j.month_label || ""}`;
+
+    /* ── Period info line ── */
+    document.getElementById("periodInfo").textContent =
+        `${j.fin_year} vs ${j.prev_fin_year}`;
+
+    /* ── Show section label ── */
+    document.getElementById("sectionLabel").style.display = "block";
+
+    /* ── Header row 1 ── */
+    const ml = j.month_label || "";
+    const fy = j.fin_year    || "";
+    const pfy = j.prev_fin_year || "";
+
+    document.getElementById("thMonth").textContent     = ml;
+    document.getElementById("thUptoCurr").textContent  = fy;
+    document.getElementById("thUtpoPrev").textContent  = pfy;
+
+    /* Header row 2 sub-labels */
+    // Extract only the month part (e.g. "Jun-26" → "Jun-25" for previous)
+    const [mAbbr, mYY] = (ml || "").split("-");
+    const prevMonthLabel = mAbbr ? `${mAbbr}-${String(parseInt(mYY || "0") - 1).padStart(2,"0")}` : "";
+
+    document.getElementById("thCurrMonth").textContent = `During the month\n(${ml})`;
+    document.getElementById("thPrevMonth").textContent = `Last year this month\n(${prevMonthLabel})`;
+    document.getElementById("thCurrUpto").textContent  = `${fy}\n(Up to current month'${fy.split("-")[0]})`;
+    document.getElementById("thPrevUpto").textContent  = `${pfy}\n(Up to previous year current month'${pfy.split("-")[0]})`;
+
+    /* ── Body ── */
+    const tbody = document.getElementById("perfBody");
+    tbody.innerHTML = (j.rows || []).map(r => {
+        const rowCls = r.type === "total" ? "total-row" : "data-row";
+        return `
+        <tr class="${rowCls}">
+            <td class="label-cell">${r.label}</td>
+            <td>${fmtQty(r.month_curr)}</td>
+            <td>${fmtQty(r.month_prev)}</td>
+            <td>${fmtVar(r.month_var_pct)}</td>
+            <td>${fmtQty(r.upto_curr)}</td>
+            <td>${fmtQty(r.upto_prev)}</td>
+            <td>${fmtVar(r.upto_var_pct)}</td>
+        </tr>`;
+    }).join("");
+}
+
+/* ──────────────────────────────────────────────────────────────
+   API calls
+────────────────────────────────────────────────────────────── */
+
+function loadMeta() {
+    status("Loading…");
+    return fetch("/api/module/RP01/report10/meta")
+        .then(r => r.json().then(j => ({ ok: r.ok, j })))
+        .then(({ ok, j }) => {
+            if (!ok) { status(j.error || "Failed to load year/month options.", true); return false; }
+            META = j;
+            populateYearSelect();
+            populateMonthSelect();
+            status("");
+            return true;
+        })
+        .catch(err => { status("Failed to load year/month options.", true); console.error(err); return false; });
+}
+
+function loadReport() {
+    const fin_year  = document.getElementById("yearSelect").value;
+    const month_idx = document.getElementById("monthSelect").value;
+    if (!fin_year || month_idx === "") { status("Select a year and month first.", true); return; }
+
+    status("Loading report…");
+    fetch(`/api/module/RP01/report10/report?fin_year=${encodeURIComponent(fin_year)}&month_idx=${month_idx}`)
+        .then(r => r.json().then(j => ({ ok: r.ok, j })))
+        .then(({ ok, j }) => {
+            if (!ok) { status(j.error || "Failed to load report.", true); return; }
+            LAST_RESULT = j;
+            renderReport(j);
+            status("");
+        })
+        .catch(err => { status("Failed to load report.", true); console.error(err); });
+}
+
+function exportExcel() {
+    const fin_year  = document.getElementById("yearSelect").value;
+    const month_idx = document.getElementById("monthSelect").value;
+    if (!fin_year || month_idx === "") { status("Select a year and month first.", true); return; }
+    window.location.href =
+        `/api/module/RP01/report10/export?fin_year=${encodeURIComponent(fin_year)}&month_idx=${month_idx}`;
+}
+
+/* ── Boot ── */
+loadMeta().then(ok => { if (ok) loadReport(); });
+
+</script>
+{% endblock %}
