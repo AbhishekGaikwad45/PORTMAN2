@@ -368,6 +368,14 @@ def load_data() -> pd.DataFrame:
             print("REPORT12: Current month not found in mis_vessel_master")
             print("REPORT12: Loading live VCN data...")
 
+            # -----------------------------------------------------------
+            # Date source for live rows: ldud_header.cast_off_datetime
+            # (the vessel's actual departure timestamp), NOT current_date.
+            # ldud_header is INNER-joined and requires a real, non-blank
+            # cast_off_datetime, so vessel calls with no cast-off yet
+            # (still alongside) or with no vcn link (e.g. orphaned rows)
+            # are correctly excluded rather than mis-dated to "today".
+            # -----------------------------------------------------------
             cur.execute("""
                 WITH po_actual AS (
                     SELECT
@@ -386,8 +394,8 @@ def load_data() -> pd.DataFrame:
                     GROUP BY po.ldud_id, UPPER(TRIM(po.cargo_name))
                 )
                 SELECT
-                    to_char(current_date,'YYYY')||'-'||right(to_char(current_date + interval '1 year','YYYY'),2) AS fin_year,
-                    to_char(current_date,'Mon-YY') AS month,
+                    to_char(lh.cast_off_datetime::timestamp,'YYYY')||'-'||right(to_char(lh.cast_off_datetime::timestamp + interval '1 year','YYYY'), 2) AS fin_year,
+                    to_char(lh.cast_off_datetime::timestamp,'Mon-YY') AS month,
                     h.vessel_run_type AS overseas_coastal,
                     'Import' AS import_export,
                     c.cargo_name AS cargo,
@@ -405,8 +413,10 @@ def load_data() -> pd.DataFrame:
                         UPPER(TRIM(cargo_name))
                 ) c
                 ON c.vcn_id = h.id
-                LEFT JOIN ldud_header lh
+                JOIN ldud_header lh
                     ON lh.vcn_id = h.id
+                    AND lh.cast_off_datetime IS NOT NULL
+                    AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL
                 LEFT JOIN po_actual poa
                     ON poa.ldud_id = lh.id
                     AND poa.cargo_key = c.cargo_name
@@ -416,8 +426,8 @@ def load_data() -> pd.DataFrame:
                 UNION ALL
 
                 SELECT
-                    to_char(current_date,'YYYY')||'-'||right(to_char(current_date + interval '1 year','YYYY'),2),
-                    to_char(current_date,'Mon-YY'),
+                    to_char(lh.cast_off_datetime::timestamp,'YYYY')||'-'||right(to_char(lh.cast_off_datetime::timestamp + interval '1 year','YYYY'), 2),
+                    to_char(lh.cast_off_datetime::timestamp,'Mon-YY'),
                     h.vessel_run_type,
                     'Export',
                     e.cargo_name,
@@ -435,9 +445,10 @@ def load_data() -> pd.DataFrame:
                         UPPER(TRIM(cargo_name))
                 ) e
                 ON e.vcn_id = h.id
-                    
-                LEFT JOIN ldud_header lh
+                JOIN ldud_header lh
                     ON lh.vcn_id = h.id
+                    AND lh.cast_off_datetime IS NOT NULL
+                    AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL
                 LEFT JOIN po_actual poa
                     ON poa.ldud_id = lh.id
                     AND poa.cargo_key = UPPER(TRIM(e.cargo_name))
@@ -479,9 +490,6 @@ def load_data() -> pd.DataFrame:
     # Convert quantity to numeric
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
-    # Map cargo to report category
- 
-
     # Map category1 (from mis_vessel_master history, or vessel_cargo for live rows) to report row
     def get_report_category(category1):
         key = str(category1 or "").strip().upper()
@@ -505,9 +513,7 @@ def load_data() -> pd.DataFrame:
 
     df["row_key"] = df["category1"].apply(get_report_category)
 
-
-    # Show unmapped cargo values
-# Show unmapped category1 values (this is what actually decides row_key now)
+    # Show unmapped category1 values (this is what actually decides row_key now)
     unmapped = sorted(
         df.loc[df["row_key"].isna(), "category1"]
         .dropna()
@@ -565,7 +571,6 @@ def load_data() -> pd.DataFrame:
 
     # No TEU source in the current schema; TEU row is always 0.
     is_teu_row = df["row_key"] == "Container (In TEUs)"
-    # Database already stores the values you want to display.
     df["value"] = df["quantity"]
     df.loc[is_teu_row, "value"] = 0.0
 
@@ -577,7 +582,7 @@ def load_data() -> pd.DataFrame:
         df.groupby(["fin_year", "fy_month_idx", "sheet", "row_key", "direction", "bucket"], as_index=False)["value"]
         .sum()
     )
-    
+
     return combined
 
 
