@@ -400,14 +400,9 @@ SELECT
 
     SUM(
         CASE
-            WHEN COALESCE(lp.is_deleted,FALSE) = FALSE
-             AND COALESCE(lp.is_shortclose,FALSE) = FALSE
-            THEN COALESCE(lp.quantity,0)
-
-            WHEN COALESCE(lp.is_deleted,FALSE) = FALSE
-             AND COALESCE(lp.is_shortclose,FALSE) = TRUE
-            THEN -COALESCE(lp.quantity,0)
-
+            WHEN COALESCE(lp.is_deleted, FALSE) = FALSE
+            AND COALESCE(lp.is_shortclose, FALSE) = FALSE
+            THEN COALESCE(lp.quantity, 0)
             ELSE 0
         END
     ) AS quantity
