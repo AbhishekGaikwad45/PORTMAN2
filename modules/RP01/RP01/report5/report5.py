@@ -1039,83 +1039,18 @@ def fetch_month_figures(month_abbrev: str, calendar_year: int):
         return fetch_from_mis_vessel_master(month_abbrev, calendar_year)
 
     # Step 3: not migrated yet -> go live.
+    # The live data MUST come from parcel_log for Report-5 so that the
+    # short-close subtraction logic is applied to the quantities.
     logger.debug(
         "fetch_month_figures: %s-%s NOT yet in mis_vessel_master, "
-        "pulling live VCN data instead",
+        "pulling live data from lueu_parcel_log/ldud_header",
         month_abbrev, calendar_year,
     )
-    live_result = fetch_live_month_figures(month_abbrev, calendar_year)
-
-    # Step 4: live data came back empty -> fall back to the old source
-    # so we never show a completely blank report.
-    if live_result["vessel_count"] == 0 and live_result["quantity"] == 0:
-        logger.debug(
-            "fetch_month_figures: live data empty for %s-%s, "
-            "falling back to lueu_parcel_log/ldud_header",
-            month_abbrev, calendar_year,
-        )
-        return {
-            "quantity": fetch_quantity_from_parcel_log(month_abbrev, calendar_year),
-            "vessel_count": fetch_vessel_count_from_ldud_header(month_abbrev, calendar_year),
-        }
-
-    return live_result
-
-
-def fetch_jjltpl_from_mis(month_abbrev: str, calendar_year: int) -> float:
-    yy = str(calendar_year)[-2:]
-    month_str = f"{month_abbrev}-{yy}"
-
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    cur.execute("""
-        SELECT COALESCE(SUM(quantity),0) AS qty
-        FROM mis_vessel_master
-        WHERE month = %s
-          AND terminal = 'JJLTPL'
-    """, (month_str,))
-
-    row = cur.fetchone()
-    conn.close()
-
-    return float(row["qty"] or 0)
-
-
-def fetch_jjltpl_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
-    """SHORT CLOSE (added 31-Jul-2026): rows flagged short_close have
-    their quantity SUBTRACTED instead of added. See ASSUMPTION (5) at
-    the top of this file."""
-    month_num = MONTH_NUM[month_abbrev]
-
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    cur.execute("""
-        SELECT
-            entry_date,
-            quantity
-        FROM lueu_parcel_log
-        WHERE COALESCE(is_deleted, false) = false
-        AND terminal = 'JJLTPL'
-        AND COALESCE(is_shortclose, false) = false
-    """)
-
-    rows = cur.fetchall()
-    conn.close()
-
-    total = 0.0
-
-    for r in rows:
-        d = _parse_text_date(r["entry_date"])
-        if d and d.year == calendar_year and d.month == month_num:
-            qty = float(r["quantity"] or 0)
-            if r["short_close"]:
-                total -= qty
-            else:
-                total += qty
-
-    return round(total, 3)
+    
+    return {
+        "quantity": fetch_quantity_from_parcel_log(month_abbrev, calendar_year),
+        "vessel_count": fetch_vessel_count_from_ldud_header(month_abbrev, calendar_year),
+    }
 
 
 def fiscal_year_start_for(month_abbrev: str, calendar_year: int) -> int:
