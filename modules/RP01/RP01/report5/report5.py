@@ -176,7 +176,7 @@ PARCEL_LOG_COMMODITY_COLUMN = None        # N/A: no commodity column on lueu_par
 # CONFIRMED 31-Jul-2026 via information_schema.columns: real column is
 # is_shortclose, type boolean (not a text flag) -- no truthiness
 # workaround needed. See ASSUMPTION (5) at the top of this file.
-PARCEL_LOG_SHORT_CLOSE_COLUMN = "is_shortclose"
+
 
 
 MIS_HISTORY_MONTH_COLUMN = "month_jsw"
@@ -704,29 +704,96 @@ def fetch_from_mis_vessel_master(month_abbrev: str, calendar_year: int):
 # NEW SOURCE (Jul onward): lueu_parcel_log (quantity) + ldud_header (vessels)
 # ---------------------------------------------------------------------
 
-def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
-    """Sum of lueu_parcel_log.quantity for vessels whose CAST-OFF date
-    falls in the given calendar month/year (attributed by cast-off,
-    matching vessel_count/turnaround conventions elsewhere in this file).
+# def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
+#     """Sum of lueu_parcel_log.quantity for vessels whose CAST-OFF date
+#     falls in the given calendar month/year (attributed by cast-off,
+#     matching vessel_count/turnaround conventions elsewhere in this file).
 
-    SHORT CLOSE: per re-confirmation on [DATE], short-close rows are
-    NOT subtracted from this particular total -- unlike Assumption (5)
-    at the top of this file, which was confirmed 31-Jul-2026 for the
-    general "everywhere lueu_parcel_log.quantity is summed" case. Verified
-    against the known-correct July-2026 figure (89,091.835 MT): applying
-    the subtraction here undershoots by exactly the short-close amount
-    (70.793 MT), so it's deliberately left out in this function only."""
+#     SHORT CLOSE: per re-confirmation on [DATE], short-close rows are
+#     NOT subtracted from this particular total -- unlike Assumption (5)
+#     at the top of this file, which was confirmed 31-Jul-2026 for the
+#     general "everywhere lueu_parcel_log.quantity is summed" case. Verified
+#     against the known-correct July-2026 figure (89,091.835 MT): applying
+#     the subtraction here undershoots by exactly the short-close amount
+#     (70.793 MT), so it's deliberately left out in this function only."""
+#     month_num = MONTH_NUM[month_abbrev]
+
+#     conn = get_db()
+#     try:
+#         cur = get_cursor(conn)
+#         cur.execute(
+#             """
+#             SELECT
+#                 CASE
+#                     WHEN p.is_shortclose THEN -COALESCE(p.quantity, 0)
+#                     ELSE COALESCE(p.quantity, 0)
+#                 END AS quantity,
+#                 h.cast_off_datetime AS castoff_raw,
+#                 h.vessel_name
+#             FROM lueu_parcel_log p
+#             JOIN ldud_parcel_ops o
+#                 ON o.id = p.parcel_op_id
+#             JOIN ldud_header h
+#                 ON h.id = o.ldud_id
+#             WHERE COALESCE(p.is_deleted, false) = false
+#             AND COALESCE(h.is_deleted, false) = false
+#             AND p.quantity IS NOT NULL
+#             AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
+#             """
+#         )
+#         rows = cur.fetchall()
+#     finally:
+#         conn.close()
+
+#     total = 0.0
+#     matched_rows = 0
+#     short_close_rows = 0
+#     debug_rows = []
+
+#     for r in rows:
+#         castoff = _parse_text_datetime(r["castoff_raw"])
+#         if not (castoff and castoff.year == calendar_year and castoff.month == month_num):
+#             continue
+
+#         matched_rows += 1
+#         qty = float(r["quantity"] or 0)
+#         is_short_close = bool(r["short_close"])
+
+#         # CHANGED: short-close no longer subtracted here -- see docstring.
+#         total += qty
+#         if is_short_close:
+#             short_close_rows += 1
+
+#         debug_rows.append({
+#             "vessel_name": r["vessel_name"],
+#             "cast_off_datetime": castoff.isoformat(),
+#             "quantity": qty,
+#             "short_close": is_short_close,
+#             "contribution": round(qty, 3),
+#         })
+
+#     logger.debug(
+#         "fetch_quantity_from_parcel_log: month=%s year=%s -> TOTAL=%.3f "
+#         "(%d matched rows by cast-off month, %d short-close rows present but NOT subtracted)",
+#         month_abbrev, calendar_year, total, matched_rows, short_close_rows,
+#     )
+
+#     return round(total, 3)
+
+
+
+def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
     month_num = MONTH_NUM[month_abbrev]
 
     conn = get_db()
     try:
         cur = get_cursor(conn)
-        cur.execute(
-            """
+
+        cur.execute("""
             SELECT
                 CASE
-                    WHEN p.is_shortclose THEN -p.quantity
-                    ELSE p.quantity
+                    WHEN p.is_shortclose THEN -COALESCE(p.quantity, 0)
+                    ELSE COALESCE(p.quantity, 0)
                 END AS quantity,
                 h.cast_off_datetime AS castoff_raw,
                 h.vessel_name
@@ -736,46 +803,34 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
             JOIN ldud_header h
                 ON h.id = o.ldud_id
             WHERE COALESCE(p.is_deleted, false) = false
-            AND COALESCE(h.is_deleted, false) = false
-            AND p.quantity IS NOT NULL
-            AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
-            """
-        )
+              AND COALESCE(h.is_deleted, false) = false
+              AND p.quantity IS NOT NULL
+              AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
+        """)
+
         rows = cur.fetchall()
+
     finally:
         conn.close()
 
     total = 0.0
-    matched_rows = 0
-    short_close_rows = 0
-    debug_rows = []
 
     for r in rows:
         castoff = _parse_text_datetime(r["castoff_raw"])
-        if not (castoff and castoff.year == calendar_year and castoff.month == month_num):
+
+        if not castoff:
             continue
 
-        matched_rows += 1
-        qty = float(r["quantity"] or 0)
-        is_short_close = bool(r["short_close"])
+        if castoff.year != calendar_year or castoff.month != month_num:
+            continue
 
-        # CHANGED: short-close no longer subtracted here -- see docstring.
-        total += qty
-        if is_short_close:
-            short_close_rows += 1
+        total += float(r["quantity"] or 0)
 
-        debug_rows.append({
-            "vessel_name": r["vessel_name"],
-            "cast_off_datetime": castoff.isoformat(),
-            "quantity": qty,
-            "short_close": is_short_close,
-            "contribution": round(qty, 3),
-        })
-
-    logger.debug(
-        "fetch_quantity_from_parcel_log: month=%s year=%s -> TOTAL=%.3f "
-        "(%d matched rows by cast-off month, %d short-close rows present but NOT subtracted)",
-        month_abbrev, calendar_year, total, matched_rows, short_close_rows,
+    logger.info(
+        "fetch_quantity_from_parcel_log(%s,%s) = %.3f",
+        month_abbrev,
+        calendar_year,
+        total,
     )
 
     return round(total, 3)
@@ -1036,11 +1091,14 @@ def fetch_jjltpl_from_parcel_log(month_abbrev: str, calendar_year: int) -> float
     conn = get_db()
     cur = get_cursor(conn)
 
-    cur.execute(f"""
-        SELECT entry_date, quantity, {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
+    cur.execute("""
+        SELECT
+            entry_date,
+            quantity
         FROM lueu_parcel_log
-        WHERE COALESCE(is_deleted,false)=false
-          AND terminal='JJLTPL'
+        WHERE COALESCE(is_deleted, false) = false
+        AND terminal = 'JJLTPL'
+        AND COALESCE(is_shortclose, false) = false
     """)
 
     rows = cur.fetchall()
@@ -1581,14 +1639,15 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
 
         # ---------------- Parcel Size ----------------
         cur.execute(
-            f"""
+            """
             SELECT
                 entry_date,
                 quantity,
-                {PARCEL_LOG_SHORT_CLOSE_COLUMN} AS short_close
+                is_shortclose AS short_close
             FROM lueu_parcel_log
-            WHERE COALESCE(is_deleted,false)=false
-              AND quantity IS NOT NULL
+            WHERE COALESCE(is_deleted, false) = false
+            AND COALESCE(is_shortclose, false) = false
+            AND quantity IS NOT NULL
             """
         )
         parcel_rows = cur.fetchall()
