@@ -43,14 +43,10 @@ below if that's wrong.
    hours are booked entirely to its ALONGSIDE month (no splitting
    across a month boundary), and "divide by 2" in the occupancy
    formula means 2 physical berths (NUM_BERTHS = 2).
-5. SHORT CLOSE (added 31-Jul-2026, CONFIRMED same day): lueu_parcel_log
-   has a column flagging a parcel as "short closed". Per user
-   instruction, any row where this flag is true has its quantity
+5. SHORT CLOSE: lueu_parcel_log has a column flagging a parcel as "short closed". 
+   Per user instruction, any row where this flag is true has its quantity
    SUBTRACTED from the running total instead of added, everywhere
-   lueu_parcel_log.quantity is summed. PARCEL_LOG_SHORT_CLOSE_COLUMN
-   below is CONFIRMED via information_schema.columns to be
-   `is_shortclose`, a real Postgres boolean column (not a text
-   'Y'/'N'/flag-string) -- no special truthiness handling needed.
+   lueu_parcel_log.quantity is summed.
 
 ======================================================================
  DEBUGGING NOTE (added)
@@ -1566,7 +1562,6 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
             JOIN ldud_header ldh
                 ON ldh.id = lpo.ldud_id
             WHERE COALESCE(lpl.is_deleted, false) = false
-            AND COALESCE(lpl.is_shortclose, false) = false
             AND lpl.quantity IS NOT NULL
             AND NULLIF(TRIM(ldh.cast_off_datetime), '') IS NOT NULL
         """)
@@ -1581,7 +1576,6 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
                 is_shortclose AS short_close
             FROM lueu_parcel_log
             WHERE COALESCE(is_deleted, false) = false
-            AND COALESCE(is_shortclose, false) = false
             AND quantity IS NOT NULL
             """
         )
