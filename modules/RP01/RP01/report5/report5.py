@@ -787,10 +787,7 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
 
         cur.execute("""
             SELECT
-                CASE
-                    WHEN p.is_shortclose THEN -COALESCE(p.quantity, 0)
-                    ELSE COALESCE(p.quantity, 0)
-                END AS quantity,
+                COALESCE(p.quantity, 0) AS quantity,
                 h.cast_off_datetime AS castoff_raw,
                 h.vessel_name
             FROM lueu_parcel_log p
@@ -1627,10 +1624,7 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
 
         qty = float(r["quantity"] or 0)
 
-        if r["short_close"]:
-            total_qty -= qty
-        else:
-            total_qty += qty
+        total_qty += qty
 
     avg_parcel_size = (
         round(total_qty / vessel_count, 2)
