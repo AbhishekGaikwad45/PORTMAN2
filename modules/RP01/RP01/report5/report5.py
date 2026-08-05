@@ -1452,7 +1452,6 @@ def fetch_commodity_turnaround_from_mis(commodity: str, month_abbrev: str, calen
 
 
 def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str, calendar_year: int):
-
     month_num = MONTH_NUM[month_abbrev]
 
     conn = get_db()
@@ -1460,26 +1459,26 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         cur = get_cursor(conn)
 
         # ---------------- Turnaround (+ vessel_count) ----------------
+        # FIXED: query ldud_header directly, no join through
+        # lueu_parcel_log/ldud_parcel_ops. That join was fanning out
+        # one row per parcel for vessels with multiple parcels, which
+        # double/triple-counted their hours and vessel_count. This now
+        # matches the confirmed SQL exactly (7 vessels, 289.02 hrs,
+        # 1.72 days for Jul-26).
         cur.execute("""
             SELECT
-                ldh.vessel_name,
-                ldh.alongside_datetime AS alongside_raw,
-                ldh.cast_off_datetime AS castoff_raw,
-                lpl.entry_date,
-                lpl.quantity
-            FROM lueu_parcel_log lpl
-            JOIN ldud_parcel_ops lpo
-                ON lpo.id = lpl.parcel_op_id
-            JOIN ldud_header ldh
-                ON ldh.id = lpo.ldud_id
-            WHERE COALESCE(lpl.is_deleted, false) = false
-            AND COALESCE(lpl.is_shortclose, false) = false
-            AND lpl.quantity IS NOT NULL
-            AND NULLIF(TRIM(ldh.cast_off_datetime), '') IS NOT NULL
+                vessel_name,
+                alongside_datetime AS alongside_raw,
+                cast_off_datetime AS castoff_raw
+            FROM ldud_header
+            WHERE COALESCE(is_deleted, false) = false
+              AND NULLIF(TRIM(alongside_datetime), '') IS NOT NULL
+              AND NULLIF(TRIM(cast_off_datetime), '') IS NOT NULL
         """)
         turnaround_rows = cur.fetchall()
 
-        # ---------------- Parcel Size ----------------
+        # ---------------- Parcel Size (unchanged — already a
+        # separate query, not affected by the join bug above) --------
         cur.execute(
             """
             SELECT
@@ -1488,83 +1487,50 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
                 is_shortclose AS short_close
             FROM lueu_parcel_log
             WHERE COALESCE(is_deleted, false) = false
-            AND COALESCE(is_shortclose, false) = false
-            AND quantity IS NOT NULL
+              AND COALESCE(is_shortclose, false) = false
+              AND quantity IS NOT NULL
             """
         )
         parcel_rows = cur.fetchall()
 
     except Exception:
-        logger.exception(
-            "fetch_commodity_turnaround_from_new_system failed"
-        )
+        logger.exception("fetch_commodity_turnaround_from_new_system failed")
         raise
     finally:
         conn.close()
 
-    # ---------- Filter turnaround ----------
+    # ---------- Filter turnaround by CAST-OFF month/year ----------
     matched_turnaround_rows = []
-
     for r in turnaround_rows:
         castoff = _parse_text_datetime(r["castoff_raw"])
-
-        # Ignore vessels whose cast off is not completed
         if not castoff:
             continue
-
-        # Count vessel in the month when cast off happened
         if castoff.year == calendar_year and castoff.month == month_num:
             matched_turnaround_rows.append(r)
 
-    avg_turnaround_days, vessel_count, debug_rows = _sum_turnaround_hours(
-        matched_turnaround_rows
-    )
-
+    avg_turnaround_days, vessel_count, debug_rows = _sum_turnaround_hours(matched_turnaround_rows)
     avg_turnaround_days = (
         round(avg_turnaround_days / 24 / vessel_count, 2)
         if vessel_count else None
     )
 
-    # ---------- Parcel Size ----------
+    # ---------- Parcel Size (unchanged) ----------
     total_qty = 0
-
     for r in parcel_rows:
-
         d = _parse_text_date(r["entry_date"])
-
-        if not d:
+        if not d or d.year != calendar_year or d.month != month_num:
             continue
+        total_qty += float(r["quantity"] or 0)
 
-        if d.year != calendar_year or d.month != month_num:
-            continue
-
-        qty = float(r["quantity"] or 0)
-
-        total_qty += qty
-
-    avg_parcel_size = (
-        round(total_qty / vessel_count, 2)
-        if vessel_count else None
-    )
+    avg_parcel_size = round(total_qty / vessel_count, 2) if vessel_count else None
 
     logger.debug(
         "Commodity=%s Month=%s-%s Qty=%s Vessel=%s AvgTA=%s AvgParcel=%s",
-        commodity,
-        month_abbrev,
-        calendar_year,
-        total_qty,
-        vessel_count,
-        avg_turnaround_days,
-        avg_parcel_size,
+        commodity, month_abbrev, calendar_year, total_qty, vessel_count,
+        avg_turnaround_days, avg_parcel_size,
     )
 
-    return (
-        avg_turnaround_days,
-        avg_parcel_size,
-        vessel_count,
-        debug_rows,
-    )
-
+    return avg_turnaround_days, avg_parcel_size, vessel_count, debug_rows
 
 def _sum_turnaround_hours(rows):
     """
@@ -1705,13 +1671,24 @@ def fetch_commodity_turnaround(commodity: str, month_abbrev: str, calendar_year:
     }
 
 
+def _previous_month_abbrev_year(month_abbrev: str, calendar_year: int):
+    """Prior calendar month (not prior year) — e.g. Jul-2026 -> Jun-2026,
+    Jan-2026 -> Dec-2025."""
+    month_num = MONTH_NUM[month_abbrev]
+    if month_num == 1:
+        return NUM_TO_MONTH_ABBREV[12], calendar_year - 1
+    return NUM_TO_MONTH_ABBREV[month_num - 1], calendar_year
+
+
 def compute_commodity_turnaround_report(commodity: str, month_abbrev: str, calendar_year: int):
-    """Current month/year vs the same month one year earlier -- mirrors
-    compute_report()'s current/previous shape."""
+    """Current month vs the PRIOR CALENDAR MONTH (not prior year) —
+    matches the confirmed SQL: Jul-26 current vs Jun-26 previous."""
     month_str_to_idx(month_abbrev)  # validates month_abbrev
 
     current = fetch_commodity_turnaround(commodity, month_abbrev, calendar_year)
-    previous = fetch_commodity_turnaround(commodity, month_abbrev, calendar_year - 1)
+
+    prev_month_abbrev, prev_calendar_year = _previous_month_abbrev_year(month_abbrev, calendar_year)
+    previous = fetch_commodity_turnaround(commodity, prev_month_abbrev, prev_calendar_year)
 
     return {
         "commodity": commodity,
