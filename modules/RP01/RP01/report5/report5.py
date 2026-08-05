@@ -700,81 +700,7 @@ def fetch_from_mis_vessel_master(month_abbrev: str, calendar_year: int):
 # NEW SOURCE (Jul onward): lueu_parcel_log (quantity) + ldud_header (vessels)
 # ---------------------------------------------------------------------
 
-# def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> float:
-#     """Sum of lueu_parcel_log.quantity for vessels whose CAST-OFF date
-#     falls in the given calendar month/year (attributed by cast-off,
-#     matching vessel_count/turnaround conventions elsewhere in this file).
 
-#     SHORT CLOSE: per re-confirmation on [DATE], short-close rows are
-#     NOT subtracted from this particular total -- unlike Assumption (5)
-#     at the top of this file, which was confirmed 31-Jul-2026 for the
-#     general "everywhere lueu_parcel_log.quantity is summed" case. Verified
-#     against the known-correct July-2026 figure (89,091.835 MT): applying
-#     the subtraction here undershoots by exactly the short-close amount
-#     (70.793 MT), so it's deliberately left out in this function only."""
-#     month_num = MONTH_NUM[month_abbrev]
-
-#     conn = get_db()
-#     try:
-#         cur = get_cursor(conn)
-#         cur.execute(
-#             """
-#             SELECT
-#                 CASE
-#                     WHEN p.is_shortclose THEN -COALESCE(p.quantity, 0)
-#                     ELSE COALESCE(p.quantity, 0)
-#                 END AS quantity,
-#                 h.cast_off_datetime AS castoff_raw,
-#                 h.vessel_name
-#             FROM lueu_parcel_log p
-#             JOIN ldud_parcel_ops o
-#                 ON o.id = p.parcel_op_id
-#             JOIN ldud_header h
-#                 ON h.id = o.ldud_id
-#             WHERE COALESCE(p.is_deleted, false) = false
-#             AND COALESCE(h.is_deleted, false) = false
-#             AND p.quantity IS NOT NULL
-#             AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
-#             """
-#         )
-#         rows = cur.fetchall()
-#     finally:
-#         conn.close()
-
-#     total = 0.0
-#     matched_rows = 0
-#     short_close_rows = 0
-#     debug_rows = []
-
-#     for r in rows:
-#         castoff = _parse_text_datetime(r["castoff_raw"])
-#         if not (castoff and castoff.year == calendar_year and castoff.month == month_num):
-#             continue
-
-#         matched_rows += 1
-#         qty = float(r["quantity"] or 0)
-#         is_short_close = bool(r["short_close"])
-
-#         # CHANGED: short-close no longer subtracted here -- see docstring.
-#         total += qty
-#         if is_short_close:
-#             short_close_rows += 1
-
-#         debug_rows.append({
-#             "vessel_name": r["vessel_name"],
-#             "cast_off_datetime": castoff.isoformat(),
-#             "quantity": qty,
-#             "short_close": is_short_close,
-#             "contribution": round(qty, 3),
-#         })
-
-#     logger.debug(
-#         "fetch_quantity_from_parcel_log: month=%s year=%s -> TOTAL=%.3f "
-#         "(%d matched rows by cast-off month, %d short-close rows present but NOT subtracted)",
-#         month_abbrev, calendar_year, total, matched_rows, short_close_rows,
-#     )
-
-#     return round(total, 3)
 
 
 
@@ -797,6 +723,7 @@ def fetch_quantity_from_parcel_log(month_abbrev: str, calendar_year: int) -> flo
                 ON h.id = o.ldud_id
             WHERE COALESCE(p.is_deleted, false) = false
               AND COALESCE(h.is_deleted, false) = false
+              AND COALESCE(p.is_shortclose, false) = false
               AND p.quantity IS NOT NULL
               AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
         """)
@@ -862,20 +789,7 @@ def fetch_vessel_count_from_ldud_header(month_abbrev: str, calendar_year: int) -
 # ---------------------------------------------------------------------
 # LIVE DATA FALLBACK (borrowed from Report-12's logic)
 #
-# Report-12 does this: before trusting mis_vessel_master, it checks
-# whether the CURRENT month is already sitting in that table. If it is
-# not there yet (i.e. nobody has finished migrating this month's data
-# into mis_vessel_master), it goes and pulls the numbers live from the
-# VCN tables (vcn_header / vcn_consigners / vcn_export_cargo_declaration)
-# joined through ldud_header, instead of showing a blank/zero report.
-#
-# The two functions below copy that same idea for Report-5, written in
-# a plain, beginner-friendly way: simple SQL, a normal Python "for"
-# loop, no pandas. Nothing below replaces any of the existing
-# fetch_from_mis_vessel_master / fetch_quantity_from_parcel_log /
-# fetch_vessel_count_from_ldud_header functions above -- those are
-# still used exactly as before, just called from a different place.
-# ---------------------------------------------------------------------
+
 
 def month_already_in_mis(month_abbrev: str, calendar_year: int) -> bool:
     """Simple yes/no check: does mis_vessel_master already have at
@@ -1559,6 +1473,7 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
             JOIN ldud_header ldh
                 ON ldh.id = lpo.ldud_id
             WHERE COALESCE(lpl.is_deleted, false) = false
+            AND COALESCE(lpl.is_shortclose, false) = false
             AND lpl.quantity IS NOT NULL
             AND NULLIF(TRIM(ldh.cast_off_datetime), '') IS NOT NULL
         """)
@@ -1573,6 +1488,7 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
                 is_shortclose AS short_close
             FROM lueu_parcel_log
             WHERE COALESCE(is_deleted, false) = false
+            AND COALESCE(is_shortclose, false) = false
             AND quantity IS NOT NULL
             """
         )
