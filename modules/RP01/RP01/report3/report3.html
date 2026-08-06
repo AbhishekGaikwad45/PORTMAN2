@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+
+{% block title %}Report-3 — RP03{% endblock %}
+
+{% block head %}
+<style>
+    :root {
+        --rp-blue: #2F6FED;
+        --rp-blue-dark: #1D4FB8;
+        --rp-green: #16A34A;
+        --rp-green-dark: #0F7C38;
+        --rp-ink: #1F2937;
+        --rp-muted: #6B7280;
+        --rp-border: #DDE3EA;
+        --rp-bg: #F6F8FA;
+        --rp-card: #FFFFFF;
+        --rp-yellow-bg: #FFFF00;
+        --rp-subtotal-bg: #F2F4F7;
+    }
+
+    .rp03-wrap * { box-sizing: border-box; }
+    .rp03-wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding-bottom: 30px; }
+
+    /* Module Header */
+    .module-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--rp-border);
+    }
+    .module-header h2 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--rp-ink);
+    }
+    .module-header .rp-badge {
+        background: var(--rp-blue);
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+    }
+    .module-header .rp-back {
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--rp-blue);
+        text-decoration: none;
+    }
+    .module-header .rp-back:hover { text-decoration: underline; }
+
+    /* Toolbar */
+    .rp-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        background: var(--rp-card);
+        border: 1px solid var(--rp-border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .rp-toolbar label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--rp-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-right: 2px;
+    }
+    .rp-toolbar select {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--rp-ink);
+        background: var(--rp-bg);
+        border: 1px solid var(--rp-border);
+        border-radius: 6px;
+        padding: 7px 12px;
+        cursor: pointer;
+        outline: none;
+    }
+    .rp-toolbar select:focus { border-color: var(--rp-blue); }
+
+    .btn-load {
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: 8px 18px;
+        border: none;
+        cursor: pointer;
+        color: #fff;
+        background: var(--rp-blue);
+        transition: background 0.2s;
+    }
+    .btn-load:hover { background: var(--rp-blue-dark); }
+
+    .btn-export {
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: 8px 18px;
+        border: none;
+        cursor: pointer;
+        color: #fff;
+        background: var(--rp-green);
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.2s;
+    }
+    .btn-export:hover { background: var(--rp-green-dark); }
+
+    /* Table Styling */
+    .table-card {
+        background: var(--rp-card);
+        border: 1px solid var(--rp-border);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .table-title {
+        background: #F8FAFC;
+        padding: 14px 20px;
+        border-bottom: 2px solid var(--rp-border);
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--rp-ink);
+        text-align: center;
+        letter-spacing: 0.5px;
+    }
+    .table-container {
+        overflow-x: auto;
+    }
+    table.rp-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        color: var(--rp-ink);
+    }
+    table.rp-table th, table.rp-table td {
+        border: 1px solid var(--rp-border);
+        padding: 6px 10px;
+        vertical-align: middle;
+    }
+    table.rp-table th {
+        background: #F1F5F9;
+        font-weight: 700;
+        text-align: center;
+    }
+    .cat-hdr {
+        font-weight: 700;
+        text-align: center;
+        background: #FAFAFA;
+        font-size: 13px;
+    }
+    .metric-label {
+        font-weight: 500;
+    }
+    .metric-label.indented {
+        padding-left: 28px;
+        color: #DC2626;
+        font-weight: 600;
+    }
+    .metric-label.red-text {
+        color: #DC2626;
+        font-weight: 600;
+    }
+    .metric-label.bold-text {
+        font-weight: 700;
+    }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+
+    /* Highlight JJLTPL in Yellow */
+    .jjltpl-row td, .jjltpl-hdr {
+        background-color: #FFFF00 !important;
+        font-weight: 600;
+    }
+
+    .summary-row td {
+        font-weight: 700;
+        background-color: #F8FAFC;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp03-wrap">
+    <!-- Header -->
+    <div class="module-header">
+        <h2>Report-3 — Bulk Terminal Report</h2>
+        <span class="rp-badge">RP03</span>
+        <a href="/module/RP01/" class="rp-back">&larr; Back to Reports</a>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="rp-toolbar">
+        <div>
+            <label for="selYear">YEAR</label>
+            <select id="selYear">
+                <option value="2026-27" selected>2026-27</option>
+                <option value="2025-26">2025-26</option>
+                <option value="2024-25">2024-25</option>
+            </select>
+        </div>
+        <button class="btn-load" id="btnLoad">Load</button>
+        <button class="btn-export" id="btnExport">Export to Excel</button>
+    </div>
+
+    <!-- Main Data Table -->
+    <div class="table-card">
+        <div class="table-title" id="tableBannerTitle">2026-27: BULK TERMINAL</div>
+        <div class="table-container">
+            <table class="rp-table" id="reportTable">
+                <thead>
+                    <tr id="tableHeaderRow">
+                        <th style="width:180px;">BULK</th>
+                        <th style="width:340px;"></th>
+                        <!-- Month Headers -->
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr><td colspan="14" class="text-center" style="padding:30px;">Loading report data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const selYear = document.getElementById("selYear");
+        const btnLoad = document.getElementById("btnLoad");
+        const btnExport = document.getElementById("btnExport");
+        const tableBannerTitle = document.getElementById("tableBannerTitle");
+        const tableHeaderRow = document.getElementById("tableHeaderRow");
+        const tableBody = document.getElementById("tableBody");
+
+        let currentReportData = null;
+
+        function loadData() {
+            const yr = selYear.value;
+            tableBannerTitle.textContent = yr + ": BULK TERMINAL";
+            tableBody.innerHTML = `<tr><td colspan="14" class="text-center" style="padding:30px;">Loading report data...</td></tr>`;
+
+            fetch(`/api/module/RP01/report3/data?year=${encodeURIComponent(yr)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        alert("Error: " + data.error);
+                        return;
+                    }
+                    currentReportData = data;
+                    updateYearDropdown(data.available_years, data.fin_year);
+                    renderTable(data);
+                })
+                .catch(err => {
+                    console.error(err);
+                    tableBody.innerHTML = `<tr><td colspan="14" class="text-center" style="padding:30px;color:red;">Error loading report data.</td></tr>`;
+                });
+        }
+
+        function updateYearDropdown(years, activeYear) {
+            if (!years || !years.length) return;
+            const existingOptions = Array.from(selYear.options).map(o => o.value);
+            years.forEach(y => {
+                if (!existingOptions.includes(y)) {
+                    const opt = document.createElement("option");
+                    opt.value = y;
+                    opt.textContent = y;
+                    selYear.appendChild(opt);
+                }
+            });
+            selYear.value = activeYear;
+        }
+
+        function renderTable(data) {
+            // Render Headers
+            tableHeaderRow.innerHTML = `<th style="width:180px;">BULK</th><th style="width:340px;"></th>`;
+            data.month_labels.forEach(lbl => {
+                const th = document.createElement("th");
+                th.style.width = "100px";
+                th.textContent = lbl;
+                tableHeaderRow.appendChild(th);
+            });
+
+            const catBlocks = [
+                { title: "DRY BULK<br>(F/FRM/FG)", key: "DRY BULK (F/FRM/FG)" },
+                { title: "1.CEMENT", key: "1.CEMENT" },
+                { title: "2.Break Bulk", key: "2.Break Bulk" },
+                { title: "1.LIQUID<br>[ Inner anchorage]", key: "1.LIQUID [ Inner anchorage]" },
+                { title: "2.LIQUID (SWB)", key: "2.LIQUID (SWB)" },
+                { title: "3.LIQUID(JJLTPL)", key: "3.LIQUID(JJLTPL)", isYellow: true },
+                { title: "Total LIQUID", key: "Total LIQUID", isBold: true },
+            ];
+
+            const metricsDef = [
+                { label: "NO.OF VSL Called", field: "vsl_called", fmt: "int", class: "" },
+                { label: "NO.OF VSL Sailed", field: "vsl_sailed", fmt: "int", class: "red-text" },
+                { label: "AVG.BERTH.WAIT", field: "avg_berth_wait", fmt: "dec2", class: "red-text" },
+                { label: "PORT", field: "port_wait", fmt: "dec2", class: "indented" },
+                { label: "AGENT", field: "agent_wait", fmt: "dec2", class: "indented" },
+                { label: "STAY AT BERTH", field: "stay_at_berth", fmt: "dec2", class: "" },
+                { label: "TURN ROUND(PORT)<br><span style='font-size:10px;font-weight:normal;'>(Stay at berth+Avg. Pre-Berth on Port AC)</span>", field: "turn_round_port", fmt: "dec2", class: "" },
+                { label: "AV. IDLE TIME", field: "av_idle_time", fmt: "dec2", class: "red-text" },
+                { label: "TRAFFIC", field: "traffic", fmt: "qty", class: "" },
+                { label: "OUTPUT", field: "output", fmt: "int", class: "" },
+            ];
+
+            let html = "";
+
+            catBlocks.forEach(blk => {
+                const mList = data.categories[blk.key] || [];
+                const isY = blk.isYellow;
+
+                metricsDef.forEach((m, rIdx) => {
+                    const rowClass = isY ? "jjltpl-row" : "";
+                    html += `<tr class="${rowClass}">`;
+                    if (rIdx === 0) {
+                        const hdrClass = isY ? "jjltpl-hdr" : "cat-hdr";
+                        html += `<td rowspan="${metricsDef.length}" class="${hdrClass}">${blk.title}</td>`;
+                    }
+                    html += `<td class="metric-label ${m.class}">${m.label}</td>`;
+
+                    for (let i = 0; i < 12; i++) {
+                        const mObj = mList[i] || {};
+                        const val = mObj[m.field] !== undefined ? mObj[m.field] : 0;
+                        let formattedVal = val;
+                        if (m.fmt === "dec2") formattedVal = Number(val).toFixed(2);
+                        else if (m.fmt === "qty") formattedVal = Number(val).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 3});
+                        else formattedVal = Math.round(val).toLocaleString();
+
+                        html += `<td class="text-right">${formattedVal}</td>`;
+                    }
+                    html += `</tr>`;
+                });
+            });
+
+            // Bottom Summary Rows
+            // 1. Total Liquid Vessels Sailed
+            html += `<tr class="summary-row">
+                <td class="text-center">TOTAL LIQUID<br>VESSELS SAILED</td>
+                <td class="red-text">(INCLUDING IN-ANCH)</td>`;
+            for (let i = 0; i < 12; i++) {
+                const v = data.total_liquid_sailed[i] || 0;
+                html += `<td class="text-right">${v}</td>`;
+            }
+            html += `</tr>`;
+
+            // 2. Total Liquid Handled
+            html += `<tr class="summary-row">
+                <td class="text-center">TOTAL LIQUID<br>HANDLED</td>
+                <td class="red-text">(INCLUDING IN-ANCH)</td>`;
+            for (let i = 0; i < 12; i++) {
+                const v = data.total_liquid_handled[i] || 0;
+                html += `<td class="text-right">${Number(v).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3})}</td>`;
+            }
+            html += `</tr>`;
+
+            tableBody.innerHTML = html;
+        }
+
+        btnLoad.addEventListener("click", loadData);
+
+        btnExport.addEventListener("click", function () {
+            const yr = selYear.value;
+            window.location.href = `/api/module/RP01/report3/export?year=${encodeURIComponent(yr)}`;
+        });
+
+        // Initial Load
+        loadData();
+    });
+</script>
+{% endblock %}
