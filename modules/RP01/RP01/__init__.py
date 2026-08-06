@@ -19,6 +19,7 @@ from . import views
 from .JJLTPL import jjltpl
 from .report1 import report1
 from .report2 import report2
+from .report3 import report3 as report_03_views
 from .report_06 import views as report_06_views
 from .Berth_plan import view as berth_plan_view
 from .report4 import report4
