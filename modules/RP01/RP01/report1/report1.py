@@ -311,7 +311,7 @@ def load_data() -> pd.DataFrame:
     FROM mis_vessel_master
     WHERE fin_year IS NOT NULL
       AND month IS NOT NULL
-      AND NULLIF(TRIM(cast_off), '') IS NOT NULL
+      AND NULLIF(TRIM(sail_cast_off), '') IS NOT NULL
 """)
         rows = cur.fetchall()
     finally:
