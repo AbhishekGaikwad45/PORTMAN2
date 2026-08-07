@@ -149,8 +149,8 @@ def get_expected_waiting_vessels(window_start, window_end):
     out = []
 
     for r in rows:
-        tank_terminal = r.get("ops_terminal_name") or r.get("declared_terminal_name") or "JJLTPL"
-        load_port = r.get("load_port")
+        tank_terminal = "JJLTPL"
+        load_port =  r.get("declared_terminal_name") or ""
 
         # Waiting vessels haven't started ops yet — base CONS purely on
         # declared equipment, not on lueu_parcel_log usage
