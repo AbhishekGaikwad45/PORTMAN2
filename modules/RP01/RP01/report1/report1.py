@@ -232,7 +232,9 @@ def _load_live_pipeline_data():
                 SELECT
                     l.entry_date,
                     po.cargo_name,
-                    l.quantity
+                    l.quantity,
+                    l.remarks,
+                    l.is_shortclose
                 FROM lueu_parcel_log l
 
                 JOIN ldud_parcel_ops po
@@ -243,6 +245,10 @@ def _load_live_pipeline_data():
 
                 WHERE l.is_deleted IS NOT TRUE
                 AND NOT COALESCE(l.is_shortclose, FALSE)
+                AND (l.remarks IS NULL OR (
+                    LOWER(l.remarks) NOT LIKE '%short%close%' AND
+                    LOWER(l.remarks) NOT LIKE '%shortclose%'
+                ))
                 AND l.quantity IS NOT NULL
                 AND h.cast_off_datetime IS NOT NULL
             """)
@@ -254,7 +260,18 @@ def _load_live_pipeline_data():
     if not rows:
         return empty
 
-    df = pd.DataFrame(rows)
+    valid_rows = []
+    for r in rows:
+        rem = str(r.get("remarks") or "").strip().lower()
+        is_sc = bool(r.get("is_shortclose"))
+        if is_sc or ("short" in rem and "close" in rem):
+            continue
+        valid_rows.append(r)
+
+    if not valid_rows:
+        return empty
+
+    df = pd.DataFrame(valid_rows)
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
     fy_list, idx_list = [], []
@@ -342,11 +359,7 @@ def load_data() -> pd.DataFrame:
 
     # ---- which (fin_year, month) periods does mis_vessel_master actually
     # cover? Only periods with ZERO rows there fall back to the live pipeline. ----
-    covered_periods = {
-        (fy, idx)
-        for fy, idx in zip(mv_df["fin_year"], mv_df["fy_month_idx"])
-        if idx <= 2      # Apr=0, May=1, Jun=2
-    }
+    covered_periods = set(zip(mv_df["fin_year"], mv_df["fy_month_idx"]))
 
     live_df = _load_live_pipeline_data()
 
