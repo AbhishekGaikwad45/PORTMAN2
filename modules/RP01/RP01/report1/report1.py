@@ -175,13 +175,22 @@ def month_str_to_idx(month_str: str) -> int:
 
 
 def _entry_date_to_fy_month(d):
-    """Real calendar date (from lueu_parcel_log.entry_date) -> (fin_year,
-    fy_month_idx), using the same Apr-Mar FY convention as the rest of the
+    """Real calendar date (from ldud_header.cast_off_datetime or lueu_parcel_log.entry_date)
+    -> (fin_year, fy_month_idx), using the same Apr-Mar FY convention as the rest of the
     report. e.g. 2026-07-12 -> ('2026-27', 3)."""
-    if isinstance(d, date):
+    if d is None or pd.isna(d):
+        return None, None
+    d_str = str(d).strip()
+    if not d_str or d_str.lower() in ("none", "nan", "nat", "null"):
+        return None, None
+
+    if isinstance(d, (date, datetime)):
         dt = d
     else:
-        dt = datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+        try:
+            dt = datetime.strptime(d_str[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None, None
 
     if dt.month >= 4:
         fy_start = dt.year
@@ -230,7 +239,7 @@ def _load_live_pipeline_data():
         cur = get_cursor(conn)
         cur.execute("""
                 SELECT
-                    l.entry_date,
+                    h.cast_off_datetime,
                     po.cargo_name,
                     l.quantity,
                     l.remarks,
@@ -251,6 +260,7 @@ def _load_live_pipeline_data():
                 ))
                 AND l.quantity IS NOT NULL
                 AND h.cast_off_datetime IS NOT NULL
+                AND NULLIF(TRIM(h.cast_off_datetime::text), '') IS NOT NULL
             """)
         rows = cur.fetchall()
     finally:
@@ -275,10 +285,18 @@ def _load_live_pipeline_data():
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
     fy_list, idx_list = [], []
-    for d in df["entry_date"]:
-        fy, idx = _entry_date_to_fy_month(d)
-        fy_list.append(fy)
-        idx_list.append(idx)
+    valid_indices = []
+    for idx, d in enumerate(df["cast_off_datetime"]):
+        fy, fidx = _entry_date_to_fy_month(d)
+        if fy is not None and fidx is not None:
+            fy_list.append(fy)
+            idx_list.append(fidx)
+            valid_indices.append(idx)
+
+    if not valid_indices:
+        return empty
+
+    df = df.iloc[valid_indices].copy()
     df["fin_year"] = fy_list
     df["fy_month_idx"] = idx_list
 
