@@ -77,6 +77,7 @@ def get_expected_waiting_vessels(window_start, window_end):
                 parcels.terminal_name AS declared_terminal_name,
                 parcels.total_quantity AS cargo_quantity,
                 parcels.equipment_names,
+                parcels.consignee_codes,
                 vh.load_port,
                 ldud.alongside_datetime,
                 ldud.anchored_datetime,
@@ -89,20 +90,25 @@ def get_expected_waiting_vessels(window_start, window_end):
 
             LEFT JOIN LATERAL (
                 SELECT
-                    STRING_AGG(DISTINCT NULLIF(TRIM(unload_terminal), ''), ', ') AS terminal_name,
-                    STRING_AGG(DISTINCT NULLIF(TRIM(equipment_names), ''), ', ') AS equipment_names,
-                    SUM(NULLIF(quantity, '')::numeric) AS total_quantity
+                    STRING_AGG(DISTINCT NULLIF(TRIM(p.unload_terminal), ''), ', ') AS terminal_name,
+                    STRING_AGG(DISTINCT NULLIF(TRIM(p.equipment_names), ''), ', ') AS equipment_names,
+                    STRING_AGG(DISTINCT NULLIF(TRIM(COALESCE(NULLIF(TRIM(vc.customer_code), ''), NULLIF(TRIM(p.consigner_name), ''))), ''), ', ') AS consignee_codes,
+                    SUM(NULLIF(p.quantity, '')::numeric) AS total_quantity
                 FROM (
-                    SELECT unload_terminal, equipment_names, quantity
+                    SELECT unload_terminal, equipment_names, quantity, consigner_name
                     FROM vcn_consigners
                     WHERE vcn_id = vh.id
 
                     UNION ALL
 
-                    SELECT unload_terminal, equipment_names, quantity
+                    SELECT unload_terminal, equipment_names, quantity, consigner_name
                     FROM vcn_export_cargo_declaration
                     WHERE vcn_id = vh.id
                 ) p
+                LEFT JOIN vessel_customers vc ON (
+                    UPPER(TRIM(vc.name)) = UPPER(TRIM(p.consigner_name))
+                    OR UPPER(TRIM(vc.customer_code)) = UPPER(TRIM(p.consigner_name))
+                )
             ) parcels ON TRUE
 
             LEFT JOIN LATERAL (
@@ -152,9 +158,8 @@ def get_expected_waiting_vessels(window_start, window_end):
         tank_terminal = "JJLTPL"
         load_port =  r.get("declared_terminal_name") or ""
 
-        # Waiting vessels haven't started ops yet — base CONS purely on
-        # declared equipment, not on lueu_parcel_log usage
-        cons = 'Y' if (r.get("equipment_names") or '').strip() else 'N'
+        # CONS shows consignee customer code(s) assigned to the vessel
+        cons = (r.get("consignee_codes") or '').strip()
 
         out.append({
             "terminal":     tank_terminal,
