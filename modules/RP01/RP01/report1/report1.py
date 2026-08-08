@@ -342,38 +342,57 @@ def load_data() -> pd.DataFrame:
         fin_year,
         month,
         category,
-        quantity
+        quantity,
+        sail_cast_off
     FROM mis_vessel_master
     WHERE fin_year IS NOT NULL
-      AND month IS NOT NULL
       AND NULLIF(TRIM(sail_cast_off), '') IS NOT NULL
 """)
         rows = cur.fetchall()
     finally:
         conn.close()
 
+    empty = pd.DataFrame(columns=["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"])
+
     if not rows:
-        mv_df = pd.DataFrame(columns=["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"])
+        mv_df = empty
     else:
         mv_df = pd.DataFrame(rows)
 
-        missing_cols = [c for c in ("fin_year", "month", "category", "quantity") if c not in mv_df.columns]
+        missing_cols = [c for c in ("fin_year", "category", "quantity", "sail_cast_off") if c not in mv_df.columns]
         if missing_cols:
             raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
 
-        mv_df["fin_year"] = mv_df["fin_year"].str.strip()
         mv_df["category"] = mv_df["category"].astype(str).str.strip()
         mv_df["quantity"] = pd.to_numeric(mv_df["quantity"], errors="coerce").fillna(0.0)
-        mv_df["fy_month_idx"] = mv_df["month"].apply(month_str_to_idx)
-        mv_df["cargo_sub_category"] = mv_df["category"].map(CATEGORY_MAP)
 
-        unmapped = sorted(mv_df.loc[mv_df["cargo_sub_category"].isna(), "category"].unique().tolist())
-        if unmapped:
-            print("REPORT1 WARNING: unmapped mis_vessel_master category values dropped:", unmapped)
+        fy_list = []
+        idx_list = []
+        valid_indices = []
 
-        mv_df = mv_df.dropna(subset=["cargo_sub_category"])
-        mv_df["quantity_000t"] = mv_df["quantity"] / 1000.0
-        mv_df = mv_df[["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"]]
+        for idx, d in enumerate(mv_df["sail_cast_off"]):
+            fy, fidx = _entry_date_to_fy_month(d)
+            if fy is not None and fidx is not None:
+                fy_list.append(fy)
+                idx_list.append(fidx)
+                valid_indices.append(idx)
+
+        if not valid_indices:
+            mv_df = empty
+        else:
+            mv_df = mv_df.iloc[valid_indices].copy()
+            mv_df["fin_year"] = fy_list
+            mv_df["fy_month_idx"] = idx_list
+
+            mv_df["cargo_sub_category"] = mv_df["category"].map(CATEGORY_MAP)
+
+            unmapped = sorted(mv_df.loc[mv_df["cargo_sub_category"].isna(), "category"].unique().tolist())
+            if unmapped:
+                print("REPORT1 WARNING: unmapped mis_vessel_master category values dropped:", unmapped)
+
+            mv_df = mv_df.dropna(subset=["cargo_sub_category"])
+            mv_df["quantity_000t"] = mv_df["quantity"] / 1000.0
+            mv_df = mv_df[["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"]]
 
     # ---- which (fin_year, month) periods does mis_vessel_master actually
     # cover? Only periods with ZERO rows there fall back to the live pipeline. ----
