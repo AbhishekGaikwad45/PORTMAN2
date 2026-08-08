@@ -1477,18 +1477,23 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         """)
         turnaround_rows = cur.fetchall()
 
-        # ---------------- Parcel Size (unchanged — already a
-        # separate query, not affected by the join bug above) --------
+        # ---------------- Parcel Size ----------------
         cur.execute(
             """
             SELECT
-                entry_date,
-                quantity,
-                is_shortclose AS short_close
-            FROM lueu_parcel_log
-            WHERE COALESCE(is_deleted, false) = false
-              AND COALESCE(is_shortclose, false) = false
-              AND quantity IS NOT NULL
+                h.cast_off_datetime AS castoff_raw,
+                p.quantity,
+                p.is_shortclose AS short_close
+            FROM lueu_parcel_log p
+            JOIN ldud_parcel_ops o
+                ON o.id = p.parcel_op_id
+            JOIN ldud_header h
+                ON h.id = o.ldud_id
+            WHERE COALESCE(p.is_deleted, false) = false
+              AND COALESCE(h.is_deleted, false) = false
+              AND COALESCE(p.is_shortclose, false) = false
+              AND p.quantity IS NOT NULL
+              AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
             """
         )
         parcel_rows = cur.fetchall()
@@ -1514,11 +1519,11 @@ def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str
         if vessel_count else None
     )
 
-    # ---------- Parcel Size (unchanged) ----------
+    # ---------- Parcel Size ----------
     total_qty = 0
     for r in parcel_rows:
-        d = _parse_text_date(r["entry_date"])
-        if not d or d.year != calendar_year or d.month != month_num:
+        castoff = _parse_text_datetime(r["castoff_raw"])
+        if not castoff or castoff.year != calendar_year or castoff.month != month_num:
             continue
         total_qty += float(r["quantity"] or 0)
 
