@@ -156,29 +156,30 @@ def _fetch_live_idle_by_parcel_op(cur, parcel_op_ids):
 
 
 def _fetch_live_rows(cur):
-    """Current-month vessel-call rows built from LDUD/VCN, in the same
-    shape as the mis_vessel_master rows, for months not yet migrated
+    """Vessel-call rows built from LDUD/VCN for months not yet migrated
     into mis_vessel_master.
 
     quantity is the ACTUAL discharged quantity from lueu_parcel_log
     (excluding is_shortclose = true entries), falling back to the
-    originally declared po.quantity only if no log entries exist yet."""
+    originally declared po.quantity only if no log entries exist yet.
+    Financial year and month are derived from the vessel's actual
+    timestamps (cast_off_datetime, alongside_datetime, nor_tendered, created_date)."""
     cur.execute("""
         SELECT
+            lh.id AS ldud_id,
             po.id AS parcel_op_id,
-            to_char(current_date, 'YYYY') || '-' ||
-                right(to_char(current_date + interval '1 year', 'YYYY'), 2) AS fin_year,
-            to_char(current_date, 'Mon-YY') AS month,
             vh.berth_name AS berth_no,
             vh.operation_type AS import_export,
             po.cargo_name AS cargo,
+            vc.cargo_type AS vc_broad_category,
             COALESCE(actual.real_qty, po.quantity::numeric) AS quantity,
             lh.nor_tendered AS nor_tendered,
             lh.nor_accepted AS nor_accepted,
             lh.alongside_datetime AS alongside_datetime,
             lh.cast_off_datetime AS cast_off_datetime,
             lh.pilot_pickup_time AS pilot_pickup_time,
-            lh.pilot_board_departure AS pilot_board_departure
+            lh.pilot_board_departure AS pilot_board_departure,
+            lh.created_date AS created_date
         FROM ldud_parcel_ops po
         JOIN ldud_header lh ON lh.id = po.ldud_id
         JOIN vcn_header vh ON vh.id = lh.vcn_id
@@ -190,7 +191,9 @@ def _fetch_live_rows(cur):
             GROUP BY parcel_op_id
         ) actual
             ON actual.parcel_op_id = po.id
-        WHERE to_char(current_date, 'Mon-YY') = to_char(current_date, 'Mon-YY')
+        LEFT JOIN vessel_cargo vc
+            ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(po.cargo_name))
+        WHERE COALESCE(lh.is_deleted, FALSE) = FALSE
     """)
     raw = cur.fetchall()
     if not raw:
@@ -199,6 +202,7 @@ def _fetch_live_rows(cur):
     parcel_op_ids = [r["parcel_op_id"] for r in raw]
     idle = _fetch_live_idle_by_parcel_op(cur, parcel_op_ids)
 
+    seen_ldud = set()
     rows = []
     for r in raw:
         nor_tendered = _parse_ts(r["nor_tendered"])
@@ -208,20 +212,37 @@ def _fetch_live_rows(cur):
         pilot_pickup = _parse_ts(r["pilot_pickup_time"])
         pilot_departure = _parse_ts(r["pilot_board_departure"])
 
-        waiting_non_port = _days_between(nor_tendered, nor_accepted)
-        waiting_port = _days_between(nor_accepted, alongside)
-        stay_at_berth = _days_between(alongside, cast_off)
-        inward_movement = _days_between(pilot_pickup, alongside)
-        outward_movement = _days_between(pilot_departure, cast_off)
+        dt = cast_off or alongside or nor_tendered or _parse_ts(r["created_date"])
+        if not dt:
+            continue
+
+        if dt.month >= 4:
+            fy_start = dt.year
+        else:
+            fy_start = dt.year - 1
+        fin_year = f"{fy_start}-{str((fy_start + 1) % 100).zfill(2)}"
+        month_str = dt.strftime("%b-%y")
+
+        ldud_id = r["ldud_id"]
+        is_first_parcel = ldud_id not in seen_ldud
+        seen_ldud.add(ldud_id)
+
+        waiting_non_port = _days_between(nor_tendered, nor_accepted) if is_first_parcel else 0.0
+        waiting_port = _days_between(nor_accepted, alongside) if is_first_parcel else 0.0
+        stay_at_berth = _days_between(alongside, cast_off) if is_first_parcel else 0.0
+        inward_movement = _days_between(pilot_pickup, alongside) if is_first_parcel else 0.0
+        outward_movement = _days_between(pilot_departure, cast_off) if is_first_parcel else 0.0
 
         idle_bucket = idle.get(r["parcel_op_id"], {"port": 0.0, "non_port": 0.0})
 
         rows.append({
-            "fin_year": r["fin_year"],
-            "month": r["month"],
+            "vessel_call_id": f"live_{ldud_id}",
+            "fin_year": fin_year,
+            "month": month_str,
             "berth_no": r["berth_no"],
             "import_export": r["import_export"],
             "cargo": r["cargo"],
+            "broad_category": r["vc_broad_category"],
             "quantity": r["quantity"],
             "pre_berthing_waiting": waiting_port + waiting_non_port,
             "waiting_port": waiting_port,
@@ -271,14 +292,7 @@ def days_in_month(fin_year: str, month_idx: int) -> int:
 # Cargo (free text) -> broad section classification
 # ---------------------------------------------------------------------
 def classify_broad_category(cargo):
-    """Classifies a free-text cargo string into LIQUID / DRY BULK / BREAK BULK.
-
-    Cargo names are often compound (e.g. "SM/IPA/Acetone", "VAM/Aacid") because
-    a single parcel can carry a blend. We split on '/', '+', '-' and whitespace
-    and check each individual piece against known short chemical codes, in
-    addition to substring-checking known multi-word phrases against the whole
-    string. This avoids silently dropping any cargo whose combined name
-    doesn't exactly match one of the old fixed strings."""
+    """Classifies a free-text cargo string into LIQUID / DRY BULK / BREAK BULK."""
     cargo_raw = str(cargo or "").strip().upper()
     if not cargo_raw:
         return None
@@ -339,6 +353,7 @@ def load_data() -> pd.DataFrame:
         cur = get_cursor(conn)
         cur.execute("""
             SELECT
+                id AS vessel_call_id,
                 fin_year,
                 month,
                 berth_no,
@@ -359,23 +374,23 @@ def load_data() -> pd.DataFrame:
         """)
         mis_rows = cur.fetchall()
 
-        current_month = pd.Timestamp.today().strftime("%b-%y")
-        mis_current = [r for r in mis_rows if str(r["month"]).strip() == current_month]
+        mis_periods = {
+            (str(r["fin_year"]).strip(), str(r["month"]).strip())
+            for r in mis_rows
+        }
 
-        live_rows = []
-        if not mis_current:
-            print("REPORT11: Current month not found in mis_vessel_master")
-            print("REPORT11: Loading live LDUD/LUEU data...")
-            live_rows = _fetch_live_rows(cur)
-        else:
-            print("REPORT11: Current month already present in mis_vessel_master — skipping live load")
+        live_rows = _fetch_live_rows(cur)
+        filtered_live = [
+            r for r in live_rows
+            if (str(r["fin_year"]).strip(), str(r["month"]).strip()) not in mis_periods
+        ]
 
-        rows = list(mis_rows) + list(live_rows)
+        rows = list(mis_rows) + filtered_live
     finally:
         conn.close()
 
     cols = [
-        "fin_year", "fy_month_idx", "import_export", "quantity",
+        "vessel_call_id", "fin_year", "fy_month_idx", "import_export", "quantity",
         "waiting_port", "waiting_non_port", "stay_at_berth",
         "inward_movement", "outward_movement",
         "non_working_port", "non_working_non_port", "broad_category",
@@ -398,7 +413,13 @@ def load_data() -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
     df["direction"] = df["import_export"].apply(_direction)
-    df["broad_category"] = df["cargo"].apply(classify_broad_category)
+
+    if "broad_category" not in df.columns:
+        df["broad_category"] = None
+    df["broad_category"] = df["broad_category"].where(
+        df["broad_category"].notna(),
+        df["cargo"].apply(classify_broad_category)
+    )
 
     unmapped = sorted(df.loc[df["broad_category"].isna(), "cargo"].dropna().unique().tolist())
     if unmapped:
@@ -421,7 +442,7 @@ def _get_df_and_years():
 def compute_section_a_month(df, fin_year, month_idx):
     m = df[(df["fin_year"] == fin_year) & (df["fy_month_idx"] == month_idx)]
 
-    vessels_sailed = len(m)  # one row per vessel call
+    vessels_sailed = m["vessel_call_id"].nunique() if "vessel_call_id" in m.columns and m["vessel_call_id"].notna().any() else len(m)
 
     def tonnes(category, direction):
         sub = m[(m["broad_category"] == category) & (m["direction"] == direction)]
@@ -467,7 +488,7 @@ def compute_section_a_fy(df, fin_year):
     compute_section_c_month) the real FY ratios for Sections B and C."""
     m = df[df["fin_year"] == fin_year]
 
-    vessels_sailed = len(m)
+    vessels_sailed = m["vessel_call_id"].nunique() if "vessel_call_id" in m.columns and m["vessel_call_id"].notna().any() else len(m)
 
     def tonnes(category, direction):
         sub = m[(m["broad_category"] == category) & (m["direction"] == direction)]
@@ -520,7 +541,7 @@ def compute_section_b_month(a):
     )
     vs = a["Vessels Sailed"]
     berth_stay_hrs = a["Total Berth Stay of all vessels (For Berth Productivity)"]
-
+    total_berth_stay_days = berth_stay_hrs / 24
     b = {
         "Vessels Sailed": vs,
         "Total Traffic Throughputs (TEUs)": a["Vessel Discharge (Including Restow)"] + a["Vessel Load (Including Restow)"],
@@ -554,13 +575,18 @@ def compute_section_b_month(a):
         "% wrt to Total Thoughput": None,
     }
     b["Avg. Turn around time - Pilot Boarding to De-boarding-Port A/c."] = b["Avg. Turn around time - Pilot Boarding to De-boarding-Total"]
-    b["Ship Output per Day (Tonnes)"] = round(_safe_div(b["Total traffic throughputs (Tons)"], b["Avg. Berth stay"]), 3) if b["Avg. Berth stay"] else 0.0
+    import_tons = a["Dry Bulk traffic - Import"] + a["Break Bulk traffic - Import"] + a["Liquid - Import"]
+    b["Ship Output per Day (Tonnes)"] = round(
+        _safe_div(import_tons, total_berth_stay_days),
+        3
+    ) if total_berth_stay_days else 0.0
     return b
 
 
 def compute_section_c_month(a, b):
     vs = a["Vessels Sailed"]
     berth_stay_hrs = a["Total Berth Stay of all vessels (For Berth Productivity)"]
+    total_berth_stay_days = berth_stay_hrs / 24
 
     c = {
         "Avg. Pre-berthing Waiting Time-Total": round(_safe_div(

@@ -232,80 +232,97 @@ def _direction(import_export):
         return "Outbound"
     return None
 
-def get_report_category(cargo):
-    cargo = str(cargo or "").strip().upper()
+# def get_report_category(cargo):
+#     cargo = str(cargo or "").strip().upper()
 
-    # ---------------- POL PRODUCTS ----------------
-    if cargo in (
-        "FO",
-        "FO [E]",
-        "CBFS",
-        "FURNACE OIL",
-    ):
-        return "POL-Products (In MMT)"
+#     # ---------------- POL PRODUCTS ----------------
+#     if cargo in (
+#         "FO",
+#         "FO [E]",
+#         "CBFS",
+#         "FURNACE OIL",
+#     ):
+#         return "POL-Products (In MMT)"
 
-    # ---------------- POL CRUDE ----------------
-    if cargo == "POL CRUDE":
-        return "POL-Crude (In MMT)"
+#     # ---------------- POL CRUDE ----------------
+#     if cargo == "POL CRUDE":
+#         return "POL-Crude (In MMT)"
 
-    # ---------------- LPG ----------------
-    if "LPG" in cargo or "LNG" in cargo:
-        return "LPG or LNG (In MMT)"
+#     # ---------------- LPG ----------------
+#     if "LPG" in cargo or "LNG" in cargo:
+#         return "LPG or LNG (In MMT)"
 
-    # ---------------- EDIBLE OIL ----------------
-    if cargo in (
-        "CPO",
-        "CPKO",
-        "CPO/CPKO",
-        "CPO/RBDPO",
-        "RBD PALM OLEIN",
-        "EDIBLE OIL",
-        "SUNFLOWER OIL",
-        "CDSBO",
-        "CSBO",
-        "CSFO",
-    ):
-        return "Edible Oil (In MMT)"
+#     # ---------------- EDIBLE OIL ----------------
+#     if any(x in cargo for x in (
+#         "CPO",
+#         "CPKO",
+#         "RBD PALM OLEIN",
+#         "EDIBLE OIL",
+#         "SUNFLOWER OIL",
+#         "CDSBO",
+#         "CSBO",
+#         "CSFO",
+#     )):
+#         return "Edible Oil (In MMT)"
 
-    # ---------------- CHEMICALS ----------------
-    if cargo in (
-        "CHEMICAL",
-        "ACETIC ACID",
-        "A. ACID",
-        "A.ACID",
-        "AACID",
-        "VAM",
-        "PHENOL/ACETON/VAM",
-        "PHENOL",
-        "MDC",
-        "MEK",
-        "IPA",
-        "ISOPROPYL ALCOHOL",
-        "SM",
-        "STRENE MONOMER",
-        "STYRENE MONOMER",
-        "N BUTONAL/TOLUNE",
-    ):
-        return "Chemicals (In MMT)"
+#     # ---------------- CHEMICALS ----------------
+#     chemical_keywords = [
+#         "CHEMICAL",
+#         "CHEMICALS",
+#         "IPA",
+#         "SM",
+#         "VAM",
+#         "PHENOL",
+#         "ACETONE",
+#         "AACID",
+#         "A.ACID",
+#         "A. ACID",
+#         "ACETIC ACID",
+#         "MDC",
+#         "MEK",
+#         "ISOPROPYL ALCOHOL",
+#         "METHYLENE",
+#         "METHELENE",
+#         "CHOLORIDE",
+#         "CHLORIDE",
+#         "STRENE MONOMER",
+#         "STYRENE MONOMER",
+#         "N BUTONAL",
+#         "TOLUNE",
+#         "NITRIC ACID",
+#     ]
 
-    # ---------------- FRM LIQUID ----------------
-    if cargo in (
-        "PHOSPHORIC ACID",
-        "PH.ACID",
-        "PH ACID",
-    ):
-        return "FRM-Liquid (In MMT)"
+#     if any(k in cargo for k in chemical_keywords):
+#         return "Chemicals (In MMT)"
 
-    # ---------------- OTHER LIQUID ----------------
-    if (
-        "BASE OIL" in cargo
-        or "LUBE" in cargo
-        or "SHELL" in cargo
-        or cargo == "CHEMICALS"
-    ):
-        return "Other Liquids (In MMT)"
+#     # ---------------- FRM LIQUID ----------------
+#     if cargo in (
+#         "PHOSPHORIC ACID",
+#         "PH.ACID",
+#         "PH ACID",
+#     ):
+#         return "FRM-Liquid (In MMT)"
 
-    return None
+#     # ---------------- OTHER LIQUID ----------------
+#     if any(x in cargo for x in (
+#         "BASE OIL",
+#         "LUBE",
+#         "SHELL",
+#     )):
+#         return "Other Liquids (In MMT)"
+#     print("\n===== UNMAPPED =====")
+
+#     print(
+#         df[df["row_key"].isna()][["cargo", "quantity"]]
+#         .groupby("cargo")
+#         .sum()
+#         .sort_values("quantity", ascending=False)
+#     )
+
+#     print("====================")
+    
+
+#     return None
 
 def load_data() -> pd.DataFrame:
     """Pulls every mis_vessel_master row (joined to vessel_cargo for the
@@ -323,6 +340,8 @@ def load_data() -> pd.DataFrame:
                 foreign_indian,
                 import_export,
                 cargo,
+                category,
+                category1,
                 quantity
             FROM mis_vessel_master
             WHERE fin_year IS NOT NULL
@@ -349,56 +368,92 @@ def load_data() -> pd.DataFrame:
             print("REPORT12: Current month not found in mis_vessel_master")
             print("REPORT12: Loading live VCN data...")
 
+            # -----------------------------------------------------------
+            # Date source for live rows: ldud_header.cast_off_datetime
+            # (the vessel's actual departure timestamp), NOT current_date.
+            # ldud_header is INNER-joined and requires a real, non-blank
+            # cast_off_datetime, so vessel calls with no cast-off yet
+            # (still alongside) or with no vcn link (e.g. orphaned rows)
+            # are correctly excluded rather than mis-dated to "today".
+            # -----------------------------------------------------------
             cur.execute("""
+                WITH po_actual AS (
+                    SELECT
+                        po.ldud_id,
+                        UPPER(TRIM(po.cargo_name)) AS cargo_key,
+                        SUM(COALESCE(act.real_qty, po.quantity)) AS total_qty
+                    FROM ldud_parcel_ops po
+                    LEFT JOIN (
+                        SELECT parcel_op_id, SUM(quantity) AS real_qty
+                        FROM lueu_parcel_log
+                        WHERE is_deleted = false
+                        AND is_shortclose = false
+                        GROUP BY parcel_op_id
+                    ) act
+                        ON act.parcel_op_id = po.id
+                    GROUP BY po.ldud_id, UPPER(TRIM(po.cargo_name))
+                )
                 SELECT
-                    to_char(current_date,'YYYY')||'-'||right(to_char(current_date + interval '1 year','YYYY'),2) AS fin_year,
-                    to_char(current_date,'Mon-YY') AS month,
+                    to_char(lh.cast_off_datetime::timestamp,'YYYY')||'-'||right(to_char(lh.cast_off_datetime::timestamp + interval '1 year','YYYY'), 2) AS fin_year,
+                    to_char(lh.cast_off_datetime::timestamp,'Mon-YY') AS month,
                     h.vessel_run_type AS overseas_coastal,
                     'Import' AS import_export,
                     c.cargo_name AS cargo,
-                    COALESCE(actual.real_qty, c.quantity::numeric) AS quantity
+                    vc.cargo_sub_category_2 AS category1,
+                    COALESCE(poa.total_qty, c.quantity::numeric) AS quantity
                 FROM vcn_header h
-                JOIN vcn_consigners c
-                    ON c.vcn_id = h.id
-                LEFT JOIN ldud_header lh
+                JOIN (
+                    SELECT
+                        vcn_id,
+                        UPPER(TRIM(cargo_name)) AS cargo_name,
+                        SUM(quantity::numeric) AS quantity
+                    FROM vcn_consigners
+                    GROUP BY
+                        vcn_id,
+                        UPPER(TRIM(cargo_name))
+                ) c
+                ON c.vcn_id = h.id
+                JOIN ldud_header lh
                     ON lh.vcn_id = h.id
-                LEFT JOIN ldud_parcel_ops po
-                    ON po.ldud_id = lh.id
-                    AND UPPER(TRIM(po.cargo_name)) = UPPER(TRIM(c.cargo_name))
-                LEFT JOIN (
-                    SELECT parcel_op_id, SUM(quantity) AS real_qty
-                    FROM lueu_parcel_log
-                    WHERE is_deleted = false
-                    AND is_shortclose = false
-                    GROUP BY parcel_op_id
-                ) actual
-                    ON actual.parcel_op_id = po.id
+                    AND lh.cast_off_datetime IS NOT NULL
+                    AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL
+                LEFT JOIN po_actual poa
+                    ON poa.ldud_id = lh.id
+                    AND poa.cargo_key = c.cargo_name
+                LEFT JOIN vessel_cargo vc
+                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(c.cargo_name))
 
                 UNION ALL
 
                 SELECT
-                    to_char(current_date,'YYYY')||'-'||right(to_char(current_date + interval '1 year','YYYY'),2),
-                    to_char(current_date,'Mon-YY'),
+                    to_char(lh.cast_off_datetime::timestamp,'YYYY')||'-'||right(to_char(lh.cast_off_datetime::timestamp + interval '1 year','YYYY'), 2),
+                    to_char(lh.cast_off_datetime::timestamp,'Mon-YY'),
                     h.vessel_run_type,
                     'Export',
                     e.cargo_name,
-                    COALESCE(actual.real_qty, e.quantity::numeric)
+                    vc.cargo_sub_category_2,
+                    COALESCE(poa.total_qty, e.quantity::numeric)
                 FROM vcn_header h
-                JOIN vcn_export_cargo_declaration e
-                    ON e.vcn_id = h.id
-                LEFT JOIN ldud_header lh
+                JOIN (
+                    SELECT
+                        vcn_id,
+                        UPPER(TRIM(cargo_name)) AS cargo_name,
+                        SUM(quantity::numeric) AS quantity
+                    FROM vcn_export_cargo_declaration
+                    GROUP BY
+                        vcn_id,
+                        UPPER(TRIM(cargo_name))
+                ) e
+                ON e.vcn_id = h.id
+                JOIN ldud_header lh
                     ON lh.vcn_id = h.id
-                LEFT JOIN ldud_parcel_ops po
-                    ON po.ldud_id = lh.id
-                    AND UPPER(TRIM(po.cargo_name)) = UPPER(TRIM(e.cargo_name))
-                LEFT JOIN (
-                    SELECT parcel_op_id, SUM(quantity) AS real_qty
-                    FROM lueu_parcel_log
-                    WHERE is_deleted = false
-                    AND is_shortclose = false
-                    GROUP BY parcel_op_id
-                ) actual
-                    ON actual.parcel_op_id = po.id
+                    AND lh.cast_off_datetime IS NOT NULL
+                    AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL
+                LEFT JOIN po_actual poa
+                    ON poa.ldud_id = lh.id
+                    AND poa.cargo_key = UPPER(TRIM(e.cargo_name))
+                LEFT JOIN vessel_cargo vc
+                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(e.cargo_name))
             """)
 
             live_rows = cur.fetchall()
@@ -435,19 +490,39 @@ def load_data() -> pd.DataFrame:
     # Convert quantity to numeric
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
-    # Map cargo to report category
-    df["row_key"] = df["cargo"].apply(get_report_category)
+    # Map category1 (from mis_vessel_master history, or vessel_cargo for live rows) to report row
+    def get_report_category(category1):
+        key = str(category1 or "").strip().upper()
 
-    # Show unmapped cargo values
+        mapping = {
+            # mis_vessel_master spelling (historical, June and earlier)
+            "EDIBLE OIL":   "Edible Oil (In MMT)",
+            "PH.ACID":      "FRM-Liquid (In MMT)",
+            "CHEMICAL":     "Chemicals (In MMT)",
+            "OTHER":        "Other Liquids (In MMT)",
+            "POL":          "POL-Products (In MMT)",
+            # vessel_cargo spelling (live, current month)
+            "OTHER LIQUID": "Other Liquids (In MMT)",
+            "FARM LIQUIDS": "FRM-Liquid (In MMT)",
+        }
+
+        row = mapping.get(key)
+        if row is None and key:
+            print(f"REPORT12 WARNING: unrecognized category1 value '{category1}' — check vessel_cargo/mis_vessel_master")
+        return row
+
+    df["row_key"] = df["category1"].apply(get_report_category)
+
+    # Show unmapped category1 values (this is what actually decides row_key now)
     unmapped = sorted(
-        df.loc[df["row_key"].isna(), "cargo"]
+        df.loc[df["row_key"].isna(), "category1"]
         .dropna()
         .unique()
         .tolist()
     )
 
     if unmapped:
-        print("REPORT12 WARNING: Unmapped cargo values:")
+        print("REPORT12 WARNING: Unmapped category1 values:")
         for c in unmapped:
             print("   ", c)
 
@@ -496,7 +571,6 @@ def load_data() -> pd.DataFrame:
 
     # No TEU source in the current schema; TEU row is always 0.
     is_teu_row = df["row_key"] == "Container (In TEUs)"
-    # Database already stores the values you want to display.
     df["value"] = df["quantity"]
     df.loc[is_teu_row, "value"] = 0.0
 
@@ -508,6 +582,7 @@ def load_data() -> pd.DataFrame:
         df.groupby(["fin_year", "fy_month_idx", "sheet", "row_key", "direction", "bucket"], as_index=False)["value"]
         .sum()
     )
+
     return combined
 
 
@@ -520,6 +595,7 @@ def _get_df_and_years():
 def compute_table(df, sheet, fin_year, month_idx):
     sdef = SHEET_DEFS[sheet]
     subset = df[(df["sheet"] == sheet) & (df["fin_year"] == fin_year) & (df["fy_month_idx"] == month_idx)]
+
 
     values = {}
     for grp in sdef["groups"]:

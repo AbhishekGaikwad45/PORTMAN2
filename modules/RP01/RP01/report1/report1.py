@@ -175,13 +175,22 @@ def month_str_to_idx(month_str: str) -> int:
 
 
 def _entry_date_to_fy_month(d):
-    """Real calendar date (from lueu_parcel_log.entry_date) -> (fin_year,
-    fy_month_idx), using the same Apr-Mar FY convention as the rest of the
+    """Real calendar date (from ldud_header.cast_off_datetime or lueu_parcel_log.entry_date)
+    -> (fin_year, fy_month_idx), using the same Apr-Mar FY convention as the rest of the
     report. e.g. 2026-07-12 -> ('2026-27', 3)."""
-    if isinstance(d, date):
+    if d is None or pd.isna(d):
+        return None, None
+    d_str = str(d).strip()
+    if not d_str or d_str.lower() in ("none", "nan", "nat", "null"):
+        return None, None
+
+    if isinstance(d, (date, datetime)):
         dt = d
     else:
-        dt = datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+        try:
+            dt = datetime.strptime(d_str[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None, None
 
     if dt.month >= 4:
         fy_start = dt.year
@@ -229,13 +238,30 @@ def _load_live_pipeline_data():
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT l.entry_date, po.cargo_name, l.quantity
-            FROM lueu_parcel_log l
-            JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
-            WHERE l.is_deleted IS NOT TRUE
-              AND l.entry_date IS NOT NULL
-              AND l.quantity IS NOT NULL
-        """)
+                SELECT
+                    h.cast_off_datetime,
+                    po.cargo_name,
+                    l.quantity,
+                    l.remarks,
+                    l.is_shortclose
+                FROM lueu_parcel_log l
+
+                JOIN ldud_parcel_ops po
+                    ON po.id = l.parcel_op_id
+
+                JOIN ldud_header h
+                    ON h.id = po.ldud_id
+
+                WHERE l.is_deleted IS NOT TRUE
+                AND NOT COALESCE(l.is_shortclose, FALSE)
+                AND (l.remarks IS NULL OR (
+                    LOWER(l.remarks) NOT LIKE '%short%close%' AND
+                    LOWER(l.remarks) NOT LIKE '%shortclose%'
+                ))
+                AND l.quantity IS NOT NULL
+                AND h.cast_off_datetime IS NOT NULL
+                AND NULLIF(TRIM(h.cast_off_datetime::text), '') IS NOT NULL
+            """)
         rows = cur.fetchall()
     finally:
         conn.close()
@@ -244,14 +270,33 @@ def _load_live_pipeline_data():
     if not rows:
         return empty
 
-    df = pd.DataFrame(rows)
+    valid_rows = []
+    for r in rows:
+        rem = str(r.get("remarks") or "").strip().lower()
+        is_sc = bool(r.get("is_shortclose"))
+        if is_sc or ("short" in rem and "close" in rem):
+            continue
+        valid_rows.append(r)
+
+    if not valid_rows:
+        return empty
+
+    df = pd.DataFrame(valid_rows)
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
 
     fy_list, idx_list = [], []
-    for d in df["entry_date"]:
-        fy, idx = _entry_date_to_fy_month(d)
-        fy_list.append(fy)
-        idx_list.append(idx)
+    valid_indices = []
+    for idx, d in enumerate(df["cast_off_datetime"]):
+        fy, fidx = _entry_date_to_fy_month(d)
+        if fy is not None and fidx is not None:
+            fy_list.append(fy)
+            idx_list.append(fidx)
+            valid_indices.append(idx)
+
+    if not valid_indices:
+        return empty
+
+    df = df.iloc[valid_indices].copy()
     df["fin_year"] = fy_list
     df["fy_month_idx"] = idx_list
 
@@ -285,73 +330,181 @@ def _load_live_pipeline_data():
 
 
 def load_data() -> pd.DataFrame:
-    """Primary source: mis_vessel_master. For any (fin_year, month) that has
-    NO rows at all in mis_vessel_master, fall back to the live LUEU01
-    logging pipeline for that period only -- mis_vessel_master always wins
-    where it has data."""
+    """Load Report-1 data.
+
+    mis_vessel_master:
+        Only rows having a valid sail_cast_off are accepted.
+
+    live LUEU01:
+        Used only when mis_vessel_master has no data for that FY/month.
+    """
+
     conn = get_db()
+
     try:
         cur = get_cursor(conn)
+
         cur.execute("""
-    SELECT
-        fin_year,
-        month,
-        category,
-        quantity
-    FROM mis_vessel_master
-    WHERE fin_year IS NOT NULL
-      AND month IS NOT NULL
-      AND NULLIF(TRIM(cast_off), '') IS NOT NULL
-""")
+            SELECT
+                fin_year,
+                month,
+                category,
+                quantity,
+                sail_cast_off
+            FROM mis_vessel_master
+            WHERE fin_year IS NOT NULL
+              AND NULLIF(TRIM(sail_cast_off::text), '') IS NOT NULL
+        """)
+
         rows = cur.fetchall()
+
     finally:
         conn.close()
 
+    empty = pd.DataFrame(
+        columns=[
+            "fin_year",
+            "fy_month_idx",
+            "cargo_sub_category",
+            "quantity_000t"
+        ]
+    )
+
     if not rows:
-        mv_df = pd.DataFrame(columns=["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"])
+        mv_df = empty
     else:
         mv_df = pd.DataFrame(rows)
 
-        missing_cols = [c for c in ("fin_year", "month", "category", "quantity") if c not in mv_df.columns]
-        if missing_cols:
-            raise ReportDataError(f"Query result is missing column(s): {', '.join(missing_cols)}")
-
-        mv_df["fin_year"] = mv_df["fin_year"].str.strip()
-        mv_df["category"] = mv_df["category"].astype(str).str.strip()
-        mv_df["quantity"] = pd.to_numeric(mv_df["quantity"], errors="coerce").fillna(0.0)
-        mv_df["fy_month_idx"] = mv_df["month"].apply(month_str_to_idx)
-        mv_df["cargo_sub_category"] = mv_df["category"].map(CATEGORY_MAP)
-
-        unmapped = sorted(mv_df.loc[mv_df["cargo_sub_category"].isna(), "category"].unique().tolist())
-        if unmapped:
-            print("REPORT1 WARNING: unmapped mis_vessel_master category values dropped:", unmapped)
-
-        mv_df = mv_df.dropna(subset=["cargo_sub_category"])
-        mv_df["quantity_000t"] = mv_df["quantity"] / 1000.0
-        mv_df = mv_df[["fin_year", "fy_month_idx", "cargo_sub_category", "quantity_000t"]]
-
-    # ---- which (fin_year, month) periods does mis_vessel_master actually
-    # cover? Only periods with ZERO rows there fall back to the live pipeline. ----
-    covered_periods = set(zip(mv_df["fin_year"], mv_df["fy_month_idx"]))
-
-    live_df = _load_live_pipeline_data()
-    if not live_df.empty:
-        live_df = live_df[
-            ~live_df.apply(lambda r: (r["fin_year"], r["fy_month_idx"]) in covered_periods, axis=1)
+        # Safety check
+        required = [
+            "fin_year",
+            "category",
+            "quantity",
+            "sail_cast_off"
         ]
 
-    combined = pd.concat([mv_df, live_df], ignore_index=True)
+        missing = [c for c in required if c not in mv_df.columns]
+
+        if missing:
+            raise ReportDataError(
+                f"Missing columns: {', '.join(missing)}"
+            )
+
+        # IMPORTANT:
+        # Remove blank sail_cast_off rows again in Python.
+        # This prevents invalid historical rows from entering YTD.
+        mv_df["sail_cast_off"] = (
+            mv_df["sail_cast_off"]
+            .astype(str)
+            .str.strip()
+        )
+
+        mv_df = mv_df[
+            mv_df["sail_cast_off"].notna()
+            & (mv_df["sail_cast_off"] != "")
+            & (~mv_df["sail_cast_off"].str.lower().isin(
+                ["none", "null", "nan", "nat"]
+            ))
+        ].copy()
+
+        mv_df["quantity"] = pd.to_numeric(
+            mv_df["quantity"],
+            errors="coerce"
+        ).fillna(0.0)
+
+        mv_df["category"] = (
+            mv_df["category"]
+            .astype(str)
+            .str.strip()
+        )
+
+        fy_list = []
+        idx_list = []
+        valid_indices = []
+
+        for idx, sail_date in enumerate(mv_df["sail_cast_off"]):
+
+            fy, fidx = _entry_date_to_fy_month(sail_date)
+
+            if fy is not None and fidx is not None:
+                fy_list.append(fy)
+                idx_list.append(fidx)
+                valid_indices.append(idx)
+
+        if not valid_indices:
+            mv_df = empty
+
+        else:
+            mv_df = mv_df.iloc[valid_indices].copy()
+
+            mv_df["fin_year"] = fy_list
+            mv_df["fy_month_idx"] = idx_list
+
+            mv_df["cargo_sub_category"] = (
+                mv_df["category"].map(CATEGORY_MAP)
+            )
+
+            mv_df = mv_df.dropna(
+                subset=["cargo_sub_category"]
+            )
+
+            mv_df["quantity_000t"] = (
+                mv_df["quantity"] / 1000.0
+            )
+
+            mv_df = mv_df[
+                [
+                    "fin_year",
+                    "fy_month_idx",
+                    "cargo_sub_category",
+                    "quantity_000t"
+                ]
+            ]
+
+    # Only periods actually present in the VALID
+    # sail_cast_off data are considered covered.
+    covered_periods = set(
+        zip(
+            mv_df["fin_year"],
+            mv_df["fy_month_idx"]
+        )
+    )
+
+    live_df = _load_live_pipeline_data()
+
+    if not live_df.empty:
+
+        live_df = live_df[
+            ~live_df.apply(
+                lambda r:
+                    (
+                        r["fin_year"],
+                        r["fy_month_idx"]
+                    ) in covered_periods,
+                axis=1
+            )
+        ]
+
+    combined = pd.concat(
+        [mv_df, live_df],
+        ignore_index=True
+    )
 
     if combined.empty:
         raise ReportDataError(
-            "No usable rows found in mis_vessel_master or the live LUEU01 pipeline."
+            "No usable rows found."
         )
 
-    # re-aggregate in case both sources ever contributed to the same
-    # (fin_year, fy_month_idx, bucket) -- shouldn't happen given the period
-    # filter above, but keeps totals correct if it ever does
     combined = (
-        combined.groupby(["fin_year", "fy_month_idx", "cargo_sub_category"], as_index=False)["quantity_000t"]
+        combined
+        .groupby(
+            [
+                "fin_year",
+                "fy_month_idx",
+                "cargo_sub_category"
+            ],
+            as_index=False
+        )["quantity_000t"]
         .sum()
     )
 

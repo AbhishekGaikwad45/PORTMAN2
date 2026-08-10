@@ -3,93 +3,357 @@
 {% block title %}Reports — RP01{% endblock %}
 
 {% block content %}
+<style>
+    .reports-container {
+        padding: 4px 0 24px 0;
+    }
+    .reports-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+        gap: 20px;
+    }
+    .report-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 20px;
+        text-decoration: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        position: relative;
+        overflow: hidden;
+    }
+    .report-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+        border-color: #4a90d9;
+    }
+    .card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+    .card-icon {
+        width: 46px;
+        height: 46px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        background: var(--hover-bg);
+        padding: 6px;
+        border: 1px solid var(--border-color);
+    }
+    .card-logo-img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+    .card-badge {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: rgba(74, 144, 217, 0.1);
+        color: #4a90d9;
+        text-transform: uppercase;
+    }
+    .card-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+        line-height: 1.3;
+    }
+    .card-desc {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        margin-bottom: 16px;
+        flex-grow: 1;
+    }
+    .card-action {
+        font-size: 12px;
+        font-weight: 600;
+        color: #4a90d9;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: gap 0.2s ease;
+    }
+    .report-card:hover .card-action {
+        gap: 10px;
+        color: #2b6cb0;
+    }
+</style>
+
 <div class="module-header" style="display:flex;align-items:center;gap:12px;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
     <h2 style="margin:0;font-size:20px;color:var(--text-primary);">Reports</h2>
     <span style="background:#4a90d9;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;">RP01</span>
 </div>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">
-    <a href="/module/RP01/mis-history/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Historical MIS Data</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Upload the legacy monthly MIS sheet as the base dataset for reports. Template download + full replace (delete &amp; insert).</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    <a href="/module/RP01/vessel-master/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Master</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Upload the legacy master sheet — one row per vessel call with berthing timings and turnaround KPIs. Template download + full replace (delete &amp; insert).</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    <a href="/module/RP01/jjltpl/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Daily MIS Report</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Daily MIS Report</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    <a href="/module/RP01/berth-plan/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Berth Plan</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Upload and manage expected/waiting vessel calls with berth particulars and timings.</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    <a href="/module/RP01/custom-report/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Custom Report Designer</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Drag-and-drop pivot over vessel calls — historical master sheet continued with live VCN/LDUD data and LUEU quantities. Save report layouts, export CSV / Excel with charts.</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    <a href="/module/RP01/report1/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-1</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-1</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    <a href="/module/RP01/report2/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-2</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-2</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    <a href="/module/RP01/report4/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-4</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-4</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-        <a href="/module/RP01/report5/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-05</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-05</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    </a>
-        <a href="/module/RP01/report_06/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-06</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-06</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
+<div class="reports-container">
+    <div class="reports-grid">
+        <!-- Historical MIS Data -->
+        <a href="/module/RP01/mis-history/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/Doc_series1.png') }}" alt="Historical MIS Data Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">MIS DATA</span>
+                </div>
+                <div class="card-title">Historical MIS Data</div>
+                <div class="card-desc">Upload the legacy monthly MIS sheet as the base dataset for reports. Template download + full replace (delete &amp; insert).</div>
+            </div>
+            <div class="card-action">Open &rarr;</div>
         </a>
-        <a href="/module/RP01/report8/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-08</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-08</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    </a>
-        <a href="/module/RP01/report9/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-09</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-09</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    
-        <a href="/module/RP01/report11/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-11</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-11</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
-    </a>
-        <a href="/module/RP01/report12/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-12</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-12</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
 
-    <a href="/module/RP01/report13/" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:20px;text-decoration:none;display:block;">
-        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Report-13</div>
-        <div style="font-size:11px;color:var(--text-secondary);line-height:1.5;">Report-13</div>
-        <div style="font-size:11px;color:#4a90d9;font-weight:600;margin-top:10px;">Open &rarr;</div>
-    </a>
+        <!-- Master -->
+        <a href="/module/RP01/vessel-master/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/Master1.png') }}" alt="Master Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">MASTER</span>
+                </div>
+                <div class="card-title">Master</div>
+                <div class="card-desc">Upload the legacy master sheet — one row per vessel call with berthing timings and turnaround KPIs. Template download + full replace (delete &amp; insert).</div>
+            </div>
+            <div class="card-action">Open &rarr;</div>
+        </a>
+
+        <!-- Daily MIS Report -->
+        <a href="/module/RP01/jjltpl/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/reports.png') }}" alt="Daily MIS Report Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">DAILY</span>
+                </div>
+                <div class="card-title">Daily MIS Report</div>
+                <div class="card-desc">Daily operational MIS report detailing vessel calls, berth activities, cargo handling, and daily port throughput metrics.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Berth Plan -->
+        <a href="/module/RP01/berth-plan/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/Marine1.png') }}" alt="Berth Plan Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">BERTH</span>
+                </div>
+                <div class="card-title">Berth Plan</div>
+                <div class="card-desc">Upload and manage expected &amp; waiting vessel calls with berth particulars, status, and arrival timelines.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Custom Report Designer -->
+        <a href="/module/RP01/custom-report/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/custom_report.png') }}" alt="Custom Report Designer Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">PIVOT</span>
+                </div>
+                <div class="card-title">Custom Report Designer</div>
+                <div class="card-desc">Drag-and-drop pivot builder over vessel calls with live VCN/LDUD/LUEU data, saved layouts, and Excel exports.</div>
+            </div>
+            <div class="card-action">Open Designer &rarr;</div>
+        </a>
+
+        <!-- Report-1 -->
+        <a href="/module/RP01/report1/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/graph.png') }}" alt="Report-1 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-01</span>
+                </div>
+                <div class="card-title">Report-1 — Principal Commodity</div>
+                <div class="card-desc">Overseas &amp; Coastal cargo traffic handled monthly by principal commodities with live operational pipeline fallback.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-2 -->
+        <a href="/module/RP01/report2/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/Operations1.png') }}" alt="Report-2 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-02</span>
+                </div>
+                <div class="card-title">Report-2 — Detailed Traffic Break-up</div>
+                <div class="card-desc">Appendix-3 style detailed commodity-wise traffic breakdown categorized by liquid bulk, dry bulk, and breakbulk.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-3 -->
+        <a href="/module/RP01/report3/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/graph.png') }}" alt="Report-3 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-03</span>
+                </div>
+                <div class="card-title">Report-3 — Bulk Terminal Report</div>
+                <div class="card-desc">Monthly operational performance metrics for Dry Bulk, Cement, Break Bulk, Liquid (Inner Anchorage, SWB, JJLTPL) with turn-round time and idling calculations.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-4 -->
+        <a href="/module/RP01/report4/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/services.png') }}" alt="Report-4 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-04</span>
+                </div>
+                <div class="card-title">Report-4 — Cargo Despatched &amp; Received</div>
+                <div class="card-desc">Import cargo despatched and export cargo received broken down by transport modes (Rail, Road, Pipeline, Conveyor).</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-05 -->
+        <a href="/module/RP01/report5/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/graph.png') }}" alt="Report-05 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-05</span>
+                </div>
+                <div class="card-title">Report-05 — Monthly Performance</div>
+                <div class="card-desc">Monthly port performance summary by berth, commodity group, vessel count, occupancy percentages, and handling rates.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-06 -->
+        <a href="/module/RP01/report_06/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/vessellogo.png') }}" alt="Report-06 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-06</span>
+                </div>
+                <div class="card-title">Report-06 — Overseas &amp; Coastal Traffic</div>
+                <div class="card-desc">Monthly reconciled cargo traffic by commodity with automatic fallback to live parcel logs for current open periods.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-08 -->
+        <a href="/module/RP01/report8/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/audit.png') }}" alt="Report-08 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-08</span>
+                </div>
+                <div class="card-title">Report-08 — PMO / NITI Aayog</div>
+                <div class="card-desc">Key operational indicators for government reporting: vessel turn-round time, coastal tonnage, rail traffic, and container dwell times.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-09 -->
+        <a href="/module/RP01/report9/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/ship.png') }}" alt="Report-09 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-09</span>
+                </div>
+                <div class="card-title">Report-09 — BPCL-BT &amp; Anchorage</div>
+                <div class="card-desc">Traffic and vessel calls handled specifically at BPCL Bulk Terminal jetties and offshore anchorage points.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-10 -->
+        <a href="/module/RP01/report10/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/graph.png') }}" alt="Report-10 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-10</span>
+                </div>
+                <div class="card-title">Report-10 — YOY Variation</div>
+                <div class="card-desc">Export &amp; Import performance comparison against prior year corresponding month and year-to-date cumulative variance percentages.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-11 -->
+        <a href="/module/RP01/report11/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/shift.png') }}" alt="Report-11 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-11</span>
+                </div>
+                <div class="card-title">Report-11 — Bulk Terminal Performance</div>
+                <div class="card-desc">Annual and monthly bulk terminal productivity parameters, turn-round timings, and idling hours in days and hours.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-12 -->
+        <a href="/module/RP01/report12/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/Accounts1.png') }}" alt="Report-12 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-12</span>
+                </div>
+                <div class="card-title">Report-12 — K-2.1 Traffic Report</div>
+                <div class="card-desc">Transshipment traffic analytics (Coastal + Coastal &amp; Coastal + International legs) and EXIM single leg operational data.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+
+        <!-- Report-13 -->
+        <a href="/module/RP01/report13/" class="report-card">
+            <div>
+                <div class="card-top">
+                    <div class="card-icon">
+                        <img src="{{ url_for('static', filename='img/ship.png') }}" alt="Report-13 Logo" class="card-logo-img">
+                    </div>
+                    <span class="card-badge">RP01-13</span>
+                </div>
+                <div class="card-title">Report-13 — Vessel Movement</div>
+                <div class="card-desc">Detailed log of vessel movements, berthing &amp; unberthing timestamps, pilotage events, tug usage, and operational delays.</div>
+            </div>
+            <div class="card-action">Open Report &rarr;</div>
+        </a>
+    </div>
 </div>
 
 <p style="color:var(--text-secondary);font-size:12px;margin-top:20px;">

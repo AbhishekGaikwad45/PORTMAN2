@@ -206,6 +206,7 @@ CARGO_ALIAS = {
 
     # ---- FERT. RAW MAT. - LIQUID -> PH. ACID ----
     "Phosphoric Acid": ("FERT. RAW MAT. - LIQUID", "PH. ACID"),
+    "PH ACID": ("FERT. RAW MAT. - LIQUID", "PH. ACID"),
 
     # ---- POL -> PRODUCT (confirmed: CBFS and FO both roll up here) ----
     "CBFS": ("POL", "PRODUCT"),
@@ -302,6 +303,19 @@ def _apply_cargo_alias(df: pd.DataFrame) -> pd.DataFrame:
 
         if key not in CARGO_ALIAS_NORM:
             return row["category"], row["category_norm"], row["cargo_norm"]
+        
+        key = _norm(cargo)
+
+        # ---- Business override for PH ACID ----
+        if key == _norm("PH ACID"):
+            return (
+                "FERT. RAW MAT. - LIQUID",
+                _norm("FERT. RAW MAT. - LIQUID"),
+                _norm("PH. ACID")
+            )
+
+        if key not in CARGO_ALIAS_NORM:
+            return row["category"], row["category_norm"], row["cargo_norm"]
 
         target = CARGO_ALIAS_NORM[key]
 
@@ -339,12 +353,110 @@ def load_data() -> pd.DataFrame:
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT fin_year, month, category, cargo AS cargo_type, import_export, quantity
-            FROM mis_vessel_master
-            WHERE fin_year IS NOT NULL
-              AND month IS NOT NULL
-              AND category IS NOT NULL
-        """)
+SELECT
+    fin_year,
+    month,
+    category,
+    cargo AS cargo_type,
+    import_export,
+    quantity
+FROM mis_vessel_master
+
+UNION ALL
+
+SELECT
+    CASE
+        WHEN EXTRACT(MONTH FROM ld.cast_off_datetime::timestamp) >= 4
+        THEN CONCAT(
+            EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp),
+            '-',
+            RIGHT((EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp) + 1)::text,2)
+        )
+        ELSE CONCAT(
+            EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp) - 1,
+            '-',
+            RIGHT(EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp)::text,2)
+        )
+    END AS fin_year,
+
+    TO_CHAR(
+        ld.cast_off_datetime::timestamp,
+        'Mon-YY'
+    ) AS month,
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category,'')) = 'POL'
+            THEN 'POL'
+        ELSE COALESCE(vc.cargo_category,'OTHERS')
+    END AS category,
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category,'')) = 'POL'
+            THEN 'PRODUCT'
+        ELSE lpo.cargo_name
+    END AS cargo_type,
+
+    lh.operation_type AS import_export,
+
+    SUM(
+        CASE
+            WHEN COALESCE(lp.is_deleted, FALSE) = FALSE
+            AND COALESCE(lp.is_shortclose, FALSE) = FALSE
+            THEN COALESCE(lp.quantity, 0)
+            ELSE 0
+        END
+    ) AS quantity
+
+FROM ldud_parcel_ops lpo
+
+JOIN ldud_header ld
+    ON ld.id = lpo.ldud_id
+
+JOIN vcn_header lh
+    ON lh.id = ld.vcn_id
+
+JOIN lueu_parcel_log lp
+    ON lp.parcel_op_id = lpo.id
+
+LEFT JOIN vessel_cargo vc
+    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(lpo.cargo_name))
+
+WHERE ld.cast_off_datetime IS NOT NULL
+
+GROUP BY
+    CASE
+        WHEN EXTRACT(MONTH FROM ld.cast_off_datetime::timestamp) >= 4
+        THEN CONCAT(
+            EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp),
+            '-',
+            RIGHT((EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp) + 1)::text,2)
+        )
+        ELSE CONCAT(
+            EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp) - 1,
+            '-',
+            RIGHT(EXTRACT(YEAR FROM ld.cast_off_datetime::timestamp)::text,2)
+        )
+    END,
+
+    TO_CHAR(
+        ld.cast_off_datetime::timestamp,
+        'Mon-YY'
+    ),
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category,'')) = 'POL'
+            THEN 'POL'
+        ELSE COALESCE(vc.cargo_category,'OTHERS')
+    END,
+
+    CASE
+        WHEN UPPER(COALESCE(vc.cargo_sub_category,'')) = 'POL'
+            THEN 'PRODUCT'
+        ELSE lpo.cargo_name
+    END,
+
+    lh.operation_type;
+""")
         rows = cur.fetchall()
     finally:
         conn.close()
