@@ -33,6 +33,15 @@ def get_next_doc_num():
     next_num = (result or 0) + 1
     return f"{prefix}{next_num:03d}"
 
+def doc_num_taken(doc_num, exclude_id):
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT 1 FROM vcn_header WHERE vcn_doc_num=%s AND id<>%s LIMIT 1',
+                [doc_num, exclude_id])
+    taken = cur.fetchone() is not None
+    conn.close()
+    return taken
+
 def get_vessels():
     """Get vessels from VC01 for dropdown"""
     conn = get_db()
@@ -98,9 +107,17 @@ def save_header(data):
         data.pop(k, None)
 
     if row_id:
-        cols = [k for k in data if k not in ['id', 'vcn_doc_num']]
+        cur.execute('SELECT vcn_doc_num FROM vcn_header WHERE id=%s', [row_id])
+        old_doc = (cur.fetchone() or {}).get('vcn_doc_num')
+        cols = [k for k in data if k != 'id']
         cur.execute(f"UPDATE vcn_header SET {', '.join([f'{c}=%s' for c in cols])} WHERE id=%s",
                    [data[c] for c in cols] + [row_id])
+        # parcel labels embed the doc number ('<doc>/P<seq>') — renumber them too
+        new_doc = data.get('vcn_doc_num')
+        if new_doc and new_doc != old_doc:
+            for t in ('vcn_consigners', 'vcn_export_cargo_declaration'):
+                cur.execute(f"UPDATE {t} SET parcel_no = %s || '/P' || parcel_seq "
+                            f"WHERE vcn_id=%s AND parcel_seq IS NOT NULL", [new_doc, row_id])
     else:
         data['vcn_doc_num'] = get_next_doc_num()
         cols = [k for k in data if k != 'id']

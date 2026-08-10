@@ -48,6 +48,7 @@
             layout: "fitColumns",
             columns: [
                 {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+                {title: "Cargo Code", field: "cargo_code", editor: canEdit ? "input" : false, width: 120},
                 {title: "Cargo Type", field: "cargo_type", editor: canEdit ? "input" : false, width: 150},
                 {title: "Cargo Category", field: "cargo_category", editor: canEdit ? "input" : false, width: 150},
                 {title: "Cargo Name", field: "cargo_name", editor: canEdit ? "input" : false, width: 180},
@@ -57,7 +58,8 @@
             ],
             pagination: true,
             paginationMode: "remote",
-            paginationSize: 20,
+            paginationSize: 200,
+            paginationSizeSelector: [20, 50, 100, 200, 500],
             ajaxURL: "/api/module/VCG01/data",
             ajaxResponse: function(url, params, response) {
                 document.getElementById('rowCount').textContent = response.data.length;

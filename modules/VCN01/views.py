@@ -83,6 +83,13 @@ def save():
         locked = _billed_locked(data['id'])
         if locked:
             return locked
+        if 'vcn_doc_num' in data:   # only the number part is editable client-side
+            doc_num = (data['vcn_doc_num'] or '').strip()
+            if not doc_num:
+                return jsonify({'error': 'VCN Doc number cannot be blank'}), 400
+            if model.doc_num_taken(doc_num, data['id']):
+                return jsonify({'error': f'VCN Doc {doc_num} already exists'}), 400
+            data['vcn_doc_num'] = doc_num
         current_status = model.get_doc_status(data['id'])
         if current_status == 'Approved':
             if not is_approver:

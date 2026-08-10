@@ -86,7 +86,7 @@ def delete():
 def download_template():
     si = io.StringIO()
     writer = csv.writer(si)
-    writer.writerow(['Cargo Type', 'Cargo Category', 'Cargo Name', 'Cargo Category 2', 'Cargo Sub Category', 'Cargo Sub Category 2'])
+    writer.writerow(['Cargo Code', 'Cargo Type', 'Cargo Category', 'Cargo Name', 'Cargo Category 2', 'Cargo Sub Category', 'Cargo Sub Category 2'])
     return Response(si.getvalue(), mimetype='text/csv',
                     headers={'Content-Disposition': 'attachment; filename=VCG01_Template.csv'})
 
@@ -102,7 +102,7 @@ def bulk_upload():
     stream = io.StringIO(file.stream.read().decode('utf-8-sig'))
     reader = csv.DictReader(stream)
     rows = []
-    field_map = {'Cargo Type': 'cargo_type', 'Cargo Category': 'cargo_category', 'Cargo Name': 'cargo_name',
+    field_map = {'Cargo Code': 'cargo_code', 'Cargo Type': 'cargo_type', 'Cargo Category': 'cargo_category', 'Cargo Name': 'cargo_name',
                  'Cargo Category 2': 'cargo_category_2', 'Cargo Sub Category': 'cargo_sub_category', 'Cargo Sub Category 2': 'cargo_sub_category_2'}
     for r in reader:
         row = {}
