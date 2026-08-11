@@ -1344,111 +1344,105 @@ def compute_berth_occupancy(month_abbrev: str, calendar_year: int):
 #      fetch_commodity_turnaround_from_new_system's docstring below.
 
 def fetch_commodity_turnaround_from_mis(commodity: str, month_abbrev: str, calendar_year: int):
-    """Turnaround + vessel_count for one commodity, one month, from
-    mis_vessel_master. Av. Parcel Size comes from mis_history (see
-    module note above).
+    """Turnaround + Average Parcel Size for one commodity, one month, from mis_vessel_master.
 
-    COMMODITY FILTER — CHANGED (30-Jul-2026): mis_vessel_master has no
-    column that literally contains the word "Liquid"/"Cement". Checked
-    cargo, category, category1, new_cat directly against Jul-25/Jun-26
-    data -- all four hold either specific cargo names ("Base Oil", "CPO",
-    "Acetic Acid") or Liquid sub-categories ("Other Liquid", "Edible
-    Oil", "POL", "Chemical", "Ph.Acid"), never the bare label "Liquid",
-    and no Cement rows appeared at all. So instead of a commodity-text
-    match, this now filters by berth_no using LIQUID_BERTH_CODES_MIS --
-    the same berth-code list already confirmed and used for berth
-    occupancy (LB-03/LB-04) -- since that's the actual way "Liquid" is
-    identified in this table. This function is therefore only meaningful
-    for commodity="Liquid" for now; fetch_commodity_turnaround() already
-    short-circuits "Cement" requests to None before this is ever called.
-
-    mis_history.cargo_type, by contrast, DOES literally hold "LIQUID"
-    (confirmed via SELECT DISTINCT), so that filter is left as an ILIKE
-    commodity match, unchanged.
-
-    NOTE: mis_history has no short_close-style column and isn't part of
-    the lueu_parcel_log short-close change -- this function's parcel-size
-    figure is unaffected by ASSUMPTION (5).
+    Business requirements:
+      1. For legacy/historical data, use mis_vessel_master (do NOT use mis_history).
+      2. The month is determined using sail_cast_off (or the vessel's month record in mis_vessel_master).
+      3. Select all vessels belonging to the selected month/year.
+      4. Sum their quantity and divide by the number of selected vessels.
+      5. Include vessels whose sail_cast_off falls in that month even if cast_off is NULL
+         (e.g., MT Jag Lokesh and MT SC Falcon in June 2026).
+      6. For turnaround calculation, continue using alongside and cast_off where valid (cast_off > alongside).
     """
     yy = str(calendar_year)[-2:]
     month_str = f"{month_abbrev}-{yy}"
 
-    logger.debug(
-        "fetch_commodity_turnaround_from_mis: commodity=%r month=%s "
-        "-> mis_vessel_master filtered by berth_no IN %s (not by a commodity "
-        "column -- see docstring), mis_history filtered by cargo_type ILIKE commodity",
-        commodity, month_str, LIQUID_BERTH_CODES_MIS,
-    )
-
     conn = get_db()
     try:
         cur = get_cursor(conn)
-
-        # ---------------- Turnaround + vessel_count (mis_vessel_master) ----------------
         cur.execute(
             f"""
             SELECT
                 vessel_name,
+                quantity,
+                sail_cast_off AS sail_cast_off_raw,
                 {MIS_ALONGSIDE_COLUMN} AS alongside_raw,
                 {MIS_CASTOFF_COLUMN} AS castoff_raw
             FROM mis_vessel_master
             WHERE month = %(month_str)s
-              AND {MIS_ALONGSIDE_COLUMN} IS NOT NULL
-              AND {MIS_CASTOFF_COLUMN} IS NOT NULL
               AND berth_no = ANY(%(berth_codes)s)
             """,
             {"month_str": month_str, "berth_codes": LIQUID_BERTH_CODES_MIS},
         )
-        turnaround_rows = cur.fetchall()
-
-        # ---------------- Av. Parcel Size (mis_history) ----------------
-        cur.execute(
-            f"""
-            SELECT {MIS_HISTORY_QUANTITY_COLUMN} AS quantity
-            FROM mis_history
-            WHERE TRIM({MIS_HISTORY_MONTH_COLUMN}) = %(month_str)s
-              AND TRIM({MIS_HISTORY_COMMODITY_COLUMN}) ILIKE %(commodity)s
-              AND {MIS_HISTORY_QUANTITY_COLUMN} IS NOT NULL
-            """,
-            {"month_str": month_str, "commodity": commodity.strip()},
-        )
-        parcel_rows = cur.fetchall()
+        rows = cur.fetchall()
     except Exception:
         logger.exception(
-            "fetch_commodity_turnaround_from_mis: query FAILED for commodity=%r "
-            "month=%s (check LIQUID_BERTH_CODES_MIS / MIS_HISTORY_* are correct)",
+            "fetch_commodity_turnaround_from_mis: query FAILED for commodity=%r month=%s",
             commodity, month_str,
         )
         raise
     finally:
         conn.close()
 
-    logger.debug(
-        "fetch_commodity_turnaround_from_mis: commodity=%r month=%s -> "
-        "%d mis_vessel_master row(s), %d mis_history row(s)",
-        commodity, month_str, len(turnaround_rows), len(parcel_rows),
-    )
+    total_parcel_qty = 0.0
+    parcel_vessel_count = len(rows)
+    selected_vessels = []
 
-    avg_turnaround_days, vessel_count, debug_rows = _sum_turnaround_hours(turnaround_rows)
+    total_turnaround_hours = 0.0
+    turnaround_vessel_count = 0
+    debug_rows = []
+
+    for r in rows:
+        vessel_name = r["vessel_name"]
+        qty = float(r["quantity"] or 0)
+        sail_cast_off = r.get("sail_cast_off_raw")
+        total_parcel_qty += qty
+
+        selected_vessels.append({
+            "vessel_name": vessel_name,
+            "quantity": qty,
+            "sail_cast_off": sail_cast_off,
+        })
+
+        alongside = _parse_text_datetime(r["alongside_raw"])
+        castoff = _parse_text_datetime(r["castoff_raw"])
+
+        if alongside and castoff and castoff > alongside:
+            hours = (castoff - alongside).total_seconds() / 3600.0
+            total_turnaround_hours += hours
+            turnaround_vessel_count += 1
+            debug_rows.append({
+                "vessel_name": vessel_name,
+                "alongside": alongside.isoformat(),
+                "castoff": castoff.isoformat(),
+                "hours": round(hours, 2),
+            })
+
     avg_turnaround_days = (
-        round(avg_turnaround_days / 24.0 / vessel_count, 2)
-        if vessel_count else None
+        round(total_turnaround_hours / 24.0 / turnaround_vessel_count, 2)
+        if turnaround_vessel_count else None
+    )
+    avg_parcel_size = (
+        round(total_parcel_qty / parcel_vessel_count, 3)
+        if parcel_vessel_count else None
     )
 
-    total_parcel_qty = sum(float(r["quantity"] or 0) for r in parcel_rows)
-    parcel_count = len(parcel_rows)
-    avg_parcel_size = round(total_parcel_qty / parcel_count, 2) if parcel_count else None
-
-    if DEBUG_BERTH_OCCUPANCY:
+    logger.debug("Average Parcel Size calculation (mis_vessel_master):")
+    logger.debug("  Selected month: %s", month_str)
+    logger.debug("  Number of vessels selected: %d", parcel_vessel_count)
+    logger.debug("  Total quantity: %.3f MT", total_parcel_qty)
+    logger.debug("  Average parcel size: %s MT", avg_parcel_size)
+    logger.debug("  Selected vessels details:")
+    for v in selected_vessels:
         logger.debug(
-            "fetch_commodity_turnaround_from_mis: commodity=%r month=%s -> "
-            "avg_turnaround_days=%s vessel_count=%d avg_parcel_size=%s "
-            "(from %d mis_history rows)",
-            commodity, month_str, avg_turnaround_days, vessel_count,
-            avg_parcel_size, parcel_count,
+            "    vessel_name=%s | quantity=%.3f | sail_cast_off=%s",
+            v["vessel_name"],
+            v["quantity"],
+            v["sail_cast_off"],
         )
 
-    return avg_turnaround_days, avg_parcel_size, vessel_count, debug_rows
+    return avg_turnaround_days, avg_parcel_size, parcel_vessel_count, debug_rows
 
 
 def fetch_commodity_turnaround_from_new_system(commodity: str, month_abbrev: str, calendar_year: int):
