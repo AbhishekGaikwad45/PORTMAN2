@@ -253,6 +253,7 @@ def _load_live_pipeline_data():
                     ON h.id = po.ldud_id
 
                 WHERE l.is_deleted IS NOT TRUE
+                AND h.is_deleted IS NOT TRUE
                 AND NOT COALESCE(l.is_shortclose, FALSE)
                 AND (l.remarks IS NULL OR (
                     LOWER(l.remarks) NOT LIKE '%short%close%' AND
