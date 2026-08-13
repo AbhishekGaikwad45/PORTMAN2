@@ -1,10 +1,10 @@
 # BPL01 — Berth Planning Canvas — Design
 
 **Date:** 2026-08-13
-**Status:** Approved (design), pending spec review
-**Scope:** A new draft-planning module. Berth lanes from PBM01, drag EV01
-expected vessels onto a lane, per-parcel mini-Gantt inside each vessel card.
-No VCN entry is created. Nothing outside BPL01 changes behaviour.
+**Status:** Built. Amended 2026-08-13 after first user review — see *Amendment 1*.
+**Scope:** A new draft-planning module. Berth lanes from PBM01, drag vessels
+onto a lane, per-parcel mini-Gantt inside each vessel card. No VCN entry is
+created. Nothing outside BPL01 changes behaviour.
 
 ## Problem
 
@@ -227,6 +227,64 @@ is read-only, matching how every other module behaves.
    to be broken by a future migration.
 4. **Payload validation** — `save_plan` rejects a non-list `parcels`, an unknown
    `berth_name`, and an element missing required keys.
+
+## Amendment 1 — VCN vessels, hours, and delay lines (2026-08-13)
+
+After seeing the first build, the user asked for three changes. Sections above
+describe the original design; where they conflict, this section wins.
+
+**1. VCN vessels are planned too.** `berth_plan` gains
+`vcn_id INTEGER UNIQUE REFERENCES vcn_header(id) ON DELETE CASCADE`, and a
+CHECK constraint `berth_plan_one_source` enforces that exactly one of
+`ev_id` / `vcn_id` is set — a plan row is one vessel, never two or none. Both
+sources cascade, so the cleanup story is unchanged.
+
+The API identifies a plan by `(source, source_id)` with `source` in
+`SOURCES = {'EV': 'ev_id', 'VCN': 'vcn_id'}`. That dict is the whitelist that
+makes the column name safe to interpolate into the `ON CONFLICT` target.
+
+The drag panel lists EV01 expected vessels plus VCNs with no LDUD
+`alongside_datetime` — the same "not berthed yet" test RP01 applies. A
+**show berthed** checkbox (`?show_all=1`) reveals the rest, for re-planning a
+vessel already at a berth. VCN quantity is summed from the parcel tables
+(`vcn_consigners` ∪ `vcn_export_cargo_declaration`); `vcn_header` has no
+quantity column.
+
+**2. Parcels are scheduled in hours, not a flow rate.** The planner states how
+long a parcel takes; a rate is then redundant. `qty` remains as a reference
+field, editable or blank.
+
+**3. Delay line items, per parcel.** Each parcel carries
+`delays: [{name, hours}]`, `name` drawn from `port_delay_types` — the same
+master LUEU01's Delay column reads. Per-parcel rather than per-vessel, matching
+LUEU01 where `delay_name` sits on the log row, so one discharge line can be
+held up while another keeps running.
+
+The parcel shape becomes:
+
+```json
+{"cargo": "HSD", "qty": 9600, "start": "2026-08-15T18:00", "hours": 20,
+ "delays": [{"name": "Rain", "hours": 2}]}
+```
+
+and the math becomes:
+
+```
+parcel_end = start + hours + Σ(delay hours)
+vessel_end = max(parcel_end)          # unchanged: parcels run in parallel
+```
+
+Delay alone is not a schedule: a parcel with delay lines but no working hours
+has no end. Delay lines named but not yet costed contribute nothing.
+
+**Parcels are now fully editable** — add, edit and remove parcels and delay
+lines on the page. Seeding on drop still happens, as a starting point rather
+than a fixed list: EV01 vessels seed from their comma-joined cargo/quantity
+text, VCNs from their actual declared parcels. Hours always seed blank.
+
+Migration `jnpa55_bpl01_vcn_and_hours` converts existing draft rows
+(`hours = qty / rate`) rather than wiping them, and is reversible. Revision IDs
+must stay ≤ 32 characters — `alembic_version.version_num` is `varchar(32)`.
 
 ## Out of scope
 

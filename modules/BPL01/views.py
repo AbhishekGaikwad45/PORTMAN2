@@ -3,7 +3,7 @@ from functools import wraps
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 
 from . import model
-from database import get_user_permissions, get_db, get_cursor
+from database import get_user_permissions
 
 bp = Blueprint('BPL01', __name__, template_folder='.')
 MODULE_CODE = 'BPL01'
@@ -43,7 +43,8 @@ def view():
 def data():
     if not get_perms().get('can_read'):
         return jsonify({'error': 'No permission'}), 403
-    return jsonify(model.get_canvas())
+    show_all = request.args.get('show_all') in ('1', 'true', 'yes')
+    return jsonify(model.get_canvas(show_all=show_all))
 
 
 @bp.route('/api/module/BPL01/plan', methods=['POST'])
@@ -52,25 +53,18 @@ def save_plan():
     if not _can_write(get_perms()):
         return jsonify({'error': 'No permission'}), 403
     d = request.json or {}
-    ev_id = d.get('ev_id')
-    if not ev_id:
-        return jsonify({'error': 'Missing ev_id'}), 400
+    source, source_id = d.get('source'), d.get('source_id')
+    if not source or not source_id:
+        return jsonify({'error': 'Missing source / source_id'}), 400
 
     parcels = d.get('parcels')
-    if parcels is None:
-        # first drop: seed one parcel per EV01 cargo/quantity pair, queued
-        # behind whatever already occupies the berth
-        conn = get_db()
-        cur = get_cursor(conn)
-        cur.execute('SELECT * FROM expected_vessels WHERE id=%s', [ev_id])
-        ev = cur.fetchone()
-        conn.close()
-        if not ev:
-            return jsonify({'error': 'Unknown vessel'}), 400
-        parcels = model.seed_parcels(dict(ev), d.get('berth_name'))
-
     try:
-        model.save_plan(ev_id, d.get('berth_name'), parcels, session.get('username'))
+        if parcels is None:
+            # first drop: seed from what the vessel already declares, queued
+            # behind whatever occupies the berth
+            parcels = model.seed_parcels(source, source_id, d.get('berth_name'))
+        model.save_plan(source, source_id, d.get('berth_name'), parcels,
+                        session.get('username'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     return jsonify({'success': True})
@@ -81,8 +75,12 @@ def save_plan():
 def delete_plan():
     if not get_perms().get('can_delete'):
         return jsonify({'error': 'No permission to delete'}), 403
-    ev_id = (request.json or {}).get('ev_id')
-    if not ev_id:
-        return jsonify({'error': 'Missing ev_id'}), 400
-    model.delete_plan(ev_id)
+    d = request.json or {}
+    source, source_id = d.get('source'), d.get('source_id')
+    if not source or not source_id:
+        return jsonify({'error': 'Missing source / source_id'}), 400
+    try:
+        model.delete_plan(source, source_id)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     return jsonify({'success': True})
