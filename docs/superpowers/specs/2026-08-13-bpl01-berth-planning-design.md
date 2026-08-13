@@ -186,12 +186,20 @@ already performs — with `start` defaulting to the vessel's ETA and `rate` blan
 It then POSTs to `/api/module/BPL01/plan`. Editing any field re-POSTs the whole
 row.
 
-**Planning math, client side** — one function, mirroring `etcText`:
+**Planning math lives in `model.py`, not the page.** `parcel_end`,
+`vessel_start`, `vessel_end` and `annotate_lane` are pure functions the API
+calls before serialising, so pytest can reach them and there is one source of
+truth:
 
-```js
-parcelEnd = start + (qty / rate) hours     // null unless rate > 0 and start set
-vesselEnd = max(parcelEnd)                 // null if no parcel has both
 ```
+parcel_end  = start + (qty / rate) hours   # None unless rate > 0 and start set
+vessel_end  = max(parcel_end)              # None if no parcel has both
+```
+
+The page re-implements `parcelEnd` only to size the bars it draws; the server's
+value is what gets displayed. Edits follow the LUEU01 shape already in use —
+`onchange` → POST → refetch → re-render — so the round trip keeps the two in
+step without any client-side state to drift.
 
 A parcel with no rate yet renders as a zero-width marker at its start, not as an
 error. A vessel with no rated parcel contributes no end time to its lane.

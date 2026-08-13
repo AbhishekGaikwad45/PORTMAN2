@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}Berth Planning - PORTMAN{% endblock %}
+
+{% block head %}
+<style>
+.bpl-wrap { display: flex; gap: 14px; align-items: flex-start; }
+.bpl-side { flex: 0 0 220px; }
+.bpl-lanes { flex: 1; min-width: 0; }
+
+.bpl-panel-hdr {
+    font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    color: #64748B; margin: 0 0 8px;
+}
+
+/* expected-vessel cards — the drag sources */
+.bpl-ev {
+    border: 1px solid #CBD5E1; border-left: 3px solid #2563EB; border-radius: 6px;
+    background: #fff; padding: 8px 10px; margin-bottom: 6px; cursor: grab;
+}
+.bpl-ev:active { cursor: grabbing; }
+.bpl-ev.dragging { opacity: .4; }
+.bpl-ev-name { font-size: 12px; font-weight: 700; color: #0F172A; }
+.bpl-ev-meta { font-size: 10px; color: #64748B; margin-top: 2px; }
+.bpl-empty { font-size: 11px; color: #94A3B8; font-style: italic; padding: 6px 2px; }
+
+/* berth lanes — the drop targets */
+.bpl-lane {
+    border: 1px solid #E2E8F0; border-radius: 8px; background: #fff;
+    margin-bottom: 10px; overflow: hidden;
+}
+.bpl-lane.drop-over { border-color: #2563EB; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+.bpl-lane-hdr {
+    background: #F8FAFC; border-bottom: 1px solid #E2E8F0; padding: 6px 12px;
+    font-size: 11px; font-weight: 700; color: #0F172A;
+    display: flex; align-items: center; gap: 8px;
+}
+.bpl-lane-hdr .axis { margin-left: auto; font-size: 9px; font-weight: 500; color: #94A3B8; }
+.bpl-lane-body { padding: 8px 12px; min-height: 34px; }
+
+.bpl-vessel { margin-bottom: 10px; }
+.bpl-vessel:last-child { margin-bottom: 0; }
+.bpl-vessel-hdr { display: flex; align-items: baseline; gap: 8px; font-size: 11px; margin-bottom: 4px; }
+.bpl-vessel-hdr b { color: #0F172A; }
+.bpl-tag {
+    font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 999px;
+}
+.bpl-tag.actual { background: #DCFCE7; color: #15803D; }
+.bpl-tag.plan   { background: #DBEAFE; color: #1D4ED8; }
+.bpl-etc { font-size: 10px; color: #64748B; }
+.bpl-conflict {
+    font-size: 10px; font-weight: 600; color: #B91C1C;
+    background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; padding: 1px 6px;
+}
+.bpl-vessel.conflict { outline: 2px solid #FCA5A5; outline-offset: 3px; border-radius: 4px; }
+
+/* per-parcel mini gantt */
+.bpl-parcel { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 10px; }
+.bpl-parcel .cargo { flex: 0 0 90px; color: #475569; font-weight: 600; }
+.bpl-parcel .qty   { flex: 0 0 70px; color: #64748B; font-family: 'DM Mono', monospace; text-align: right; }
+.bpl-parcel input {
+    font-family: 'DM Mono', monospace; font-size: 10px;
+    border: 1px solid #CBD5E1; border-radius: 4px; padding: 2px 5px; outline: none;
+}
+.bpl-parcel input:focus { border-color: #2563EB; }
+.bpl-parcel .track {
+    flex: 1; min-width: 60px; height: 14px; position: relative;
+    background: repeating-linear-gradient(90deg, #F1F5F9 0 1px, transparent 1px 100%) , #F8FAFC;
+    border-radius: 3px;
+}
+.bpl-bar { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; min-width: 3px; }
+.bpl-bar.actual { background: #22C55E; }
+.bpl-bar.plan   { background: #60A5FA; }
+.bpl-bar.norate { background: #CBD5E1; width: 3px !important; }
+.bpl-remove {
+    border: none; background: none; cursor: pointer; color: #94A3B8; font-size: 13px;
+    padding: 0 2px; line-height: 1;
+}
+.bpl-remove:hover { color: #DC2626; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Berth Planning</h2>
+    <span class="module-code">BPL01</span>
+</div>
+
+<div class="bpl-wrap">
+    <div class="bpl-side">
+        <p class="bpl-panel-hdr">Expected Vessels</p>
+        <div id="bpl-expected"></div>
+    </div>
+    <div class="bpl-lanes">
+        <p class="bpl-panel-hdr">Berths</p>
+        <div id="bpl-lanes"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CAN_WRITE  = {{ 'true' if permissions.can_add or permissions.can_edit else 'false' }};
+const CAN_DELETE = {{ 'true' if permissions.can_delete else 'false' }};
+
+let canvas = null;
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = v => (v === null || v === undefined || v === '') ? null : (isNaN(+v) ? null : +v);
+
+function fmt(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d)) return '—';
+    const p = n => String(n).padStart(2, '0');
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${p(d.getDate())} ${mon[d.getMonth()]}, ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// end = start + qty/rate hours — the same formula the server computes with.
+// Recomputed here only to draw the bars; the server's value is authoritative.
+function parcelEnd(p) {
+    const start = p.start ? new Date(p.start) : null, qty = num(p.qty), rate = num(p.rate);
+    if (!start || isNaN(start) || !rate || rate <= 0 || qty === null) return null;
+    return new Date(start.getTime() + (qty / rate) * 3600 * 1000);
+}
+
+// One shared time axis per lane, so vessels in the same berth are comparable
+// and "what fits ahead of that vessel" is readable at a glance.
+function laneAxis(lane) {
+    const times = [new Date(canvas.now)];
+    lane.occupied.forEach(o => { if (o.end) times.push(new Date(o.end)); });
+    lane.plans.forEach(pl => (pl.parcels || []).forEach(p => {
+        if (p.start) times.push(new Date(p.start));
+        const e = parcelEnd(p); if (e) times.push(e);
+    }));
+    const valid = times.filter(t => !isNaN(t));
+    let lo = new Date(Math.min(...valid)), hi = new Date(Math.max(...valid));
+    if (hi - lo < 3600 * 1000) hi = new Date(lo.getTime() + 3600 * 1000);  // never divide by zero
+    return {lo, hi, span: hi - lo};
+}
+
+function bar(axis, start, end, cls) {
+    if (!start) return '';
+    const s = new Date(start);
+    if (isNaN(s)) return '';
+    const left = ((s - axis.lo) / axis.span) * 100;
+    if (!end) return `<div class="bpl-bar norate" style="left:${left}%" title="No rate set — no end time"></div>`;
+    const width = ((end - s) / axis.span) * 100;
+    return `<div class="bpl-bar ${cls}" style="left:${left}%;width:${width}%"></div>`;
+}
+
+function renderExpected() {
+    const el = document.getElementById('bpl-expected');
+    if (!canvas.expected.length) {
+        el.innerHTML = '<p class="bpl-empty">Nothing waiting to be planned.</p>';
+        return;
+    }
+    el.innerHTML = canvas.expected.map(v => `
+        <div class="bpl-ev" ${CAN_WRITE ? 'draggable="true"' : ''} data-ev="${v.ev_id}">
+            <div class="bpl-ev-name">${esc(v.vessel_name)}</div>
+            <div class="bpl-ev-meta">
+                ${esc(v.cargo_name || '—')}<br>
+                ${esc(v.quantity || '—')} MT &middot; ETA ${v.eta ? fmt(v.eta) : '—'}
+            </div>
+        </div>`).join('');
+    el.querySelectorAll('.bpl-ev').forEach(card => {
+        card.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('text/plain', card.dataset.ev);
+            card.classList.add('dragging');
+        });
+        card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    });
+}
+
+function renderParcel(evId, idx, p, axis, editable) {
+    const end = parcelEnd(p);
+    const dis = editable ? '' : 'disabled';
+    return `
+        <div class="bpl-parcel">
+            <span class="cargo">${esc(p.cargo || '—')}</span>
+            <span class="qty">${esc(p.qty ?? '—')} MT</span>
+            <input type="datetime-local" value="${esc((p.start || '').slice(0, 16))}" ${dis}
+                   onchange="editParcel(${evId}, ${idx}, 'start', this.value)" style="width:150px">
+            <input type="number" min="0" step="0.01" placeholder="rate" value="${esc(p.rate ?? '')}" ${dis}
+                   onchange="editParcel(${evId}, ${idx}, 'rate', this.value)" style="width:64px">
+            <span style="color:#94A3B8">MT/Hr</span>
+            <span class="track">${bar(axis, p.start, end, 'plan')}</span>
+        </div>`;
+}
+
+function renderLane(lane) {
+    const axis = laneAxis(lane);
+
+    const occupied = lane.occupied.map(o => `
+        <div class="bpl-vessel">
+            <div class="bpl-vessel-hdr">
+                <b>${esc(o.vessel_name)}</b>
+                <span class="bpl-tag actual">Berthed</span>
+                <span class="bpl-etc">${esc(o.cargo || '')} &middot;
+                    ETC ${fmt(o.end)}${o.is_planned ? ' (Exp)' : ''}</span>
+            </div>
+            <div class="bpl-parcel">
+                <span class="cargo">alongside</span>
+                <span class="qty">${esc(o.quantity ?? '—')} MT</span>
+                <span style="flex:0 0 222px;color:#64748B">${esc(o.alongside || '—')}</span>
+                <span class="track">${bar(axis, canvas.now, o.end ? new Date(o.end) : null, 'actual')}</span>
+            </div>
+        </div>`).join('');
+
+    const plans = lane.plans.map(pl => `
+        <div class="bpl-vessel ${pl.conflict_with ? 'conflict' : ''}">
+            <div class="bpl-vessel-hdr">
+                <b>${esc(pl.vessel_name)}</b>
+                <span class="bpl-tag plan">Planned</span>
+                <span class="bpl-etc">ends ${fmt(pl.end)}</span>
+                ${pl.conflict_with
+                    ? `<span class="bpl-conflict">starts before ${esc(pl.conflict_with)} frees the berth</span>`
+                    : ''}
+                ${CAN_DELETE ? `<button class="bpl-remove" title="Remove from plan"
+                                   onclick="removePlan(${pl.ev_id})">&#10005;</button>` : ''}
+            </div>
+            ${(pl.parcels || []).length
+                ? pl.parcels.map((p, i) => renderParcel(pl.ev_id, i, p, axis, CAN_WRITE)).join('')
+                : '<p class="bpl-empty">No cargo on the EV01 record — nothing to schedule.</p>'}
+        </div>`).join('');
+
+    const body = (occupied + plans) || '<p class="bpl-empty">Drop a vessel here.</p>';
+    return `
+        <div class="bpl-lane" data-berth="${esc(lane.berth_name)}">
+            <div class="bpl-lane-hdr">
+                ${esc(lane.berth_name)}
+                <span class="axis">${fmt(axis.lo.toISOString())} → ${fmt(axis.hi.toISOString())}</span>
+            </div>
+            <div class="bpl-lane-body">${body}</div>
+        </div>`;
+}
+
+function renderLanes() {
+    const el = document.getElementById('bpl-lanes');
+    if (!canvas.lanes.length) {
+        el.innerHTML = '<p class="bpl-empty">No berths configured — add them in PBM01.</p>';
+        return;
+    }
+    el.innerHTML = canvas.lanes.map(renderLane).join('');
+    if (!CAN_WRITE) return;
+    el.querySelectorAll('.bpl-lane').forEach(lane => {
+        lane.addEventListener('dragover', e => { e.preventDefault(); lane.classList.add('drop-over'); });
+        lane.addEventListener('dragleave', () => lane.classList.remove('drop-over'));
+        lane.addEventListener('drop', e => {
+            e.preventDefault();
+            lane.classList.remove('drop-over');
+            const evId = +e.dataTransfer.getData('text/plain');
+            if (evId) post('/api/module/BPL01/plan', {ev_id: evId, berth_name: lane.dataset.berth});
+        });
+    });
+}
+
+async function post(url, body) {
+    const res = await fetch(url, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(out.error || 'Save failed'); return false; }
+    await load();
+    return true;
+}
+
+// Edit a parcel field, then re-POST the whole vessel — same save-then-refresh
+// shape LUEU01 uses, so the server stays the single source of truth.
+function editParcel(evId, idx, field, value) {
+    const lane = canvas.lanes.find(l => l.plans.some(p => p.ev_id === evId));
+    const plan = lane.plans.find(p => p.ev_id === evId);
+    const parcels = plan.parcels.map(p => ({cargo: p.cargo, qty: p.qty, start: p.start, rate: p.rate}));
+    parcels[idx][field] = value === '' ? null : value;
+    post('/api/module/BPL01/plan',
+         {ev_id: evId, berth_name: plan.berth_name, parcels});
+}
+
+function removePlan(evId) {
+    post('/api/module/BPL01/plan/delete', {ev_id: evId});
+}
+
+async function load() {
+    canvas = await fetch('/api/module/BPL01/data').then(r => r.json());
+    renderExpected();
+    renderLanes();
+}
+
+load();
+</script>
+{% endblock %}
