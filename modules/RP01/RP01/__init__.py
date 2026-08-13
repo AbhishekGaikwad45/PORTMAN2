@@ -16,6 +16,7 @@ bp = Blueprint(
 
 # Import after blueprint creation
 from . import views
+from . import vessel_call_report
 from .JJLTPL import jjltpl
 from .report1 import report1
 from .report2 import report2
