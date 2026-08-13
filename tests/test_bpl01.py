@@ -157,6 +157,56 @@ def test_unrated_plan_ahead_does_not_falsely_clear_the_one_behind_it():
     assert lane[1]['conflict_with'] == 'SC GARNET'
 
 
+# ── queueing: a vessel dropped behind another starts when the berth frees ──
+
+def test_lane_free_at_is_the_latest_end_in_the_lane():
+    assert model.lane_free_at(
+        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
+        plans=[_plan(1, '2026-08-15T18:00')],          # 4800 @ 480 = 10h -> 08-16 04:00
+    ) == _dt('2026-08-16 04:00')
+
+
+def test_lane_free_at_is_none_for_an_empty_berth():
+    assert model.lane_free_at(occupied=[], plans=[]) is None
+
+
+def test_lane_free_at_ignores_plans_with_no_rate_yet():
+    # an unrated plan has no end and must not hide the berthed vessel's ETC
+    assert model.lane_free_at(
+        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
+        plans=[_plan(1, '2026-08-15T20:00', rate=None)],
+    ) == _dt('2026-08-15 18:00')
+
+
+def test_seed_parcels_starts_the_new_vessel_when_the_berth_frees(berths, ev_id):
+    """Dropping a vessel behind one that ends at a known time should queue it
+    at that time, not leave the planner to retype it."""
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("INSERT INTO expected_vessels (vessel_name, doc_status, cargo_name, quantity) "
+                "VALUES ('ZZ AHEAD', 'Pending', 'HSD', '4800') RETURNING id")
+    ahead = cur.fetchone()['id']
+    conn.commit(); conn.close()
+    try:
+        # the vessel already in the lane runs 08-15 18:00 -> 08-16 04:00
+        model.save_plan(ahead, berths[0], [{'cargo': 'HSD', 'qty': 4800, 'rate': 480,
+                                            'start': '2026-08-15T18:00'}], 'tester')
+        ev = {'cargo_name': 'MS', 'quantity': '2400'}
+        parcels = model.seed_parcels(ev, berths[0])
+        assert [p['start'] for p in parcels] == ['2026-08-16T04:00']
+    finally:
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute('DELETE FROM berth_plan WHERE ev_id=%s', [ahead])
+        cur.execute('DELETE FROM expected_vessels WHERE id=%s', [ahead])
+        conn.commit(); conn.close()
+
+
+def test_seed_parcels_leaves_start_blank_on_a_free_berth(berths):
+    parcels = model.seed_parcels({'cargo_name': 'HSD,MS', 'quantity': '9600,4800'}, berths[0])
+    assert [p['cargo'] for p in parcels] == ['HSD', 'MS']
+    assert [p['start'] for p in parcels] == [None, None]
+    assert [p['rate'] for p in parcels] == [None, None]
+
+
 # ── payload guard: parcels is JSONB written straight from the browser ──
 
 def test_save_plan_rejects_a_berth_that_is_not_in_the_master(ev_id):

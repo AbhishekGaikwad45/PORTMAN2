@@ -62,6 +62,20 @@ def vessel_end(parcels):
     return max(ends) if ends else None
 
 
+def lane_free_at(occupied, plans):
+    """When the berth is next free: the latest end across everything in the
+    lane. A plan with no rate yet has no end and simply doesn't count — it
+    can't pull the berth's free time earlier than it really is.
+
+    None means nothing in this lane has a known end, so a new vessel has
+    nothing to queue behind.
+    """
+    ends = [o.get('end') for o in occupied]
+    ends += [vessel_end(p.get('parcels') or []) for p in plans]
+    ends = [e for e in ends if e]
+    return max(ends) if ends else None
+
+
 def annotate_lane(occupied, plans):
     """Add 'start', 'end' and 'conflict_with' to each plan in one berth's queue.
 
@@ -238,9 +252,32 @@ def _iso(row):
     return {k: conv(v) for k, v in row.items()}
 
 
-def split_cargo(ev):
+def seed_parcels(ev, berth_name):
     """Parcels for a freshly-dropped vessel: the EV01 row's comma-joined
-    cargo/quantity pairs, split the same way EV01's cargo_quotas splits them."""
+    cargo/quantity pairs, split the same way EV01's cargo_quotas splits them.
+
+    Each parcel starts when the berth is next free, so dropping a vessel behind
+    one that already has an end time (or a berthed vessel's ETC) queues it there
+    instead of making the planner retype the handover. All parcels get the same
+    start because they are parallel discharge lines, not a sequence.
+
+    On a free berth the start stays blank — there is nothing to queue behind,
+    and guessing the ETA would be a schedule the planner never entered.
+    """
     from modules.EV01.model import cargo_quotas
-    return [{'cargo': name, 'qty': qty, 'start': None, 'rate': None}
+
+    free_at = _berth_free_at(berth_name)
+    start = free_at.isoformat(timespec='minutes') if free_at else None
+    return [{'cargo': name, 'qty': qty, 'start': start, 'rate': None}
             for name, qty in cargo_quotas(ev).items()]
+
+
+def _berth_free_at(berth_name):
+    """lane_free_at for one berth, reading its current occupancy and plans."""
+    occupied = _occupied_by_berth([berth_name]).get(berth_name, [])
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT parcels FROM berth_plan WHERE berth_name=%s', [berth_name])
+    plans = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return lane_free_at(occupied, plans)

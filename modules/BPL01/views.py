@@ -58,7 +58,8 @@ def save_plan():
 
     parcels = d.get('parcels')
     if parcels is None:
-        # first drop: seed one parcel per EV01 cargo/quantity pair
+        # first drop: seed one parcel per EV01 cargo/quantity pair, queued
+        # behind whatever already occupies the berth
         conn = get_db()
         cur = get_cursor(conn)
         cur.execute('SELECT * FROM expected_vessels WHERE id=%s', [ev_id])
@@ -66,7 +67,7 @@ def save_plan():
         conn.close()
         if not ev:
             return jsonify({'error': 'Unknown vessel'}), 400
-        parcels = model.split_cargo(dict(ev))
+        parcels = model.seed_parcels(dict(ev), d.get('berth_name'))
 
     try:
         model.save_plan(ev_id, d.get('berth_name'), parcels, session.get('username'))
