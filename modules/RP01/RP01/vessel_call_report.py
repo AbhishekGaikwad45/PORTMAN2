@@ -36,6 +36,7 @@ def login_required(f):
 #  Master-only and system-only columns stay blank on the other side.
 # ──────────────────────────────────────────────────────────────────
 COLS = [
+    ('Sr No',                   'sr_no'),
     ('Source',                  'source'),
     ('Fin Year',                'fin_year'),
     ('Month JSW',               'month_jsw'),
@@ -113,6 +114,19 @@ def _fin_year(vcn_doc_num, doc_date):
     return ''
 
 
+def _vcn_seq(vcn_doc_num):
+    """Sr No for a system row: the running number out of 'VCN-2627-199'.
+
+    PORTMAN's VCN numbering was seeded to carry on from the last master row, so
+    these continue the master's Sr No instead of restarting at 1.
+    ponytail: VCN01 restarts that counter every financial year, so next FY these
+    will collide with the master's low numbers — switch to a global running
+    number here if that becomes a problem.
+    """
+    parts = str(vcn_doc_num or '').split('-')
+    return int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else None
+
+
 _MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
 
@@ -134,7 +148,7 @@ def _month(*candidates):
 #  from there by VCN No, falling back to the master's own single Month.
 # ──────────────────────────────────────────────────────────────────
 _MASTER_SQL = '''
-    SELECT 'Master' AS source, m.fin_year,
+    SELECT m.sr_no, 'Master' AS source, m.fin_year,
            COALESCE(h.month_jsw,  m.month) AS month_jsw,
            COALESCE(h.month_jnpt, m.month) AS month_jnpt,
            m.berth_no, m.vcn_no, m.vessel_name, m.overseas_coastal, m.foreign_indian,
@@ -233,7 +247,7 @@ _ACTUAL_SQL = f'''
     LEFT JOIN ops  ON ops.ldud_id = l.id
     LEFT JOIN act  ON act.ldud_id = l.id
     WHERE l.is_deleted IS NOT TRUE AND l.doc_status IN {CLOSED_STATUSES}
-    ORDER BY l.doc_num
+    ORDER BY v.vcn_doc_num
 '''
 
 
@@ -278,6 +292,7 @@ def report_rows():
     for r in actuals:
         for col in _MULTI_COLS:
             r[col] = _dedupe_csv(r.get(col))
+        r['sr_no'] = _vcn_seq(r.get('vcn_doc_num'))
         r['fin_year'] = _fin_year(r.get('vcn_doc_num'), r.get('doc_date'))
         # ponytail: both months off the same anchor (cargo completion → alongside →
         # VCN doc date). The real JSW/JNPT cut-off rule differs; change here when known.

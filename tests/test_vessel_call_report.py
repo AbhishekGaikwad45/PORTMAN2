@@ -10,8 +10,16 @@ import excel_export
 from database import get_db, get_cursor
 from modules.RP01.RP01.vessel_call_report import (
     COLS, _ACTUAL_SQL, _MASTER_SQL, _datetime_cell, _dedupe_csv, _fin_year,
-    _hours, _month,
+    _hours, _month, _vcn_seq,
 )
+
+
+def test_vcn_seq():
+    # system rows continue the master's Sr No — PORTMAN numbering was seeded past it
+    assert _vcn_seq('VCN-2627-199') == 199
+    assert _vcn_seq('VCN-2627-001') == 1
+    assert _vcn_seq(None) is None
+    assert _vcn_seq('VCN-2627') is None      # malformed, no running number
 
 
 def test_datetime_cell():
