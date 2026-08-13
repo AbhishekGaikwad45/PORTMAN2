@@ -61,17 +61,17 @@ COLS = [
     ('Category-1',              'category1'),
     ('Category',                'category'),
     ('Cargo',                   'cargo'),
-    ('NOR',                     'dt:nor'),
-    ('Anchorage Time',          'dt:anchorage_time'),
-    ('Pilot Pick Up',           'dt:pilot_pickup'),
-    ('First Line',              'dt:first_line'),
-    ('Alongside',               'dt:alongside'),
-    ('Ops Commenced',           'dt:ops_commenced'),
-    ('Cargo Completion',        'dt:cargo_completion'),
-    ('Sail Cast Off',           'dt:sail_cast_off'),     # master only — no system field
-    ('Cast Off',                'dt:cast_off'),
-    ('Pilot Board Departure',   'dt:pilot_board_departure'),
-    ('Pilot Disembarked',       'dt:pilot_disembarked'),
+    ('NOR',                     'nor'),
+    ('Anchorage Time',          'anchorage_time'),
+    ('Pilot Pick Up',           'pilot_pickup'),
+    ('First Line',              'first_line'),
+    ('Alongside',               'alongside'),
+    ('Ops Commenced',           'ops_commenced'),
+    ('Cargo Completion',        'cargo_completion'),
+    ('Sail Cast Off',           'sail_cast_off'),        # actual rows report cast off here
+    ('Cast Off',                'cast_off'),             # master only
+    ('Pilot Board Departure',   'pilot_board_departure'),
+    ('Pilot Disembarked',       'pilot_disembarked'),
     ('Quantity MT',             'quantity'),
     ('Declared Qty MT',         'declared_qty'),         # actual rows only
     ('Short-Closed MT',         'shortclose_qty'),       # actual rows only
@@ -81,6 +81,18 @@ COLS = [
     ('LDUD Doc',                'ldud_doc_num'),         # actual rows only
     ('LDUD Status',             'ldud_status'),          # actual rows only
 ]
+
+# Timings are stored 'YYYY-MM-DDTHH:MM' on both sides and reported as one
+# merged 'DD-MM-YYYY HH:MM' cell, the way the legacy sheet shows them.
+_TIME_COLS = ('nor', 'anchorage_time', 'pilot_pickup', 'first_line', 'alongside',
+              'ops_commenced', 'cargo_completion', 'sail_cast_off', 'cast_off',
+              'pilot_board_departure', 'pilot_disembarked')
+
+
+def _datetime_cell(val):
+    date, time = excel_export.split_datetime(val)
+    return ' '.join(p for p in (date, time) if p) or None
+
 
 # Day-count KPIs (pre-berthing waiting, stay at berth, working time, …) are
 # deliberately out: the system stores none of them and the derived-vs-stored
@@ -209,7 +221,9 @@ _ACTUAL_SQL = f'''
            l.first_line,
            l.alongside_datetime   AS alongside,
            ops.ops_commenced, ops.cargo_completion,
-           l.cast_off_datetime    AS cast_off,
+           -- The system's single cast off is reported as Sail Cast Off; the plain
+           -- Cast Off column stays blank on actual rows (master rows carry both).
+           l.cast_off_datetime    AS sail_cast_off,
            l.pilot_board_departure, l.pilot_disembarked,
            act.actual_qty, act.shortclose_qty, pagg.declared_qty
     FROM ldud_header l
@@ -277,7 +291,12 @@ def report_rows():
         r['flow_rate'] = round(float(r['quantity']) / hrs, 2) if (hrs and r.get('quantity')) else None
         r.pop('doc_date', None)
 
-    return rows + actuals
+    rows += actuals
+    # Last — _month/_hours above read the raw ISO values.
+    for r in rows:
+        for col in _TIME_COLS:
+            r[col] = _datetime_cell(r.get(col))
+    return rows
 
 
 @bp.route('/module/RP01/vessel-call-report/')

@@ -9,8 +9,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import excel_export
 from database import get_db, get_cursor
 from modules.RP01.RP01.vessel_call_report import (
-    COLS, _ACTUAL_SQL, _MASTER_SQL, _dedupe_csv, _fin_year, _hours, _month,
+    COLS, _ACTUAL_SQL, _MASTER_SQL, _datetime_cell, _dedupe_csv, _fin_year,
+    _hours, _month,
 )
+
+
+def test_datetime_cell():
+    # one merged cell, not the split Date/Time pair the other exports use
+    assert _datetime_cell('2024-12-25T07:48') == '25-12-2024 07:48'
+    assert _datetime_cell('2024-12-25') == '25-12-2024'      # date only, no stray time
+    assert _datetime_cell(None) is None
+    assert _datetime_cell('') is None
+
+
+def test_no_split_datetime_columns():
+    """COLS must carry no 'dt:' fields — every timing is one merged column, so
+    the header count equals the field count."""
+    assert not [f for _, f in COLS if f.startswith('dt:')]
+    assert len(excel_export.headers(COLS)) == len(COLS)
+
+
+def test_actual_cast_off_reports_as_sail_cast_off():
+    """The system's single cast off goes in Sail Cast Off; plain Cast Off is
+    master-only, so the actual query must not select it."""
+    assert 'AS sail_cast_off' in _ACTUAL_SQL
+    assert 'AS cast_off' not in _ACTUAL_SQL
+    assert 'm.cast_off' in _MASTER_SQL and 'm.sail_cast_off' in _MASTER_SQL
 
 
 def test_dedupe_csv():

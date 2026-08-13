@@ -42,9 +42,9 @@
     <ul style="padding-left:18px;margin:4px 0;">
         <li>Actual rows are built from <b>VCN01</b> (vessel call, parcels, cargo), <b>LDUD01</b> (SOF timings, parcel ops) and <b>VC01</b> (IMO, flag, GRT).</li>
         <li>Only <b>closed</b> LDUDs are included — Closed and Partial Close.</li>
-        <li>Every timing is split into a <b>Date</b> and a <b>Time</b> column so both can be sorted and pivoted.</li>
+        <li>Every timing is one cell, <code>DD-MM-YYYY HH:MM</code>, as in the legacy sheet.</li>
         <li><b>Quantity MT</b> is the master's quantity on master rows and the actual quantity logged in LUEU01 on actual rows, with Declared and Short-Closed shown alongside.</li>
-        <li><b>Sail Cast Off</b> exists only in the master sheet — it is blank for actual rows.</li>
+        <li>The system records a single cast off, reported under <b>Sail Cast Off</b>. The plain <b>Cast Off</b> column is master-only and is blank for actual rows.</li>
     </ul>
 </div>
 
