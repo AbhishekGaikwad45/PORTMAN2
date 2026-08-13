@@ -41,7 +41,7 @@
     <p>Every vessel call in one list — the uploaded <b>Vessel Call Master</b> for calls up to the go-live cut-off, and the <b>live system</b> for everything after it. The two never overlap, so rows are simply appended; the <b>Source</b> column says which side each row came from.</p>
     <ul style="padding-left:18px;margin:4px 0;">
         <li>Actual rows are built from <b>VCN01</b> (vessel call, parcels, cargo), <b>LDUD01</b> (SOF timings, parcel ops) and <b>VC01</b> (IMO, flag, GRT).</li>
-        <li>Only <b>closed</b> LDUDs are included — Closed and Partial Close.</li>
+        <li><b>Every VCN vessel</b> is listed whatever its state. A call with no LDUD yet still gets a row, with its timings blank — the <b>VCN Status</b> and <b>LDUD Status</b> columns say how far along each one is.</li>
         <li>Every timing is one cell, <code>DD-MM-YYYY HH:MM</code>, as in the legacy sheet.</li>
         <li><b>Quantity MT</b> is the master's quantity on master rows and the actual quantity logged in LUEU01 on actual rows, with Declared and Short-Closed shown alongside.</li>
         <li>The system records a single cast off, reported under <b>Sail Cast Off</b>. The plain <b>Cast Off</b> column is master-only and is blank for actual rows.</li>
@@ -63,7 +63,8 @@ fetch('/api/module/RP01/vessel-call-report/summary').then(r => r.json()).then(s 
     document.getElementById('summary').innerHTML = `
         <div class="vcr-chip"><div class="val">${fmt(s.total)}</div><div class="lbl">Total Rows</div></div>
         <div class="vcr-chip"><div class="val">${fmt(s.master_rows)}</div><div class="lbl">From Master</div></div>
-        <div class="vcr-chip"><div class="val">${fmt(s.actual_rows)}</div><div class="lbl">From System (closed)</div></div>
+        <div class="vcr-chip"><div class="val">${fmt(s.actual_rows)}</div><div class="lbl">From System</div></div>
+        <div class="vcr-chip"><div class="val">${fmt(s.closed_rows)}</div><div class="lbl">…of which closed</div></div>
         <div class="vcr-chip"><div class="val">${fmt(s.columns)}</div><div class="lbl">Columns</div></div>`;
 });
 </script>

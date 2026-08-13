@@ -6,7 +6,9 @@ not a join — same columns, master rows first, then actual rows. A 'Source' col
 says which side a row came from.
 
 Actual rows come from VCN01 (vcn_header + parcels) + LDUD01 (SOF timings, parcel
-ops) + VC01 (vessels), restricted to closed LDUDs.
+ops) + VC01 (vessels). Every VCN vessel is listed whatever its state — the LDUD
+join is outer, so a call with no LDUD yet still gets a row with its timings blank.
+The VCN Status / LDUD Status columns say how far along each one is.
 """
 from flask import render_template, session, redirect, url_for, jsonify
 from functools import wraps
@@ -17,7 +19,8 @@ from database import get_db, get_cursor
 
 MODULE_CODE = 'RP01'
 
-# Closed LDUDs only — an open vessel call has no final timings to report.
+# Reported for information on the summary chips only — the sheet itself lists
+# every VCN vessel regardless of status.
 CLOSED_STATUSES = ('Closed', 'Partial Close')
 
 
@@ -79,6 +82,7 @@ COLS = [
     ('Flow Rate (MT/hr)',       'flow_rate'),
     ('Remarks',                 'remarks'),
     ('PORTMAN VCN Doc',         'vcn_doc_num'),          # actual rows only
+    ('VCN Status',              'vcn_status'),           # actual rows only
     ('LDUD Doc',                'ldud_doc_num'),         # actual rows only
     ('LDUD Status',             'ldud_status'),          # actual rows only
 ]
@@ -213,7 +217,8 @@ _ACTUAL_SQL = f'''
         GROUP BY po.ldud_id
     )
     SELECT 'Actual' AS source,
-           v.vcn_doc_num, v.doc_date, l.doc_num AS ldud_doc_num, l.doc_status AS ldud_status,
+           v.vcn_doc_num, v.doc_date, v.doc_status AS vcn_status,
+           l.doc_num AS ldud_doc_num, l.doc_status AS ldud_status,
            v.berth_name       AS berth_no,
            v.via_number       AS vcn_no,
            v.vessel_name,
@@ -240,13 +245,12 @@ _ACTUAL_SQL = f'''
            l.cast_off_datetime    AS sail_cast_off,
            l.pilot_board_departure, l.pilot_disembarked,
            act.actual_qty, act.shortclose_qty, pagg.declared_qty
-    FROM ldud_header l
-    JOIN vcn_header v ON v.id = l.vcn_id
+    FROM vcn_header v
+    LEFT JOIN ldud_header l ON l.vcn_id = v.id AND l.is_deleted IS NOT TRUE
     LEFT JOIN vessels ves ON ves.doc_num = split_part(COALESCE(v.vessel_master_doc, ''), '/', 1)
     LEFT JOIN pagg ON pagg.vcn_id = v.id
     LEFT JOIN ops  ON ops.ldud_id = l.id
     LEFT JOIN act  ON act.ldud_id = l.id
-    WHERE l.is_deleted IS NOT TRUE AND l.doc_status IN {CLOSED_STATUSES}
     ORDER BY v.vcn_doc_num
 '''
 
@@ -332,11 +336,13 @@ def vcr_summary():
     cur = get_cursor(conn)
     cur.execute('SELECT COUNT(*) AS c FROM mis_vessel_master')
     master = cur.fetchone()['c']
+    cur.execute('SELECT COUNT(*) AS c FROM vcn_header')
+    actual = cur.fetchone()['c']
     cur.execute('''SELECT COUNT(*) AS c FROM ldud_header l JOIN vcn_header v ON v.id = l.vcn_id
                    WHERE l.is_deleted IS NOT TRUE AND l.doc_status IN %s''', (CLOSED_STATUSES,))
-    actual = cur.fetchone()['c']
+    closed = cur.fetchone()['c']
     conn.close()
-    return jsonify({'master_rows': master, 'actual_rows': actual,
+    return jsonify({'master_rows': master, 'actual_rows': actual, 'closed_rows': closed,
                     'total': master + actual, 'columns': len(excel_export.headers(COLS))})
 
 
