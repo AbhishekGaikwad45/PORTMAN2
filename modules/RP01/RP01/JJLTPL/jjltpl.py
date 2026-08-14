@@ -542,28 +542,27 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
     """
     MONTH quantity, based on vessels whose cast_off_datetime (in
-    ldud_header) falls within the period — valued at ACTUAL logged
-    quantity (capped at target), same as the DAY figure used to be.
+    ldud_header) falls within the period — valued at direct SUM(log.quantity).
     """
     cur.execute("""
         SELECT
-            po.id AS parcel_op_id,
-            po.parcel_ids,
-            po.quantity AS op_qty,
-            vh.operation_type
+            COALESCE(SUM(log.quantity), 0) AS qty
         FROM ldud_header lh
         JOIN vcn_header vh
             ON vh.id = lh.vcn_id
-        LEFT JOIN ldud_parcel_ops po
+        JOIN ldud_parcel_ops po
             ON po.ldud_id = lh.id
+        JOIN lueu_parcel_log log
+            ON log.parcel_op_id = po.id
         WHERE vh.berth_name = ANY(%s)
+          AND log.is_deleted IS NOT TRUE
           AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
           AND NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
           AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
     """, (berths, period_start, period_end))
 
-    rows = cur.fetchall()
-    qty = _jjltpl_actual_qty_for_rows(cur, rows, label="MONTH")
+    row = cur.fetchone()
+    qty = float(row["qty"] or 0)
 
     return {
         MEDIUM_DRY_BULK: 0.0,
