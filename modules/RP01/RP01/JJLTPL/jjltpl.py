@@ -575,12 +575,22 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
 
 def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
     """
-    DAY vessel count: distinct vessels that handled cargo within [period_start, period_end).
-    Delegates to _jjltpl_bulk_tons to guarantee complete consistency between
-    vessel count and cargo throughput for the DAY period.
+    DAY vessel count: vessels whose cast_off_datetime (cast off complete)
+    falls strictly within [period_start, period_end).
     """
-    tons_data = _jjltpl_bulk_tons(cur, period_start, period_end, berths)
-    return tons_data["vessel_count"]
+    cur.execute("""
+        SELECT COUNT(DISTINCT vh.id) AS cnt
+        FROM ldud_header lh
+        JOIN vcn_header vh
+            ON vh.id = lh.vcn_id
+        WHERE vh.berth_name = ANY(%s)
+          AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
+          AND NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
+          AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
+    """, (berths, period_start, period_end))
+
+    row = cur.fetchone()
+    return row["cnt"] if row and row["cnt"] else 0
 
 
 def _jjltpl_month_bulk_vessel_count(cur, period_start, period_end, berths):
