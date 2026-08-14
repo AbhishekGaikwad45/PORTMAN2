@@ -556,6 +556,8 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
             ON log.parcel_op_id = po.id
         WHERE vh.berth_name = ANY(%s)
           AND log.is_deleted IS NOT TRUE
+          AND log.is_shortclose IS NOT TRUE
+          AND LOWER(COALESCE(log.remarks, '')) NOT LIKE '%%short%%close%%'
           AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
           AND NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
           AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
