@@ -291,7 +291,7 @@ def _cumulative_as_of(cur, ldud_id, window_end):
         if h > max_hrs:
             max_hrs = h
         if h > 0:
-            total_rate += (q / h)
+            total_rate = total_qty / max_hrs if max_hrs > 0 else 0.0
 
     return total_qty, max_hrs, round(total_rate, 2)
 
