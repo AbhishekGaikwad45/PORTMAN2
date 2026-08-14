@@ -562,14 +562,18 @@ def get_berthed_vessels(window_start, window_end, berths):
                h.operation_type,
                v.imo_num, v.nationality,
                l.alongside_datetime,
-               (SELECT ec.unload_terminal FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_terminal,
-               (SELECT ec.pipeline_name FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_pipeline,
-               (SELECT cn.unload_terminal FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_terminal,
-               (SELECT cn.pipeline_name FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.unload_terminal), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.pipeline_name), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_pipeline,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.unload_terminal), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.pipeline_name), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_pipeline
         FROM ldud_header l
         JOIN vcn_header h ON h.id = l.vcn_id
         LEFT JOIN vessels v
@@ -626,14 +630,18 @@ def get_sailed_vessels(window_start, window_end, berths):
                h.operation_type,
                v.imo_num, v.nationality,
                l.alongside_datetime, l.{SAIL_COLUMN}::timestamp AS sail_dt,
-               (SELECT ec.unload_terminal FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_terminal,
-               (SELECT ec.pipeline_name FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_pipeline,
-               (SELECT cn.unload_terminal FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_terminal,
-               (SELECT cn.pipeline_name FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.unload_terminal), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.pipeline_name), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_pipeline,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.unload_terminal), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.pipeline_name), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_pipeline,
                (SELECT MAX(po.end_dt::timestamp)
                   FROM ldud_parcel_ops po
                  WHERE po.ldud_id = l.id) AS cargo_completion_dt
