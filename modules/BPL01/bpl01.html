@@ -64,6 +64,9 @@
     background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; padding: 1px 6px;
 }
 .bpl-vessel.conflict .bpl-vessel-hdr { border-color: #DC2626; background: #FEF2F2; }
+/* actuals: rendered, never editable */
+table.bpl-items.readonly td { background: #F8FAFC; color: #475569; }
+table.bpl-items.readonly td.time { color: #15803D; }
 
 table.bpl-items { border-collapse: collapse; width: 100%; font-size: 10px; }
 table.bpl-items th {
@@ -257,17 +260,45 @@ function renderVessel(pl) {
     </div>`;
 }
 
+// A vessel actually alongside. Shown in the same table so the lane reads as
+// one story, but every cell is plain text — these are actuals from LUEU01,
+// not something the planner may edit here.
+function renderBerthed(o) {
+    const items = o.items || [];
+    return `
+    <div class="bpl-vessel berthed">
+        <div class="bpl-vessel-hdr" style="border-color:#22C55E;background:#F0FDF4">
+            <b>${esc(o.vessel_name)}</b>
+            <span class="bpl-tag actual">Berthed</span>
+            <span class="bpl-muted">${esc(o.cargo || '')}</span>
+            <span class="times">alongside ${esc(o.alongside || '—')}
+                &rarr; ETC ${fmt(o.end)}${o.is_planned ? ' (Exp)' : ''}</span>
+        </div>
+        ${items.length ? `
+        <table class="bpl-items readonly">
+            <tr>
+                <th style="width:26%">Particular</th><th style="width:9%">Qty</th>
+                <th style="width:15%">Pipeline</th><th style="width:13%">Actual Rate MT/Hr</th>
+                <th style="width:6%">Hrs</th><th style="width:15%">Start time</th>
+                <th style="width:15%">End Time</th><th></th>
+            </tr>
+            ${items.map(i => `
+            <tr class="parcel">
+                <td class="particular">${esc(i.name)}</td>
+                <td>${esc(i.qty ?? '')}</td>
+                <td>${esc(i.pipeline || '')}</td>
+                <td>${esc(i.rate ?? '')}</td>
+                <td class="hours">${fmtHours(i.hours)}</td>
+                <td class="time">${i.start ? fmt(i.start) : '—'}</td>
+                <td class="time">${i.end ? fmt(i.end) : 'in progress'}</td>
+                <td></td>
+            </tr>`).join('')}
+        </table>` : ''}
+    </div>`;
+}
+
 function renderLane(lane) {
-    const occupied = lane.occupied.map(o => `
-        <div class="bpl-vessel">
-            <div class="bpl-vessel-hdr" style="border-color:#22C55E;background:#F0FDF4">
-                <b>${esc(o.vessel_name)}</b>
-                <span class="bpl-tag actual">Berthed</span>
-                <span class="bpl-muted">${esc(o.cargo || '')}</span>
-                <span class="times">alongside ${esc(o.alongside || '—')}
-                    &rarr; ETC ${fmt(o.end)}${o.is_planned ? ' (Exp)' : ''}</span>
-            </div>
-        </div>`).join('');
+    const occupied = lane.occupied.map(renderBerthed).join('');
 
     const plans = lane.plans.map(renderVessel).join('');
     const body = (occupied + plans) || '<p class="bpl-empty">Drop a vessel here.</p>';

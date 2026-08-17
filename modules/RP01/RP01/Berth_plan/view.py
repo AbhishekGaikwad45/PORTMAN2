@@ -554,6 +554,9 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
 
 def _base_row(h):
     return {
+        # carried through so callers can reach the vessel's own parcels
+        # (BPL01 renders them read-only); ignored by this module's own output
+        'vcn_id': h.get('vcn_id'),
         'via_no': h.get('via_number') or '',
         'vessel_name': h.get('vessel_name') or '',
         'loa': h.get('loa'),

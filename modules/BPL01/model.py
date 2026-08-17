@@ -286,6 +286,7 @@ def _occupied_by_berth(berths):
     out = {}
     for r in rows:
         out.setdefault(r.get('berth_name'), []).append({
+            'vcn_id': r.get('vcn_id'),
             'vessel_name': r.get('vessel_name'),
             'via_no': r.get('via_no'),
             'cargo': r.get('cargo'),
@@ -293,6 +294,38 @@ def _occupied_by_berth(berths):
             'alongside': r.get('alongside'),
             'end': _dt_ddmm(r.get('expected_completion')),
             'is_planned': r.get('is_planned'),
+            'items': _actual_items(r.get('vcn_id')),
+            # this is what is happening, not what someone plans — the page
+            # renders it but must never offer to edit it
+            'readonly': True,
+        })
+    return out
+
+
+def _actual_items(vcn_id):
+    """A berthed vessel's real discharge lines, shaped like plan items so the
+    page can render them in the same table.
+
+    Read straight from LUEU01 — quantities, rates and times here are actuals,
+    never the planner's estimates. Note these are genuinely parallel lines, so
+    their times come from the operation itself and are NOT chained.
+    """
+    if not vcn_id:
+        return []
+    from modules.LUEU01.model import get_started_parcels
+
+    out = []
+    for p in get_started_parcels(vcn_id):
+        out.append({
+            'kind': 'parcel',
+            'name': p.get('parcel_no') or p.get('cargo_name') or '',
+            'qty': p.get('target_qty'),
+            'pipeline': p.get('pipeline_name') or '',
+            'rate': p.get('avg_rate') or _num(p.get('expected_flow_rate')),
+            'hours': p.get('op_hours'),
+            'start': _dt(p.get('start_dt')),
+            'end': _dt(p.get('end_dt')),
+            'fixed': True,
         })
     return out
 
@@ -383,7 +416,7 @@ def get_canvas(show_all=False):
         lane_occ = occupied.get(berth, [])
         lanes.append({
             'berth_name': berth,
-            'occupied': [_iso(o) for o in lane_occ],
+            'occupied': [_iso_plan(o) for o in lane_occ],
             'plans': [_iso_plan(p) for p in annotate_lane(lane_occ, lane_plans)],
         })
     return {'lanes': lanes, 'expected': [_iso(e) for e in waiting],

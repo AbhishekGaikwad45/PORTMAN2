@@ -285,6 +285,75 @@ def test_a_broken_chain_leaves_the_next_vessel_unscheduled():
     assert lane[1]['start'] is None and lane[1]['conflict_with'] is None
 
 
+# ── a vessel actually alongside shows on the plan, read-only ──
+
+@pytest.fixture
+def berthed(berths):
+    """A vessel actually at a berth: VCN -> parcel -> LDUD -> parcel op, with
+    an alongside time so RP01 counts it as berthed."""
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("""INSERT INTO vcn_header (operation_type, vessel_name, berth_name, cargo_type)
+                   VALUES ('Import', 'ZZ BERTHED VESSEL', %s, 'HSD') RETURNING id""", [berths[0]])
+    vcn = cur.fetchone()['id']
+    cur.execute("""INSERT INTO vcn_consigners (vcn_id, cargo_name, quantity, parcel_seq,
+                                               parcel_no, pipeline_name)
+                   VALUES (%s,'HSD','5000',1,'P1','P1') RETURNING id""", [vcn])
+    parcel = cur.fetchone()['id']
+    cur.execute("""INSERT INTO ldud_header (vcn_id, alongside_datetime)
+                   VALUES (%s, now() - interval '6 hours') RETURNING id""", [vcn])
+    ldud = cur.fetchone()['id']
+    cur.execute("""INSERT INTO ldud_parcel_ops (ldud_id, parcel_ids, cargo_name, quantity, start_dt)
+                   VALUES (%s,%s,'HSD','5000',
+                           to_char(now() - interval '5 hours', 'YYYY-MM-DD"T"HH24:MI'))
+                   RETURNING id""", [ldud, str(parcel)])
+    op = cur.fetchone()['id']
+    # some logged progress, so there is an actual rate and therefore an ETC
+    cur.execute("""INSERT INTO lueu_parcel_log (parcel_op_id, entry_date, from_time, to_time, quantity)
+                   VALUES (%s, to_char(now() - interval '5 hours', 'YYYY-MM-DD'),
+                           '08:00', '12:00', 1000)""", [op])
+    conn.commit(); conn.close()
+    try:
+        yield {'vcn_id': vcn, 'berth': berths[0], 'parcel_op': op}
+    finally:
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute('DELETE FROM lueu_parcel_log WHERE parcel_op_id=%s', [op])
+        cur.execute('DELETE FROM ldud_parcel_ops WHERE id=%s', [op])
+        cur.execute('DELETE FROM ldud_header WHERE id=%s', [ldud])
+        cur.execute('DELETE FROM vcn_header WHERE id=%s', [vcn])
+        conn.commit(); conn.close()
+
+
+def test_a_berthed_vessel_appears_in_its_lane(berthed):
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berthed['berth'])
+    names = [o['vessel_name'] for o in lane['occupied']]
+    assert 'ZZ BERTHED VESSEL' in names
+
+
+def test_a_berthed_vessel_is_marked_read_only(berthed):
+    """It is what is happening, not what someone plans — the page must not
+    offer to edit it."""
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berthed['berth'])
+    occ = next(o for o in lane['occupied'] if o['vessel_name'] == 'ZZ BERTHED VESSEL')
+    assert occ['readonly'] is True
+
+
+def test_a_berthed_vessel_carries_its_actual_parcel_rows(berthed):
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berthed['berth'])
+    occ = next(o for o in lane['occupied'] if o['vessel_name'] == 'ZZ BERTHED VESSEL')
+    assert [i['name'] for i in occ['items']] == ['P1']
+    assert occ['items'][0]['qty'] == 5000.0
+    assert occ['items'][0]['kind'] == 'parcel'
+
+
+def test_planned_vessels_queue_behind_the_berthed_ones_etc(berths, berthed, ev_id):
+    """The whole point of showing it: the plan starts where reality ends."""
+    model.save_plan('EV', ev_id, berths[0], model.default_items(), None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    occ_end = next(o['end'] for o in lane['occupied'] if o['vessel_name'] == 'ZZ BERTHED VESSEL')
+    assert occ_end, 'berthed vessel should have an ETC to queue behind'
+    assert lane['plans'][0]['start'] == occ_end
+
+
 # ── payload guard: items is JSONB written straight from the browser ──
 
 def test_save_plan_rejects_a_berth_that_is_not_in_the_master(ev_id):
