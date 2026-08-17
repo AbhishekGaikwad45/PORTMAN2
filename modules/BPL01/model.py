@@ -7,13 +7,20 @@ A vessel's plan is an ordered list of line items that run one after another:
     Post Documentation    (fixed bookend, typed hours)
 
 A parcel's hours are derived from qty / flow rate. A doc or delay line carries
-typed hours. Each item starts when the one before it ends, and each vessel in a
-berth starts when the vessel before it ends — so a berth is one continuous
-chain from whatever is alongside now to the last vessel planned.
+typed hours.
 
-Note this is deliberately NOT how LUEU01/RP01 treat a berthed vessel, where
-parcel ops are parallel discharge lines and the ETC is max(parcel ETCs). This
-module plans a sequence; that one reports concurrent reality.
+Scheduling treats a pipeline as a resource: a line starts when its own pipeline
+frees, so parcels on different pipelines overlap while parcels on the same one
+queue. Lines that name no pipeline — the documentation bookends, and any delay
+that holds the whole vessel — are barriers that wait for every pipeline and
+block everything after them. Vessels chain too: each starts when the vessel
+ahead of it in the berth ends, so a berth is one continuous schedule from
+whatever is alongside now to the last vessel planned.
+
+A planned parcel on a VCN points at that VCN's declared parcel by id, and reads
+its name and quantity from there on every load — the plan tracks the
+declaration rather than a copy of it. EV01 vessels are pre-VCN and have nothing
+to link to, so their parcel lines stay free text.
 
 A plan hangs off either an EV01 expected vessel or a VCN, identified through
 the API as (source, source_id) with source in SOURCES.
@@ -25,7 +32,7 @@ from database import get_db, get_cursor
 
 # Element shape of the items JSONB column. Written straight from a browser
 # payload, so the key set is a whitelist, not a suggestion.
-ITEM_KEYS = {'kind', 'name', 'qty', 'pipeline', 'rate', 'hours', 'fixed'}
+ITEM_KEYS = {'kind', 'name', 'qty', 'pipeline', 'rate', 'hours', 'fixed', 'parcel_id'}
 ITEM_KINDS = {'doc', 'parcel', 'delay'}
 
 # source -> the berth_plan column it lands in
@@ -65,11 +72,6 @@ def _num(v):
 
 # ── the fixed bookends ────────────────────────────────────────────────────────
 
-def _doc_item(name):
-    return {'kind': 'doc', 'name': name, 'qty': None, 'pipeline': None,
-            'rate': None, 'hours': DOC_HOURS, 'fixed': True}
-
-
 def default_items():
     """Every vessel starts with the two documentation lines and nothing else."""
     return [_doc_item(PRIOR_DOC), _doc_item(POST_DOC)]
@@ -79,6 +81,10 @@ def _normalize(item):
     """Fill in the keys this item's kind doesn't use, so every stored item has
     the same shape and no reader has to guess whether a key is missing."""
     return {k: item.get(k) for k in ITEM_KEYS}
+
+
+def _doc_item(name):
+    return _normalize({'kind': 'doc', 'name': name, 'hours': DOC_HOURS, 'fixed': True})
 
 
 def with_bookends(items):
@@ -111,26 +117,58 @@ def item_hours(item):
     return _num(item.get('hours'))
 
 
-def chain(items, start):
-    """Run the items back to back from `start`, returning each with its own
-    start/end and computed hours.
+def _pipe(item):
+    """The pipeline an item occupies, or None if it occupies the whole vessel."""
+    return (str(item.get('pipeline') or '').strip()) or None
 
-    An item with no computable hours has no end, and nothing after it has a
-    known time either — a visible gap beats a schedule built on a guess.
+
+def chain(items, start):
+    """Schedule the items from `start`, returning each with its own start/end
+    and computed hours.
+
+    A pipeline is a resource. An item that names one starts as soon as that
+    pipeline frees, so two parcels on different pipelines run side by side
+    while two on the same pipeline queue.
+
+    An item with no pipeline is a **barrier**: the documentation lines, and any
+    delay that holds the whole vessel. A barrier waits for every pipeline to
+    finish, and nothing may start until it ends. A parcel with no pipeline
+    chosen yet is treated as a barrier too — without knowing what it competes
+    with, the conservative answer is that it competes with everything.
+
+    An item with no computable hours has no end. That poisons its own pipeline
+    (and, at the next barrier, the whole vessel) rather than the entire plan —
+    a visible gap beats a schedule built on a guess.
     """
-    out, cursor = [], _dt(start)
+    out, barrier, free = [], _dt(start), {}
     for item in items or []:
         hours = item_hours(item)
-        end = cursor + timedelta(hours=hours) if (cursor and hours) else None
-        out.append({**item, 'hours': hours, 'start': cursor, 'end': end})
-        cursor = end
+        pipe = _pipe(item)
+        if pipe:
+            begin = free.get(pipe, barrier)
+        else:
+            waits_for = list(free.values()) + [barrier]
+            begin = None if any(w is None for w in waits_for) else max(waits_for)
+        end = begin + timedelta(hours=hours) if (begin and hours) else None
+        out.append({**item, 'hours': hours, 'start': begin, 'end': end})
+        if pipe:
+            free[pipe] = end
+        else:
+            barrier, free = end, {}   # the barrier absorbed every pipeline
     return out
 
 
 def vessel_end(items, start):
-    """When the vessel is done: the end of its last line, not its longest."""
+    """When the vessel is done: the last line to finish, across all pipelines.
+
+    None if any line has no end — an unfinishable line makes the whole finish
+    unknown, and Post Documentation cannot start until every line is done.
+    """
     done = chain(items, start)
-    return done[-1]['end'] if done else _dt(start)
+    if not done:
+        return _dt(start)
+    ends = [i['end'] for i in done]
+    return None if any(e is None for e in ends) else max(ends)
 
 
 def annotate_lane(occupied, plans):
@@ -152,7 +190,7 @@ def annotate_lane(occupied, plans):
         start = pinned or free_at
         conflict = blocker if (pinned and free_at and pinned < free_at) else None
         items = chain(plan.get('items') or [], start)
-        end = items[-1]['end'] if items else start
+        end = vessel_end(plan.get('items') or [], start)
         out.append({**plan, 'items': items, 'start': start, 'end': end,
                     'conflict_with': conflict})
         if end:
@@ -200,10 +238,11 @@ def get_delay_types():
     return names
 
 
-def _validate(items):
+def _validate(items, source, source_id):
     """Trust boundary: this goes into a JSONB column straight off the wire."""
     if not isinstance(items, list):
         raise ValueError('items must be a list')
+    own = {p['id'] for p in vessel_parcels(source, source_id)}
     for i in items:
         if not isinstance(i, dict) or set(i) - ITEM_KEYS:
             raise ValueError(f'items entries must have only {sorted(ITEM_KEYS)}')
@@ -212,6 +251,53 @@ def _validate(items):
         for key in ('qty', 'rate', 'hours'):
             if i.get(key) not in (None, '') and _num(i.get(key)) is None:
                 raise ValueError(f'items {key} must be numeric')
+        pid = i.get('parcel_id')
+        if pid is not None and int(pid) not in own:
+            raise ValueError(f'parcel_id {pid} does not belong to this vessel')
+
+
+def vessel_parcels(source, source_id):
+    """The real parcels a vessel declares, for a planned line to point at.
+
+    Only a VCN has any — an EV01 vessel is pre-VCN, so its parcel lines stay
+    free text with nothing to link to.
+    """
+    if source != 'VCN' or not source_id:
+        return []
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT operation_type FROM vcn_header WHERE id=%s', [source_id])
+    row = cur.fetchone()
+    tbl = ('vcn_export_cargo_declaration'
+           if (row or {}).get('operation_type') == 'Export' else 'vcn_consigners')
+    cur.execute(f'''SELECT id, parcel_no, cargo_name, quantity, pipeline_name
+                    FROM {tbl} WHERE vcn_id=%s ORDER BY parcel_seq, id''', [source_id])
+    out = []
+    for r in cur.fetchall():
+        out.append({'id': r['id'],
+                    'name': r['parcel_no'] or r['cargo_name'] or f"#{r['id']}",
+                    'cargo_name': r['cargo_name'],
+                    'qty': _num(str(r['quantity']).replace(',', '') if r['quantity'] else None),
+                    'pipeline': r['pipeline_name'] or None})
+    conn.close()
+    return out
+
+
+def resolve_links(items, source, source_id):
+    """Refresh every linked line from the VCN parcel it points at.
+
+    This is what the link buys: name and quantity are read from the source
+    rather than a copy taken when the line was added, so a plan can never
+    quietly hold a number the VCN has since changed.
+    """
+    if source != 'VCN':
+        return items
+    by_id = {p['id']: p for p in vessel_parcels(source, source_id)}
+    out = []
+    for i in items:
+        src = by_id.get(i.get('parcel_id')) if i.get('parcel_id') is not None else None
+        out.append({**i, 'name': src['name'], 'qty': src['qty']} if src else i)
+    return out
 
 
 def _source_col(source):
@@ -227,7 +313,7 @@ def save_plan(source, source_id, berth_name, items, start_dt, username):
     col = _source_col(source)
     if berth_name not in get_berths():
         raise ValueError(f'unknown berth: {berth_name}')
-    _validate(items)
+    _validate(items, source, source_id)
     start = _dt(start_dt)
     if start_dt and start is None:
         raise ValueError('start must be YYYY-MM-DDTHH:MM')
@@ -407,6 +493,12 @@ def get_canvas(show_all=False):
     waiting += [_norm_eta(dict(r)) for r in cur.fetchall()]
     conn.close()
 
+    # linked lines read their name and quantity from the VCN parcel itself,
+    # and every VCN plan offers its declared parcels to pick from
+    for p in plans:
+        p['available_parcels'] = vessel_parcels(p['source'], p['source_id'])
+        p['items'] = resolve_links(p['items'] or [], p['source'], p['source_id'])
+
     lanes = []
     for berth in berths:
         lane_plans = [p for p in plans if p['berth_name'] == berth]
@@ -453,9 +545,15 @@ def seed_items(source, source_id, berth_name):
     the hours follow from it.
     """
     _source_col(source)   # reject unknown sources before touching the DB
-    pairs = _ev_cargo(source_id) if source == 'EV' else _vcn_cargo(source_id)
-    parcels = [{'kind': 'parcel', 'name': cargo, 'qty': qty, 'pipeline': None,
-                'rate': None, 'hours': None} for cargo, qty in pairs]
+    if source == 'VCN':
+        # linked from the start: each line points at the parcel it came from
+        parcels = [{'kind': 'parcel', 'name': p['name'], 'qty': p['qty'],
+                    'pipeline': p['pipeline'], 'rate': None, 'hours': None,
+                    'parcel_id': p['id']} for p in vessel_parcels(source, source_id)]
+    else:
+        parcels = [{'kind': 'parcel', 'name': cargo, 'qty': qty, 'pipeline': None,
+                    'rate': None, 'hours': None, 'parcel_id': None}
+                   for cargo, qty in _ev_cargo(source_id)]
     return [_doc_item(PRIOR_DOC)] + parcels + [_doc_item(POST_DOC)]
 
 
@@ -467,28 +565,6 @@ def _ev_cargo(ev_id):
     row = cur.fetchone()
     conn.close()
     return list(cargo_quotas(dict(row)).items()) if row else []
-
-
-def _vcn_cargo(vcn_id):
-    """The VCN's declared parcels, from whichever table its operation_type
-    points at — same import/export split LUEU01 applies."""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('SELECT operation_type FROM vcn_header WHERE id=%s', [vcn_id])
-    row = cur.fetchone()
-    tbl = ('vcn_export_cargo_declaration'
-           if (row or {}).get('operation_type') == 'Export' else 'vcn_consigners')
-    cur.execute(f'SELECT cargo_name, quantity FROM {tbl} WHERE vcn_id=%s ORDER BY parcel_seq, id',
-                [vcn_id])
-    out = []
-    for r in cur.fetchall():
-        try:
-            qty = float(str(r['quantity']).replace(',', '')) if r['quantity'] else None
-        except (TypeError, ValueError):
-            qty = None
-        out.append((r['cargo_name'] or '', qty))
-    conn.close()
-    return out
 
 
 def berth_free_at(berth_name):

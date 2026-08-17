@@ -349,6 +349,74 @@ quantities and hours as parcel items inside the new bookends. The old
 per-parcel delay lists are dropped: delays are now their own items in the
 sequence, and the previous shape carried no position to restore them to.
 
+## Amendment 3 — pipelines as resources, and linked parcels (2026-08-13)
+
+Two changes from the second review. Where they conflict with Amendment 2, this
+section wins.
+
+### Berthed vessels appear on the plan, read-only
+
+A vessel actually alongside renders in its lane as a table of its real
+discharge lines — quantity, pipeline, actual rate, run hours, start/end read
+from LUEU01's `get_started_parcels`. Every cell is plain text; these are
+actuals, not the planner's to edit.
+
+Its times are **not** chained. Real discharge lines are concurrent, so they are
+shown as the operation reports them. Only the planned vessels behind it chain,
+starting from its ETC. RP01's `_base_row` now carries `vcn_id` through so the
+vessel's parcels can be reached; that addition is inert for RP01's own output.
+
+### A pipeline is a resource
+
+Amendment 2 scheduled every line strictly one after another. That overstates
+how long a vessel holds a berth whenever two pipelines run at once. The rule is
+now:
+
+- A line that names a **pipeline** starts when *that pipeline* frees. Parcels
+  on different pipelines overlap; parcels on the same pipeline queue.
+- A line that names **no pipeline** is a **barrier**: the documentation
+  bookends, and any delay meant to hold the whole vessel. A barrier waits for
+  every pipeline to finish and blocks everything after it.
+- A **parcel with no pipeline chosen yet** is treated as a barrier. Without
+  knowing what it competes with, the conservative answer is everything — so an
+  incomplete plan is never optimistic.
+- A **delay may name a pipeline**, in which case it holds only that line. This
+  is how "Cargo Pigging" on one line stops that line and nothing else.
+
+`vessel_end` is now the latest end across all pipelines, not the last row's
+end. It is `None` if any line lacks an end, since Post Documentation cannot
+start until every line is done.
+
+A line with no computable hours poisons only its own pipeline, and then the
+whole vessel at the next barrier — not the entire plan.
+
+**This changes the numbers in the original mock.** There, SM (`12" dia GBL`)
+and Tolune (`12" dia IMC`) were on different pipelines yet ran back to back;
+they now overlap and the vessel finishes earlier. That is the intended
+correction, and it will read differently from the spreadsheet.
+
+### Planned parcels link to real VCN parcels
+
+Raised by Bhadresh Kumar Mehta: with free-text parcel names, nothing connects a
+planned line to a real parcel, so the plan can never be revised automatically
+from an ongoing operation.
+
+Items gain `parcel_id`. On a VCN vessel, a parcel line picks from that VCN's
+declared parcels (`vcn_consigners` / `vcn_export_cargo_declaration`) and stores
+the row id; `resolve_links` then reads name and quantity **from the source on
+every load**, so a plan cannot hold a quantity the VCN has since changed.
+Seeding links every parcel from the start and copies its pipeline.
+
+`save_plan` rejects a `parcel_id` that does not belong to the vessel being
+planned — the payload is browser-supplied, so the link is verified, not
+trusted.
+
+EV01 vessels keep free-text parcel lines: pre-VCN there is nothing to point at.
+
+**Not built:** auto-revising the remaining timings from LUEU01 actuals. The
+linkage is the prerequisite; the revision rule (what happens when actuals
+disagree with the plan) is still undecided.
+
 ## Out of scope
 
 Deliberately excluded, with the trigger for adding each:

@@ -28,8 +28,9 @@ def _doc(name, hours=4):
     return {'kind': 'doc', 'name': name, 'hours': hours}
 
 
-def _parcel(name, qty, rate, pipeline=None):
-    return {'kind': 'parcel', 'name': name, 'qty': qty, 'rate': rate, 'pipeline': pipeline}
+def _parcel(name, qty, rate, pipeline=None, parcel_id=None):
+    return {'kind': 'parcel', 'name': name, 'qty': qty, 'rate': rate,
+            'pipeline': pipeline, 'parcel_id': parcel_id}
 
 
 def _delay(name, hours):
@@ -176,6 +177,83 @@ def test_vessel_end_is_the_last_items_end_not_the_longest():
 def test_vessel_end_is_none_when_the_chain_breaks():
     items = [_doc('Prior Documentation', 4), _parcel('X', 100, None)]
     assert model.vessel_end(items, _dt('2026-08-16 03:00')) is None
+
+
+# ── pipelines are resources: same pipe queues, different pipes overlap ──
+
+def test_parcels_on_different_pipelines_run_at_the_same_time():
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 10 h
+             _parcel('B1', 600, 100, 'P-2')]       # 6 h
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[1]['start'] == _dt('2026-08-16 12:00')
+    assert out[2]['start'] == _dt('2026-08-16 12:00'), 'P-2 was free — should not wait for P-1'
+    assert out[1]['end'] == _dt('2026-08-16 22:00')
+    assert out[2]['end'] == _dt('2026-08-16 18:00')
+
+
+def test_a_second_parcel_on_the_same_pipeline_waits_for_the_first():
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 12:00 -> 22:00
+             _parcel('A2', 500, 100, 'P-1')]       # must wait: same pipe
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[2]['start'] == _dt('2026-08-16 22:00')
+    assert out[2]['end'] == _dt('2026-08-17 03:00')
+
+
+def test_post_documentation_waits_for_every_pipeline_to_finish():
+    """A documentation line is a barrier — it cannot start while any line is
+    still running, and nothing may start before it ends."""
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 12:00 -> 22:00
+             _parcel('B1', 600, 100, 'P-2'),       # 12:00 -> 18:00
+             _parcel('A2', 500, 100, 'P-1'),       # 22:00 -> 03:00
+             _doc('Post Documentation', 4)]
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[4]['start'] == _dt('2026-08-17 03:00'), 'must wait for the last line'
+    assert out[4]['end'] == _dt('2026-08-17 07:00')
+    assert model.vessel_end(items, _dt('2026-08-16 08:00')) == _dt('2026-08-17 07:00')
+
+
+def test_a_barrier_frees_every_pipeline_behind_it():
+    items = [_parcel('A1', 1000, 100, 'P-1'),      # 08:00 -> 18:00
+             _doc('Post Documentation', 4),        # 18:00 -> 22:00
+             _parcel('A2', 200, 100, 'P-1')]       # P-1 is free again after the barrier
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[2]['start'] == _dt('2026-08-16 22:00')
+
+
+def test_a_parcel_with_no_pipeline_named_blocks_everything():
+    """Without a pipeline we cannot know what it competes with, so it is
+    treated as a barrier — conservative, never optimistic."""
+    items = [_parcel('A1', 1000, 100, 'P-1'),      # 08:00 -> 18:00
+             _parcel('Unknown', 200, 100, None),   # barrier: waits for P-1
+             _parcel('B1', 300, 100, 'P-2')]
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[1]['start'] == _dt('2026-08-16 18:00')
+    assert out[2]['start'] == _dt('2026-08-16 20:00'), 'must wait for the barrier'
+
+
+def test_a_delay_on_one_pipeline_only_holds_that_pipeline():
+    items = [_parcel('A1', 1000, 100, 'P-1'),                     # 08:00 -> 18:00
+             {**_delay('Cargo Pigging', 2), 'pipeline': 'P-1'},   # 18:00 -> 20:00
+             _parcel('A2', 100, 100, 'P-1'),                      # 20:00 -> 21:00
+             _parcel('B1', 300, 100, 'P-2')]                      # unaffected
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[1]['start'] == _dt('2026-08-16 18:00')
+    assert out[2]['start'] == _dt('2026-08-16 20:00')
+    assert out[3]['start'] == _dt('2026-08-16 08:00'), 'P-2 never touched P-1'
+
+
+def test_a_broken_line_only_poisons_its_own_pipeline_until_the_next_barrier():
+    items = [_parcel('A1', 1000, None, 'P-1'),     # no rate: no end
+             _parcel('A2', 100, 100, 'P-1'),       # behind the broken one
+             _parcel('B1', 300, 100, 'P-2')]       # a different pipe, still fine
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[0]['end'] is None
+    assert out[1]['start'] is None, 'same pipeline as the broken line'
+    assert out[2]['start'] == _dt('2026-08-16 08:00')
+    assert out[2]['end'] == _dt('2026-08-16 11:00')
 
 
 # ── the fixed bookends ──
@@ -354,6 +432,71 @@ def test_planned_vessels_queue_behind_the_berthed_ones_etc(berths, berthed, ev_i
     assert lane['plans'][0]['start'] == occ_end
 
 
+# ── linkage: a planned parcel on a VCN points at a real declared parcel ──
+
+@pytest.fixture
+def vcn_with_parcels(vcn_id):
+    """A VCN with two declared parcels, and their row ids."""
+    conn = get_db(); cur = get_cursor(conn)
+    ids = []
+    for seq, (cargo, qty) in enumerate([('HSD', '9600'), ('MS', '4800')], start=1):
+        cur.execute('''INSERT INTO vcn_consigners (vcn_id, cargo_name, quantity, parcel_seq, parcel_no)
+                       VALUES (%s,%s,%s,%s,%s) RETURNING id''',
+                    [vcn_id, cargo, qty, seq, f'P{seq}'])
+        ids.append(cur.fetchone()['id'])
+    conn.commit(); conn.close()
+    return {'vcn_id': vcn_id, 'parcel_ids': ids}
+
+
+def test_seeded_vcn_parcels_are_linked_to_their_source_rows(berths, vcn_with_parcels):
+    items = model.seed_items('VCN', vcn_with_parcels['vcn_id'], berths[0])
+    parcels = [i for i in items if i['kind'] == 'parcel']
+    assert [i['parcel_id'] for i in parcels] == vcn_with_parcels['parcel_ids']
+
+
+def test_a_linked_parcel_tracks_the_vcn_rather_than_its_stored_copy(berths, vcn_with_parcels):
+    """The whole point of linking: when the VCN parcel changes, the plan
+    follows instead of quietly holding a stale number."""
+    vcn, pid = vcn_with_parcels['vcn_id'], vcn_with_parcels['parcel_ids'][0]
+    model.save_plan('VCN', vcn, berths[0],
+                    [_parcel('WRONG NAME', 1, 100, 'P-1', parcel_id=pid)], None, 'tester')
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("UPDATE vcn_consigners SET quantity='7777' WHERE id=%s", [pid])
+    conn.commit(); conn.close()
+
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    item = next(i for i in lane['plans'][0]['items'] if i['kind'] == 'parcel')
+    assert item['qty'] == 7777.0, 'linked qty must come from the VCN parcel'
+    assert item['name'] == 'P1', 'linked name must come from the VCN parcel'
+
+
+def test_a_vcn_plan_offers_its_declared_parcels_to_pick_from(berths, vcn_with_parcels):
+    model.save_plan('VCN', vcn_with_parcels['vcn_id'], berths[0],
+                    model.default_items(), None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    available = lane['plans'][0]['available_parcels']
+    assert [a['id'] for a in available] == vcn_with_parcels['parcel_ids']
+    assert [a['name'] for a in available] == ['P1', 'P2']
+
+
+def test_save_plan_rejects_a_parcel_id_from_another_vessel(berths, vcn_with_parcels, ev_id):
+    """A trust-boundary check: the link must be to this vessel's own parcel."""
+    other = vcn_with_parcels['parcel_ids'][0]
+    with pytest.raises(ValueError, match='parcel_id'):
+        model.save_plan('EV', ev_id, berths[0],
+                        [_parcel('X', 1, 1, 'P-1', parcel_id=other)], None, 'tester')
+
+
+def test_an_ev01_vessel_keeps_free_text_parcels(berths, ev_id):
+    """Pre-VCN there is nothing to link to, so the name stays as typed."""
+    model.save_plan('EV', ev_id, berths[0],
+                    [_parcel('SOME CARGO', 500, 100, 'P-1')], None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    item = next(i for i in lane['plans'][0]['items'] if i['kind'] == 'parcel')
+    assert item['name'] == 'SOME CARGO' and item['qty'] == 500.0
+    assert lane['plans'][0]['available_parcels'] == []
+
+
 # ── payload guard: items is JSONB written straight from the browser ──
 
 def test_save_plan_rejects_a_berth_that_is_not_in_the_master(ev_id):
@@ -413,8 +556,10 @@ def test_seed_items_for_a_vcn_uses_its_own_declared_parcels(berths, vcn_id):
                        VALUES (%s,%s,%s,%s,%s)''', [vcn_id, cargo, qty, seq, f'P{seq}'])
     conn.commit(); conn.close()
     items = model.seed_items('VCN', vcn_id, berths[0])
+    # a linked line is named by the parcel it points at, not by its cargo —
+    # the parcel number is the identity the plan has to track
     assert [i['name'] for i in items] == \
-        ['Prior Documentation', 'HSD', 'MS', 'Post Documentation']
+        ['Prior Documentation', 'P1', 'P2', 'Post Documentation']
     assert [i['qty'] for i in items[1:3]] == [9600.0, 4800.0]
     assert all(i['rate'] is None for i in items[1:3]), 'flow rate is the planner\'s to set'
 

@@ -185,29 +185,56 @@ function options(list, selected, placeholder) {
         `<option value="${esc(n)}" ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('');
 }
 
-function renderItem(k, idx, it) {
+// Parcels declared on the VCN this plan belongs to, as picker options.
+// Labelled "P1 — HSD" so the planner sees the cargo while the plan stores the
+// parcel's identity.
+function parcelOptions(pl, selected) {
+    const opts = (pl.available_parcels || []).map(p =>
+        `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${
+            esc(p.name)}${p.cargo_name ? ' — ' + esc(p.cargo_name) : ''}</option>`).join('');
+    return `<option value="">— select parcel —</option>${opts}`;
+}
+
+function renderItem(pl, k, idx, it) {
     const dis = CAN_WRITE ? '' : 'disabled';
     const isParcel = it.kind === 'parcel';
+    const linkable = isParcel && (pl.available_parcels || []).length > 0;
     const broken = it.start && !it.end;
 
     // Particular: fixed docs are label-only; delays pick from the delay master;
-    // parcels take a free-text cargo name.
+    // a parcel on a VCN picks a real declared parcel, so the plan row keeps its
+    // identity; an EV01 vessel is pre-VCN and has nothing to link to, so it
+    // stays free text.
     let particular;
     if (it.fixed) particular = esc(it.name);
     else if (it.kind === 'delay')
         particular = `<select ${dis} onchange="editItem('${k}',${idx},'name',this.value)">
                         ${options(canvas.delay_types, it.name, '— select delay —')}</select>`;
+    else if (linkable)
+        particular = `<select ${dis} onchange="linkParcel('${k}',${idx},this.value)">
+                        ${parcelOptions(pl, it.parcel_id)}</select>`;
     else
         particular = `<input class="name" ${dis} value="${esc(it.name ?? '')}" placeholder="cargo"
                         onchange="editItem('${k}',${idx},'name',this.value)">`;
 
+    // a linked parcel's qty is the VCN's, shown but not editable here
+    const qtyCell = !isParcel ? ''
+        : (it.parcel_id
+            ? `<span class="bpl-muted" title="From the VCN parcel">${esc(it.qty ?? '')}</span>`
+            : `<input type="number" step="0.001" ${dis} value="${esc(it.qty ?? '')}"
+                 onchange="editItem('${k}',${idx},'qty',this.value)">`);
+
+    // delays may name a pipeline too — then they hold only that line
+    const pipeCell = (isParcel || it.kind === 'delay')
+        ? `<select ${dis} onchange="editItem('${k}',${idx},'pipeline',this.value)">
+             ${options(canvas.pipelines, it.pipeline, isParcel ? '—' : '— whole vessel —')}</select>`
+        : '';
+
     return `
     <tr class="${it.kind} ${broken ? 'broken' : ''}">
         <td class="particular">${particular}</td>
-        <td>${isParcel ? `<input type="number" step="0.001" ${dis} value="${esc(it.qty ?? '')}"
-                onchange="editItem('${k}',${idx},'qty',this.value)">` : ''}</td>
-        <td>${isParcel ? `<select ${dis} onchange="editItem('${k}',${idx},'pipeline',this.value)">
-                ${options(canvas.pipelines, it.pipeline, '—')}</select>` : ''}</td>
+        <td>${qtyCell}</td>
+        <td>${pipeCell}</td>
         <td>${isParcel ? `<input type="number" step="0.01" min="0" ${dis} value="${esc(it.rate ?? '')}"
                 onchange="editItem('${k}',${idx},'rate',this.value)">` : ''}</td>
         <td class="hours">${isParcel
@@ -250,7 +277,7 @@ function renderVessel(pl) {
                 <th style="width:6%">Hrs</th><th style="width:15%">Start time</th>
                 <th style="width:15%">End Time</th><th></th>
             </tr>
-            ${items.map((it, i) => renderItem(k, i, it)).join('')}
+            ${items.map((it, i) => renderItem(pl, k, i, it)).join('')}
         </table>
         ${CAN_WRITE ? `<div class="bpl-addrow">
             <button class="bpl-linkbtn" onclick="addItem('${k}','parcel')">+ parcel</button>
@@ -360,7 +387,8 @@ function findPlan(k) {
 // strip server-computed fields — the API only accepts an item's own keys
 const clean = items => items.map(i => ({
     kind: i.kind, name: i.name, qty: i.qty, pipeline: i.pipeline,
-    rate: i.rate, hours: i.kind === 'parcel' ? null : i.hours, fixed: i.fixed
+    rate: i.rate, hours: i.kind === 'parcel' ? null : i.hours, fixed: i.fixed,
+    parcel_id: i.parcel_id
 }));
 
 function savePlan(pl, items, startDt) {
@@ -377,13 +405,25 @@ function editItem(k, idx, field, value) {
     savePlan(pl, items);
 }
 
+// Point a plan row at a real VCN parcel. Name and quantity then come from the
+// VCN itself on every read, so the plan can't drift from the declaration.
+function linkParcel(k, idx, value) {
+    const pl = findPlan(k); if (!pl) return;
+    const items = clean(pl.items);
+    const src = (pl.available_parcels || []).find(p => String(p.id) === String(value));
+    items[idx].parcel_id = src ? src.id : null;
+    if (src && !items[idx].pipeline) items[idx].pipeline = src.pipeline;
+    savePlan(pl, items);
+}
+
 function addItem(k, kind) {
     const pl = findPlan(k); if (!pl) return;
     const items = clean(pl.items);
     const at = items.findIndex(i => i.fixed && i.name === POST_DOC);
     items.splice(at < 0 ? items.length : at, 0, {
         kind, name: null, qty: null, pipeline: null, rate: null,
-        hours: kind === 'parcel' ? null : canvas.doc_hours, fixed: false
+        hours: kind === 'parcel' ? null : canvas.doc_hours, fixed: false,
+        parcel_id: null
     });
     savePlan(pl, items);
 }
