@@ -193,6 +193,18 @@ def test_seeded_parcels_land_between_the_bookends(berths, ev_id):
     assert items[1]['kind'] == 'parcel' and items[1]['qty'] == 9600.0
 
 
+def test_stored_items_always_carry_the_full_key_set(berths, ev_id):
+    """Callers may omit keys that don't apply to their kind; storing a ragged
+    shape pushes the missing-key handling onto every reader."""
+    model.save_plan('EV', ev_id, berths[0],
+                    [{'kind': 'delay', 'name': 'Rain', 'hours': 2}], None, 'tester')
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute('SELECT items FROM berth_plan WHERE ev_id=%s', [ev_id])
+    items = cur.fetchone()['items']; conn.close()
+    for it in items:
+        assert set(it) == model.ITEM_KEYS, it
+
+
 def test_save_plan_reinstates_missing_bookends(berths, ev_id):
     """The bookends are fixed for every vessel — a payload without them is
     repaired rather than rejected, so the plan can never lose its documentation."""

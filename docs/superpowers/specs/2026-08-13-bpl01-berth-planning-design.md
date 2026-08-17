@@ -286,6 +286,69 @@ Migration `jnpa55_bpl01_vcn_and_hours` converts existing draft rows
 (`hours = qty / rate`) rather than wiping them, and is reversible. Revision IDs
 must stay ≤ 32 characters — `alembic_version.version_num` is `varchar(32)`.
 
+## Amendment 2 — sequential line items (2026-08-13)
+
+The user supplied a spreadsheet mock of what they actually want. It reverses
+the central assumption of the original design, so this section supersedes both
+sections above where they conflict.
+
+**Parcels run in sequence, not in parallel.** The original design copied
+LUEU01/RP01, where parcel ops are concurrent discharge lines and the vessel ETC
+is `max(parcel ETCs)`. The mock's arithmetic disproves that for planning:
+
+```
+SOUTHERN UNICORN, berth free 16/08 03:00
+  Prior Documentation   4 h              03:00 → 07:00
+  SM       2001 ÷ 250 ≈ 8 h              07:00 → 15:00
+  Tolune   1050 ÷ 250 = 4.2 h            15:00 → 19:12   ← 15:00, not 07:00
+  Post Documentation    4 h              19:12 → 23:12
+```
+
+Tolune ends at 19:12. Parallel would put it at 11:12. Every row starts when the
+previous row ends. This is a *plan* — a sequence someone intends to execute —
+whereas LUEU01/RP01 *report* concurrent reality. Both are correct for their own
+job, and BPL01 no longer borrows that module's rollup.
+
+**Vessels chain too.** In the mock, SOUTHERN UNICORN starts 16/08 03:00, which
+is exactly DAWN MANSAROVA R's end. A berth is one continuous chain: from
+whatever is alongside now, through every planned vessel in turn.
+
+**A plan is an ordered list of line items**, replacing the parcel list.
+`berth_plan.parcels` → `berth_plan.items`, plus `start_dt` as the optional
+anchor. Three kinds:
+
+| kind | Particular | Hours |
+|---|---|---|
+| `doc` | Prior / Post Documentation — fixed bookends, undeletable | typed, default `DOC_HOURS = 4` |
+| `parcel` | cargo name, free text | **derived**: `qty ÷ flow rate` |
+| `delay` | picked from `port_delay_types` | typed |
+
+Parcels also carry a Pipeline, chosen from `pipeline_master`. A parcel's hours
+are always recomputed from qty and rate — a stale `hours` in the payload never
+wins, or the row would contradict the qty and rate displayed beside it.
+
+`with_bookends` repairs a payload missing either documentation line rather than
+rejecting it, and normalizes every item to the full key set, so no reader has
+to handle a ragged shape.
+
+**Timing rules:**
+
+```
+item.start   = previous item's end   (first item: the vessel's start)
+vessel.start = pinned start_dt, else the moment the berth frees
+vessel.end   = last item's end       (NOT the longest item)
+```
+
+An item with no computable hours has no end, and nothing after it has a known
+time — a visible gap beats a schedule built on a guess. A pinned start earlier
+than the berth frees is flagged as a conflict rather than silently reordering
+the queue.
+
+Migration `jnpa56_bpl01_line_items` keeps existing drafts' cargo names,
+quantities and hours as parcel items inside the new bookends. The old
+per-parcel delay lists are dropped: delays are now their own items in the
+sequence, and the previous shape carried no position to restore them to.
+
 ## Out of scope
 
 Deliberately excluded, with the trigger for adding each:

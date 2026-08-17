@@ -75,17 +75,25 @@ def default_items():
     return [_doc_item(PRIOR_DOC), _doc_item(POST_DOC)]
 
 
+def _normalize(item):
+    """Fill in the keys this item's kind doesn't use, so every stored item has
+    the same shape and no reader has to guess whether a key is missing."""
+    return {k: item.get(k) for k in ITEM_KEYS}
+
+
 def with_bookends(items):
-    """Guarantee Prior Documentation first and Post Documentation last.
+    """Guarantee Prior Documentation first and Post Documentation last, and
+    normalize every item's key set.
 
     The bookends are fixed for every vessel, so a payload that has lost one
     (an old draft, a hand-rolled request) is repaired rather than rejected —
     a plan must never end up without its documentation time.
     """
-    body = [i for i in (items or [])
+    items = [_normalize(i) for i in (items or [])]
+    body = [i for i in items
             if not (i.get('kind') == 'doc' and i.get('name') in (PRIOR_DOC, POST_DOC))]
-    prior = next((i for i in (items or []) if i.get('name') == PRIOR_DOC), _doc_item(PRIOR_DOC))
-    post = next((i for i in (items or []) if i.get('name') == POST_DOC), _doc_item(POST_DOC))
+    prior = next((i for i in items if i.get('name') == PRIOR_DOC), _doc_item(PRIOR_DOC))
+    post = next((i for i in items if i.get('name') == POST_DOC), _doc_item(POST_DOC))
     return [{**prior, 'fixed': True}] + body + [{**post, 'fixed': True}]
 
 
