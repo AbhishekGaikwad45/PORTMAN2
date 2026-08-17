@@ -1,29 +1,40 @@
 """BPL01 berth planning — draft plans, never written back to EV01/VCN/LDUD.
 
+A vessel's plan is an ordered list of line items that run one after another:
+
+    Prior Documentation   (fixed bookend, typed hours)
+    ... parcels and delays the planner inserts between them ...
+    Post Documentation    (fixed bookend, typed hours)
+
+A parcel's hours are derived from qty / flow rate. A doc or delay line carries
+typed hours. Each item starts when the one before it ends, and each vessel in a
+berth starts when the vessel before it ends — so a berth is one continuous
+chain from whatever is alongside now to the last vessel planned.
+
+Note this is deliberately NOT how LUEU01/RP01 treat a berthed vessel, where
+parcel ops are parallel discharge lines and the ETC is max(parcel ETCs). This
+module plans a sequence; that one reports concurrent reality.
+
 A plan hangs off either an EV01 expected vessel or a VCN, identified through
 the API as (source, source_id) with source in SOURCES.
-
-The planner states how long each parcel takes rather than a flow rate, and
-adds delay line items against it (the same delay master LUEU01 picks from):
-
-    parcel end = start + hours + sum(delay hours)
-
-Parcels run in parallel, so a vessel is done when its latest parcel is —
-matching RP01's max(parcel ETCs) rollup. The math lives here rather than in
-the page so there is one source of truth and pytest can reach it.
 """
 import json
 from datetime import date, datetime, timedelta
 
 from database import get_db, get_cursor
 
-# Element shape of the parcels JSONB column. Written straight from a browser
-# payload, so the key sets are whitelists, not suggestions.
-PARCEL_KEYS = {'cargo', 'qty', 'start', 'hours', 'delays'}
-DELAY_KEYS = {'name', 'hours'}
+# Element shape of the items JSONB column. Written straight from a browser
+# payload, so the key set is a whitelist, not a suggestion.
+ITEM_KEYS = {'kind', 'name', 'qty', 'pipeline', 'rate', 'hours', 'fixed'}
+ITEM_KINDS = {'doc', 'parcel', 'delay'}
 
 # source -> the berth_plan column it lands in
 SOURCES = {'EV': 'ev_id', 'VCN': 'vcn_id'}
+
+# The two documentation lines every vessel carries, and their default hours.
+DOC_HOURS = 4
+PRIOR_DOC = 'Prior Documentation'
+POST_DOC = 'Post Documentation'
 
 
 def _dt(v):
@@ -52,65 +63,74 @@ def _num(v):
         return None
 
 
+# ── the fixed bookends ────────────────────────────────────────────────────────
+
+def _doc_item(name):
+    return {'kind': 'doc', 'name': name, 'qty': None, 'pipeline': None,
+            'rate': None, 'hours': DOC_HOURS, 'fixed': True}
+
+
+def default_items():
+    """Every vessel starts with the two documentation lines and nothing else."""
+    return [_doc_item(PRIOR_DOC), _doc_item(POST_DOC)]
+
+
+def with_bookends(items):
+    """Guarantee Prior Documentation first and Post Documentation last.
+
+    The bookends are fixed for every vessel, so a payload that has lost one
+    (an old draft, a hand-rolled request) is repaired rather than rejected —
+    a plan must never end up without its documentation time.
+    """
+    body = [i for i in (items or [])
+            if not (i.get('kind') == 'doc' and i.get('name') in (PRIOR_DOC, POST_DOC))]
+    prior = next((i for i in (items or []) if i.get('name') == PRIOR_DOC), _doc_item(PRIOR_DOC))
+    post = next((i for i in (items or []) if i.get('name') == POST_DOC), _doc_item(POST_DOC))
+    return [{**prior, 'fixed': True}] + body + [{**post, 'fixed': True}]
+
+
 # ── planning math ────────────────────────────────────────────────────────────
 
-def delay_hours(parcel):
-    """Total hours of delay line items on a parcel. Lines the planner has
-    named but not yet costed contribute nothing."""
-    total = 0.0
-    for d in parcel.get('delays') or []:
-        total += _num(d.get('hours')) or 0.0
-    return total
+def item_hours(item):
+    """How long a line takes. A parcel is always qty / flow rate — a stale
+    'hours' on the payload never wins, or the row would disagree with the qty
+    and rate shown beside it. Docs and delays carry typed hours."""
+    if item.get('kind') == 'parcel':
+        qty, rate = _num(item.get('qty')), _num(item.get('rate'))
+        if qty is None or not rate or rate <= 0:
+            return None
+        return qty / rate
+    return _num(item.get('hours'))
 
 
-def parcel_end(parcel):
-    """end = start + hours + delay hours. None until the planner has said how
-    long the parcel takes — an unhoured parcel is incomplete, not invalid.
+def chain(items, start):
+    """Run the items back to back from `start`, returning each with its own
+    start/end and computed hours.
 
-    Delay alone is not a schedule: with no working hours there is no end.
+    An item with no computable hours has no end, and nothing after it has a
+    known time either — a visible gap beats a schedule built on a guess.
     """
-    start, hours = _dt(parcel.get('start')), _num(parcel.get('hours'))
-    if start is None or not hours or hours <= 0:
-        return None
-    return start + timedelta(hours=hours + delay_hours(parcel))
+    out, cursor = [], _dt(start)
+    for item in items or []:
+        hours = item_hours(item)
+        end = cursor + timedelta(hours=hours) if (cursor and hours) else None
+        out.append({**item, 'hours': hours, 'start': cursor, 'end': end})
+        cursor = end
+    return out
 
 
-def vessel_start(parcels):
-    """Earliest parcel start — where the vessel's bar begins in its lane."""
-    starts = [d for d in (_dt(p.get('start')) for p in parcels or []) if d]
-    return min(starts) if starts else None
-
-
-def vessel_end(parcels):
-    """Latest parcel end. Parcels are parallel discharge lines, so the vessel
-    is done when the slowest one is — same rollup as RP01."""
-    ends = [d for d in (parcel_end(p) for p in parcels or []) if d]
-    return max(ends) if ends else None
-
-
-def lane_free_at(occupied, plans):
-    """When the berth is next free: the latest end across everything in the
-    lane. A plan with no rate yet has no end and simply doesn't count — it
-    can't pull the berth's free time earlier than it really is.
-
-    None means nothing in this lane has a known end, so a new vessel has
-    nothing to queue behind.
-    """
-    ends = [o.get('end') for o in occupied]
-    ends += [vessel_end(p.get('parcels') or []) for p in plans]
-    ends = [e for e in ends if e]
-    return max(ends) if ends else None
+def vessel_end(items, start):
+    """When the vessel is done: the end of its last line, not its longest."""
+    done = chain(items, start)
+    return done[-1]['end'] if done else _dt(start)
 
 
 def annotate_lane(occupied, plans):
-    """Add 'start', 'end' and 'conflict_with' to each plan in one berth's queue.
+    """Walk one berth's queue in order, chaining each vessel off the previous.
 
-    A plan conflicts when it starts before the berth is free — i.e. before the
-    running high-water mark of everything ahead of it in the lane. Starting
-    exactly at the previous end is legal.
-
-    An unrated plan (no end) does NOT lower the high-water mark, so it can't
-    make the vessel behind it look falsely clear.
+    A vessel's start is its pinned start_dt when set, otherwise the moment the
+    berth frees. Pinning a start earlier than the berth frees is flagged as a
+    conflict rather than silently reordering the queue.
     """
     free_at, blocker = None, None
     for occ in occupied:
@@ -120,13 +140,24 @@ def annotate_lane(occupied, plans):
 
     out = []
     for plan in plans:
-        parcels = plan.get('parcels') or []
-        start, end = vessel_start(parcels), vessel_end(parcels)
-        conflict = blocker if (start and free_at and start < free_at) else None
-        out.append({**plan, 'start': start, 'end': end, 'conflict_with': conflict})
-        if end and (free_at is None or end > free_at):
+        pinned = _dt(plan.get('start_dt'))
+        start = pinned or free_at
+        conflict = blocker if (pinned and free_at and pinned < free_at) else None
+        items = chain(plan.get('items') or [], start)
+        end = items[-1]['end'] if items else start
+        out.append({**plan, 'items': items, 'start': start, 'end': end,
+                    'conflict_with': conflict})
+        if end:
             free_at, blocker = end, plan.get('vessel_name')
     return out
+
+
+def lane_free_at(occupied, plans):
+    """When the berth is next free, after everything already in the lane."""
+    annotated = annotate_lane(occupied, plans)
+    ends = [o.get('end') for o in occupied] + [p['end'] for p in annotated]
+    ends = [e for e in ends if e]
+    return max(ends) if ends else None
 
 
 # ── persistence ──────────────────────────────────────────────────────────────
@@ -140,31 +171,39 @@ def get_berths():
     return berths
 
 
-def _validate(parcels):
+def get_pipelines():
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT pipeline_name FROM pipeline_master '
+                'WHERE is_active IS NOT FALSE ORDER BY pipeline_name')
+    names = [r['pipeline_name'] for r in cur.fetchall()]
+    conn.close()
+    return names
+
+
+def get_delay_types():
+    """Delay master, same source LUEU01's Delay dropdown reads."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("SELECT name FROM port_delay_types "
+                "WHERE name IS NOT NULL AND name != '' ORDER BY name")
+    names = [r['name'] for r in cur.fetchall()]
+    conn.close()
+    return names
+
+
+def _validate(items):
     """Trust boundary: this goes into a JSONB column straight off the wire."""
-    if not isinstance(parcels, list):
-        raise ValueError('parcels must be a list')
-    for p in parcels:
-        if not isinstance(p, dict) or set(p) - PARCEL_KEYS:
-            raise ValueError(f'parcels entries must have only {sorted(PARCEL_KEYS)}')
-        for key in ('qty', 'hours'):
-            if p.get(key) not in (None, '') and _num(p.get(key)) is None:
-                raise ValueError(f'parcels {key} must be numeric')
-        if p.get('start') and _dt(p.get('start')) is None:
-            raise ValueError('parcels start must be YYYY-MM-DDTHH:MM')
-        _validate_delays(p.get('delays'))
-
-
-def _validate_delays(delays):
-    if delays is None:
-        return
-    if not isinstance(delays, list):
-        raise ValueError('parcels delays must be a list')
-    for d in delays:
-        if not isinstance(d, dict) or set(d) - DELAY_KEYS:
-            raise ValueError(f'parcels delays entries must have only {sorted(DELAY_KEYS)}')
-        if d.get('hours') not in (None, '') and _num(d.get('hours')) is None:
-            raise ValueError('parcels delays hours must be numeric')
+    if not isinstance(items, list):
+        raise ValueError('items must be a list')
+    for i in items:
+        if not isinstance(i, dict) or set(i) - ITEM_KEYS:
+            raise ValueError(f'items entries must have only {sorted(ITEM_KEYS)}')
+        if i.get('kind') not in ITEM_KINDS:
+            raise ValueError(f'items kind must be one of {sorted(ITEM_KINDS)}')
+        for key in ('qty', 'rate', 'hours'):
+            if i.get(key) not in (None, '') and _num(i.get(key)) is None:
+                raise ValueError(f'items {key} must be numeric')
 
 
 def _source_col(source):
@@ -174,23 +213,30 @@ def _source_col(source):
         raise ValueError(f'unknown source: {source} (expected one of {sorted(SOURCES)})')
 
 
-def save_plan(source, source_id, berth_name, parcels, username):
+def save_plan(source, source_id, berth_name, items, start_dt, username):
     """Upsert one plan. The source column is whitelisted through SOURCES, so
     it is safe to interpolate into the conflict target."""
     col = _source_col(source)
     if berth_name not in get_berths():
         raise ValueError(f'unknown berth: {berth_name}')
-    _validate(parcels)
+    _validate(items)
+    start = _dt(start_dt)
+    if start_dt and start is None:
+        raise ValueError('start must be YYYY-MM-DDTHH:MM')
+    items = with_bookends(items)
+
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute(f'''INSERT INTO berth_plan ({col}, berth_name, parcels, created_by, updated_at)
-                    VALUES (%s, %s, %s::jsonb, %s, now())
+    cur.execute(f'''INSERT INTO berth_plan ({col}, berth_name, items, start_dt,
+                                            created_by, updated_at)
+                    VALUES (%s, %s, %s::jsonb, %s, %s, now())
                     ON CONFLICT ({col}) DO UPDATE
                       SET berth_name = EXCLUDED.berth_name,
-                          parcels    = EXCLUDED.parcels,
+                          items      = EXCLUDED.items,
+                          start_dt   = EXCLUDED.start_dt,
                           updated_at = now()
                     RETURNING id''',
-                [source_id, berth_name, json.dumps(parcels), username])
+                [source_id, berth_name, json.dumps(items), start, username])
     row_id = cur.fetchone()['id']
     conn.commit()
     conn.close()
@@ -253,6 +299,13 @@ def _dt_ddmm(v):
         return None
 
 
+def _norm_eta(row):
+    """eta arrives as text from either source; hand the page a real datetime
+    (or None) so it formats the same regardless of which table it came from."""
+    row['eta'] = _dt(row.get('eta'))
+    return row
+
+
 def get_canvas(show_all=False):
     """Everything the page draws: berths, real occupancy, draft plans, and the
     vessels still waiting to be planned — EV01 expected vessels and VCNs alike.
@@ -268,14 +321,15 @@ def get_canvas(show_all=False):
     cur = get_cursor(conn)
     # eta is cast to text on both sides: expected_vessels.eta is a timestamptz
     # while vcn_header.doc_date is text, so the UNION needs a common type.
-    # _norm_eta turns them back into datetimes below.
-    cur.execute('''SELECT 'EV' AS source, p.ev_id AS source_id, p.berth_name, p.parcels,
-                          e.vessel_name, e.via_number, e.loa, e.draft, e.eta::text AS eta
+    cur.execute('''SELECT 'EV' AS source, p.ev_id AS source_id, p.berth_name, p.items,
+                          p.start_dt, e.vessel_name, e.via_number, e.loa, e.draft,
+                          e.eta::text AS eta
                    FROM berth_plan p
                    JOIN expected_vessels e ON e.id = p.ev_id
                    UNION ALL
-                   SELECT 'VCN', p.vcn_id, p.berth_name, p.parcels,
-                          h.vessel_name, h.via_number, h.loa, h.draft, h.doc_date
+                   SELECT 'VCN', p.vcn_id, p.berth_name, p.items,
+                          p.start_dt, h.vessel_name, h.via_number, h.loa, h.draft,
+                          h.doc_date
                    FROM berth_plan p
                    JOIN vcn_header h ON h.id = p.vcn_id''')
     plans = [_norm_eta(dict(r)) for r in cur.fetchall()]
@@ -315,35 +369,19 @@ def get_canvas(show_all=False):
     lanes = []
     for berth in berths:
         lane_plans = [p for p in plans if p['berth_name'] == berth]
-        lane_plans.sort(key=lambda p: (vessel_start(p['parcels']) or datetime.max,
+        # queue order: pinned vessels by their pinned start, the rest behind
+        lane_plans.sort(key=lambda p: (_dt(p['start_dt']) or datetime.max,
                                        p['source'], p['source_id']))
         lane_occ = occupied.get(berth, [])
         lanes.append({
             'berth_name': berth,
             'occupied': [_iso(o) for o in lane_occ],
-            'plans': [_iso(p) for p in annotate_lane(lane_occ, lane_plans)],
+            'plans': [_iso_plan(p) for p in annotate_lane(lane_occ, lane_plans)],
         })
     return {'lanes': lanes, 'expected': [_iso(e) for e in waiting],
-            'delay_types': get_delay_types(),
+            'delay_types': get_delay_types(), 'pipelines': get_pipelines(),
+            'doc_hours': DOC_HOURS,
             'now': datetime.now().isoformat(timespec='minutes')}
-
-
-def _norm_eta(row):
-    """eta arrives as text from either source; hand the page a real datetime
-    (or None) so it formats the same regardless of which table it came from."""
-    row['eta'] = _dt(row.get('eta'))
-    return row
-
-
-def get_delay_types():
-    """Delay master, same source LUEU01's Delay dropdown reads."""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute("SELECT name FROM port_delay_types "
-                "WHERE name IS NOT NULL AND name != '' ORDER BY name")
-    names = [r['name'] for r in cur.fetchall()]
-    conn.close()
-    return names
 
 
 def _iso(row):
@@ -358,29 +396,26 @@ def _iso(row):
     return {k: conv(v) for k, v in row.items()}
 
 
-def seed_parcels(source, source_id, berth_name):
-    """Opening parcel list for a freshly-dropped vessel — a starting point the
-    planner edits, adds to, or deletes outright.
+def _iso_plan(plan):
+    return {**_iso(plan), 'items': [_iso(i) for i in plan.get('items') or []]}
+
+
+# ── seeding a freshly dropped vessel ─────────────────────────────────────────
+
+def seed_items(source, source_id, berth_name):
+    """Opening line items for a freshly-dropped vessel: the documentation
+    bookends wrapped around whatever cargo the vessel already declares.
 
     EV01 vessels only have comma-joined cargo/quantity text, split the same way
-    EV01's cargo_quotas splits it. A VCN already declares real parcels, so
-    those are used instead.
-
-    Each parcel starts when the berth is next free, so dropping a vessel behind
-    one that already has an end time (or a berthed vessel's ETC) queues it there
-    instead of making the planner retype the handover. All parcels get the same
-    start because they are parallel discharge lines, not a sequence.
-
-    On a free berth the start stays blank — there is nothing to queue behind,
-    and guessing the ETA would be a schedule the planner never entered. Hours
-    are always blank: only the planner knows how long it will take.
+    EV01's cargo_quotas splits it. A VCN declares real parcels, so those are
+    used instead. Flow rate is always blank — only the planner knows it, and
+    the hours follow from it.
     """
     _source_col(source)   # reject unknown sources before touching the DB
-    free_at = _berth_free_at(berth_name)
-    start = free_at.isoformat(timespec='minutes') if free_at else None
     pairs = _ev_cargo(source_id) if source == 'EV' else _vcn_cargo(source_id)
-    return [{'cargo': cargo, 'qty': qty, 'start': start, 'hours': None, 'delays': []}
-            for cargo, qty in pairs]
+    parcels = [{'kind': 'parcel', 'name': cargo, 'qty': qty, 'pipeline': None,
+                'rate': None, 'hours': None} for cargo, qty in pairs]
+    return [_doc_item(PRIOR_DOC)] + parcels + [_doc_item(POST_DOC)]
 
 
 def _ev_cargo(ev_id):
@@ -415,12 +450,12 @@ def _vcn_cargo(vcn_id):
     return out
 
 
-def _berth_free_at(berth_name):
-    """lane_free_at for one berth, reading its current occupancy and plans."""
+def berth_free_at(berth_name):
+    """When a berth is next free, reading its current occupancy and plans."""
     occupied = _occupied_by_berth([berth_name]).get(berth_name, [])
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('SELECT parcels FROM berth_plan WHERE berth_name=%s', [berth_name])
+    cur.execute('SELECT items, start_dt FROM berth_plan WHERE berth_name=%s', [berth_name])
     plans = [dict(r) for r in cur.fetchall()]
     conn.close()
     return lane_free_at(occupied, plans)

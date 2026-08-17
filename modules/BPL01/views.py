@@ -57,14 +57,14 @@ def save_plan():
     if not source or not source_id:
         return jsonify({'error': 'Missing source / source_id'}), 400
 
-    parcels = d.get('parcels')
+    items = d.get('items')
     try:
-        if parcels is None:
-            # first drop: seed from what the vessel already declares, queued
-            # behind whatever occupies the berth
-            parcels = model.seed_parcels(source, source_id, d.get('berth_name'))
-        model.save_plan(source, source_id, d.get('berth_name'), parcels,
-                        session.get('username'))
+        if items is None:
+            # first drop: documentation bookends around whatever cargo the
+            # vessel already declares
+            items = model.seed_items(source, source_id, d.get('berth_name'))
+        model.save_plan(source, source_id, d.get('berth_name'), items,
+                        d.get('start_dt'), session.get('username'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     return jsonify({'success': True})
