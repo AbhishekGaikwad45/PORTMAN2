@@ -122,13 +122,17 @@ def _pipe(item):
     return (str(item.get('pipeline') or '').strip()) or None
 
 
-def chain(items, start):
+def chain(items, start, simultaneous=True):
     """Schedule the items from `start`, returning each with its own start/end
     and computed hours.
 
     A pipeline is a resource. An item that names one starts as soon as that
     pipeline frees, so two parcels on different pipelines run side by side
     while two on the same pipeline queue.
+
+    `simultaneous=False` is for a vessel that cannot work two lines at once
+    whatever the berth offers — the limit is its own pumps, so every line is
+    treated as a barrier and the plan falls back to one line at a time.
 
     An item with no pipeline is a **barrier**: the documentation lines, and any
     delay that holds the whole vessel. A barrier waits for every pipeline to
@@ -143,7 +147,7 @@ def chain(items, start):
     out, barrier, free = [], _dt(start), {}
     for item in items or []:
         hours = item_hours(item)
-        pipe = _pipe(item)
+        pipe = _pipe(item) if simultaneous else None
         if pipe:
             begin = free.get(pipe, barrier)
         else:
@@ -158,13 +162,13 @@ def chain(items, start):
     return out
 
 
-def vessel_end(items, start):
+def vessel_end(items, start, simultaneous=True):
     """When the vessel is done: the last line to finish, across all pipelines.
 
     None if any line has no end — an unfinishable line makes the whole finish
     unknown, and Post Documentation cannot start until every line is done.
     """
-    done = chain(items, start)
+    done = chain(items, start, simultaneous)
     if not done:
         return _dt(start)
     ends = [i['end'] for i in done]
@@ -189,8 +193,10 @@ def annotate_lane(occupied, plans):
         pinned = _dt(plan.get('start_dt'))
         start = pinned or free_at
         conflict = blocker if (pinned and free_at and pinned < free_at) else None
-        items = chain(plan.get('items') or [], start)
-        end = vessel_end(plan.get('items') or [], start)
+        sim = plan.get('simultaneous')
+        sim = True if sim is None else bool(sim)
+        items = chain(plan.get('items') or [], start, sim)
+        end = vessel_end(plan.get('items') or [], start, sim)
         out.append({**plan, 'items': items, 'start': start, 'end': end,
                     'conflict_with': conflict})
         if end:
@@ -307,7 +313,8 @@ def _source_col(source):
         raise ValueError(f'unknown source: {source} (expected one of {sorted(SOURCES)})')
 
 
-def save_plan(source, source_id, berth_name, items, start_dt, username):
+def save_plan(source, source_id, berth_name, items, start_dt, username,
+              simultaneous=True):
     """Upsert one plan. The source column is whitelisted through SOURCES, so
     it is safe to interpolate into the conflict target."""
     col = _source_col(source)
@@ -322,15 +329,17 @@ def save_plan(source, source_id, berth_name, items, start_dt, username):
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute(f'''INSERT INTO berth_plan ({col}, berth_name, items, start_dt,
-                                            created_by, updated_at)
-                    VALUES (%s, %s, %s::jsonb, %s, %s, now())
+                                            simultaneous, created_by, updated_at)
+                    VALUES (%s, %s, %s::jsonb, %s, %s, %s, now())
                     ON CONFLICT ({col}) DO UPDATE
-                      SET berth_name = EXCLUDED.berth_name,
-                          items      = EXCLUDED.items,
-                          start_dt   = EXCLUDED.start_dt,
-                          updated_at = now()
+                      SET berth_name   = EXCLUDED.berth_name,
+                          items        = EXCLUDED.items,
+                          start_dt     = EXCLUDED.start_dt,
+                          simultaneous = EXCLUDED.simultaneous,
+                          updated_at   = now()
                     RETURNING id''',
-                [source_id, berth_name, json.dumps(items), start, username])
+                [source_id, berth_name, json.dumps(items), start,
+                 bool(simultaneous), username])
     row_id = cur.fetchone()['id']
     conn.commit()
     conn.close()
@@ -449,14 +458,14 @@ def get_canvas(show_all=False):
     # eta is cast to text on both sides: expected_vessels.eta is a timestamptz
     # while vcn_header.doc_date is text, so the UNION needs a common type.
     cur.execute('''SELECT 'EV' AS source, p.ev_id AS source_id, p.berth_name, p.items,
-                          p.start_dt, e.vessel_name, e.via_number, e.loa, e.draft,
-                          e.eta::text AS eta
+                          p.start_dt, p.simultaneous, e.vessel_name, e.via_number,
+                          e.loa, e.draft, e.eta::text AS eta
                    FROM berth_plan p
                    JOIN expected_vessels e ON e.id = p.ev_id
                    UNION ALL
                    SELECT 'VCN', p.vcn_id, p.berth_name, p.items,
-                          p.start_dt, h.vessel_name, h.via_number, h.loa, h.draft,
-                          h.doc_date
+                          p.start_dt, p.simultaneous, h.vessel_name, h.via_number,
+                          h.loa, h.draft, h.doc_date
                    FROM berth_plan p
                    JOIN vcn_header h ON h.id = p.vcn_id''')
     plans = [_norm_eta(dict(r)) for r in cur.fetchall()]
@@ -572,7 +581,8 @@ def berth_free_at(berth_name):
     occupied = _occupied_by_berth([berth_name]).get(berth_name, [])
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('SELECT items, start_dt FROM berth_plan WHERE berth_name=%s', [berth_name])
+    cur.execute('SELECT items, start_dt, simultaneous FROM berth_plan WHERE berth_name=%s',
+                [berth_name])
     plans = [dict(r) for r in cur.fetchall()]
     conn.close()
     return lane_free_at(occupied, plans)

@@ -54,6 +54,8 @@
 }
 .bpl-vessel-hdr b { color: #0F172A; }
 .bpl-vessel-hdr .times { margin-left: auto; font-family: 'DM Mono', monospace; color: #475569; }
+.bpl-sim { font-size: 10px; color: #475569; display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.bpl-sim input { cursor: pointer; }
 .bpl-tag {
     font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
     padding: 1px 6px; border-radius: 999px;
@@ -259,6 +261,12 @@ function renderVessel(pl) {
             <span class="bpl-src ${pl.source === 'VCN' ? 'vcn' : ''}">${pl.source}</span>
             ${pl.conflict_with
                 ? `<span class="bpl-conflict">starts before ${esc(pl.conflict_with)} frees the berth</span>` : ''}
+            <label class="bpl-sim" title="Uncheck for a vessel that cannot work two lines at once, whatever the berth offers">
+                <input type="checkbox" ${pl.simultaneous ? 'checked' : ''}
+                       ${CAN_WRITE ? '' : 'disabled'}
+                       onchange="editSimultaneous('${k}', this.checked)">
+                simultaneous
+            </label>
             <span class="times">
                 start
                 <input type="datetime-local" class="bpl-start-input" ${CAN_WRITE ? '' : 'disabled'}
@@ -391,11 +399,19 @@ const clean = items => items.map(i => ({
     parcel_id: i.parcel_id
 }));
 
-function savePlan(pl, items, startDt) {
+function savePlan(pl, items, startDt, sim) {
     return post('/api/module/BPL01/plan', {
         source: pl.source, source_id: pl.source_id, berth_name: pl.berth_name,
-        items, start_dt: startDt === undefined ? pl.start_dt : startDt
+        items, start_dt: startDt === undefined ? pl.start_dt : startDt,
+        simultaneous: sim === undefined ? pl.simultaneous : sim
     });
+}
+
+// Off for a vessel whose own pumps cannot work two lines at once — the
+// pipelines then grant no overlap and every line queues.
+function editSimultaneous(k, checked) {
+    const pl = findPlan(k); if (!pl) return;
+    savePlan(pl, clean(pl.items), undefined, checked);
 }
 
 function editItem(k, idx, field, value) {

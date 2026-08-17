@@ -245,6 +245,47 @@ def test_a_delay_on_one_pipeline_only_holds_that_pipeline():
     assert out[3]['start'] == _dt('2026-08-16 08:00'), 'P-2 never touched P-1'
 
 
+def test_a_vessel_that_cannot_discharge_simultaneously_runs_one_line_at_a_time():
+    """Some ships cannot work two lines at once whatever the berth offers —
+    the limit is their own pumps, so the pipelines stop granting any overlap."""
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 10 h
+             _parcel('B1', 600, 100, 'P-2')]       # 6 h, different pipeline
+    out = model.chain(items, _dt('2026-08-16 08:00'), simultaneous=False)
+    assert out[1]['start'] == _dt('2026-08-16 12:00')
+    assert out[2]['start'] == _dt('2026-08-16 22:00'), 'must wait: vessel works one line'
+    assert out[2]['end'] == _dt('2026-08-17 04:00')
+
+
+def test_simultaneous_discharge_is_the_default():
+    items = [_parcel('A1', 1000, 100, 'P-1'), _parcel('B1', 600, 100, 'P-2')]
+    assert model.chain(items, _dt('2026-08-16 08:00'))[1]['start'] == _dt('2026-08-16 08:00')
+
+
+def test_vessel_end_respects_a_non_simultaneous_vessel():
+    items = [_parcel('A1', 1000, 100, 'P-1'), _parcel('B1', 600, 100, 'P-2')]
+    start = _dt('2026-08-16 08:00')
+    assert model.vessel_end(items, start, simultaneous=True) == _dt('2026-08-16 18:00')
+    assert model.vessel_end(items, start, simultaneous=False) == _dt('2026-08-17 00:00')
+
+
+def test_a_non_simultaneous_vessel_still_queues_the_next_vessel_correctly(berths, ev_id):
+    model.save_plan('EV', ev_id, berths[0],
+                    [_parcel('A1', 1000, 100, 'P-1'), _parcel('B1', 600, 100, 'P-2')],
+                    '2026-08-16T08:00', 'tester', simultaneous=False)
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    plan = lane['plans'][0]
+    assert plan['simultaneous'] is False
+    # 4 h prior doc, then 10 h + 6 h back to back, then 4 h post doc
+    assert plan['end'] == '2026-08-17T08:00'
+
+
+def test_a_plan_defaults_to_allowing_simultaneous_discharge(berths, ev_id):
+    model.save_plan('EV', ev_id, berths[0], model.default_items(), None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    assert lane['plans'][0]['simultaneous'] is True
+
+
 def test_a_broken_line_only_poisons_its_own_pipeline_until_the_next_barrier():
     items = [_parcel('A1', 1000, None, 'P-1'),     # no rate: no end
              _parcel('A2', 100, 100, 'P-1'),       # behind the broken one

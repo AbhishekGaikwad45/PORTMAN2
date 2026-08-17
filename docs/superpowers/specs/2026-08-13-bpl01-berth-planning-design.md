@@ -417,6 +417,22 @@ EV01 vessels keep free-text parcel lines: pre-VCN there is nothing to point at.
 linkage is the prerequisite; the revision rule (what happens when actuals
 disagree with the plan) is still undecided.
 
+### Per-vessel simultaneous-discharge switch
+
+Also raised by Bhadresh: some vessels cannot work two lines at once however
+many pipelines the berth offers, because the constraint is the ship's own pumps
+and manifold rather than the shore side.
+
+`berth_plan.simultaneous` (boolean, default TRUE). When false, `chain` ignores
+every item's pipeline and treats each as a barrier, so the vessel falls back to
+one line at a time. Default TRUE keeps the pipeline-aware schedule as the norm
+and makes this the exception a planner ticks off per vessel.
+
+It lives on the plan, not the vessel master, so it is set per call. If it turns
+out to be a stable property of a ship, the natural home is a column on the VC01
+`vessels` master with the plan inheriting it — worth doing once planners are
+found re-setting it for the same vessels.
+
 ## Out of scope
 
 Deliberately excluded, with the trigger for adding each:

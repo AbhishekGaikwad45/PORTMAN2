@@ -64,7 +64,8 @@ def save_plan():
             # vessel already declares
             items = model.seed_items(source, source_id, d.get('berth_name'))
         model.save_plan(source, source_id, d.get('berth_name'), items,
-                        d.get('start_dt'), session.get('username'))
+                        d.get('start_dt'), session.get('username'),
+                        simultaneous=d.get('simultaneous', True))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     return jsonify({'success': True})
