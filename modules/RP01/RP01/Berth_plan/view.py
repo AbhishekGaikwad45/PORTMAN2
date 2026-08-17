@@ -258,10 +258,11 @@ def _cumulative_as_of(cur, ldud_id, window_end):
     ''', [ldud_id])
     pop_ids = [r['parcel_op_id'] for r in cur.fetchall()]
     if not pop_ids:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
 
     cur.execute('''
-        SELECT COALESCE(SUM(quantity), 0) AS qty,
+        SELECT parcel_op_id,
+               COALESCE(SUM(quantity), 0) AS qty,
                COALESCE(SUM(
                  EXTRACT(EPOCH FROM (
                    COALESCE(NULLIF(to_time,'')::time, '00:00'::time)
@@ -276,9 +277,23 @@ def _cumulative_as_of(cur, ldud_id, window_end):
           AND is_shortclose IS NOT TRUE
           AND (NULLIF(entry_date, '')::timestamp
                + COALESCE(NULLIF(from_time, '')::time, '00:00'::time)) < %s
+        GROUP BY parcel_op_id
     ''', [pop_ids, window_end])
-    row = cur.fetchone()
-    return float(row['qty'] or 0), float(row['hrs'] or 0)
+    rows = cur.fetchall()
+
+    total_qty = 0.0
+    max_hrs = 0.0
+    total_rate = 0.0
+    for r in rows:
+        q = float(r['qty'] or 0)
+        h = float(r['hrs'] or 0)
+        total_qty += q
+        if h > max_hrs:
+            max_hrs = h
+        if h > 0:
+            total_rate = total_qty / max_hrs if max_hrs > 0 else 0.0
+
+    return total_qty, max_hrs, round(total_rate, 2)
 
 
 MIN_HOURS_FOR_ACTUAL = 4      # must match MIN_HOURS_FOR_ACTUAL in lueu01.html
@@ -453,9 +468,8 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     #    if operators have logged ahead). This makes 'Till now', 'Balance',
     #    and 'Present Flow Rate' change day-by-day correctly for a vessel that
     #    spans multiple days, instead of always showing the final/latest state. ──
-    logged_qty, total_hours = _cumulative_as_of(cur, ldud_id, window_end)
+    logged_qty, total_hours, present_flow_rate = _cumulative_as_of(cur, ldud_id, window_end)
     balance_qty = round(target_qty - logged_qty, 3)
-    present_flow_rate = round(logged_qty / total_hours, 2) if total_hours > 0 else 0
 
     # Last-24-hours figure — already correctly window-bound (unchanged).
     cur.execute('''
@@ -562,14 +576,18 @@ def get_berthed_vessels(window_start, window_end, berths):
                h.operation_type,
                v.imo_num, v.nationality,
                l.alongside_datetime,
-               (SELECT ec.unload_terminal FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_terminal,
-               (SELECT ec.pipeline_name FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_pipeline,
-               (SELECT cn.unload_terminal FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_terminal,
-               (SELECT cn.pipeline_name FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.unload_terminal), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.pipeline_name), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_pipeline,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.unload_terminal), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.pipeline_name), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_pipeline
         FROM ldud_header l
         JOIN vcn_header h ON h.id = l.vcn_id
         LEFT JOIN vessels v
@@ -626,14 +644,18 @@ def get_sailed_vessels(window_start, window_end, berths):
                h.operation_type,
                v.imo_num, v.nationality,
                l.alongside_datetime, l.{SAIL_COLUMN}::timestamp AS sail_dt,
-               (SELECT ec.unload_terminal FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_terminal,
-               (SELECT ec.pipeline_name FROM vcn_export_cargo_declaration ec
-                 WHERE ec.vcn_id = h.id LIMIT 1) AS exp_pipeline,
-               (SELECT cn.unload_terminal FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_terminal,
-               (SELECT cn.pipeline_name FROM vcn_consigners cn
-                 WHERE cn.vcn_id = h.id LIMIT 1) AS imp_pipeline,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.unload_terminal), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.pipeline_name), ''), ', ')
+                  FROM vcn_export_cargo_declaration ec
+                 WHERE ec.vcn_id = h.id) AS exp_pipeline,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.unload_terminal), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_terminal,
+               (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(cn.pipeline_name), ''), ', ')
+                  FROM vcn_consigners cn
+                 WHERE cn.vcn_id = h.id) AS imp_pipeline,
                (SELECT MAX(po.end_dt::timestamp)
                   FROM ldud_parcel_ops po
                  WHERE po.ldud_id = l.id) AS cargo_completion_dt

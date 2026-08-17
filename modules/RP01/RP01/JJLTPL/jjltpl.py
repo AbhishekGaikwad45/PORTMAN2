@@ -270,14 +270,13 @@ def _parse_entry_date(entry_date):
 
 def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
     """
-    DAY quantity:
-    Sums log entries (lueu_parcel_log) falling within [period_start, period_end)
-    for active unloading vessels at these berths.
-    If a vessel completed (cast off) within [period_start, period_end), ensures
-    the vessel's actual completed quantity is included.
+    DAY quantity & vessel count:
+    Sums log entries (lueu_parcel_log) falling strictly within [period_start, period_end)
+    for vessels at these berths.
+    Shows only the selected 24-hr operational day period data, excluding running
+    or cumulative multi-day totals from previous days.
     Ignores is_deleted rows and respects short-close reductions.
     """
-    # 1. Sum log entries within 24hr window for active/completed vessels
     cur.execute("""
         SELECT
             log.entry_date,
@@ -285,23 +284,19 @@ def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
             log.to_time,
             COALESCE(log.quantity, 0) AS q,
             log.is_shortclose,
-            log.remarks
+            log.remarks,
+            vh.id AS vh_id
         FROM lueu_parcel_log log
         JOIN ldud_parcel_ops po ON po.id = log.parcel_op_id
         JOIN ldud_header lh ON lh.id = po.ldud_id
         JOIN vcn_header vh ON vh.id = lh.vcn_id
         WHERE vh.berth_name = ANY(%s)
           AND log.is_deleted IS NOT TRUE
-          AND NULLIF(lh.alongside_datetime, '') IS NOT NULL
-          AND NULLIF(lh.alongside_datetime, '')::timestamp <= %s
-          AND (
-                NULLIF(lh.cast_off_datetime, '') IS NULL
-                OR NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
-          )
-    """, (berths, period_end, period_start))
+    """, (berths,))
 
     rows = cur.fetchall()
     log_qty = 0.0
+    vessel_ids = set()
 
     for r in rows:
         if _lueu_is_shortclose_row(r):
@@ -319,36 +314,14 @@ def _jjltpl_bulk_tons(cur, period_start, period_end, berths):
         entry_dt = datetime.combine(entry_date, time(fh, fm))
         if period_start <= entry_dt < period_end:
             log_qty += float(r['q'] or 0)
-
-    # 2. Also check vessels that COMPLETED (cast off) during this 24hr window
-    cur.execute("""
-        SELECT
-            po.id AS parcel_op_id,
-            po.parcel_ids,
-            po.quantity AS op_qty,
-            vh.operation_type
-        FROM ldud_header lh
-        JOIN vcn_header vh
-            ON vh.id = lh.vcn_id
-        LEFT JOIN ldud_parcel_ops po
-            ON po.ldud_id = lh.id
-        WHERE vh.berth_name = ANY(%s)
-          AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
-          AND NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
-          AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
-    """, (berths, period_start, period_end))
-
-    completed_rows = cur.fetchall()
-    completed_qty = _jjltpl_actual_qty_for_rows(cur, completed_rows, label="DAY_COMPLETED")
-
-    # Final DAY qty is max of log_qty and completed_qty
-    qty = max(log_qty, completed_qty)
+            vessel_ids.add(r['vh_id'])
 
     return {
         MEDIUM_DRY_BULK: 0.0,
         MEDIUM_BREAK_BULK: 0.0,
-        MEDIUM_LIQUID_BULK: qty,
-        "bulk_total": qty,
+        MEDIUM_LIQUID_BULK: log_qty,
+        "bulk_total": log_qty,
+        "vessel_count": len(vessel_ids),
     }
 
 
@@ -569,28 +542,29 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
     """
     MONTH quantity, based on vessels whose cast_off_datetime (in
-    ldud_header) falls within the period — valued at ACTUAL logged
-    quantity (capped at target), same as the DAY figure used to be.
+    ldud_header) falls within the period — valued at direct SUM(log.quantity).
     """
     cur.execute("""
         SELECT
-            po.id AS parcel_op_id,
-            po.parcel_ids,
-            po.quantity AS op_qty,
-            vh.operation_type
+            COALESCE(SUM(log.quantity), 0) AS qty
         FROM ldud_header lh
         JOIN vcn_header vh
             ON vh.id = lh.vcn_id
-        LEFT JOIN ldud_parcel_ops po
+        JOIN ldud_parcel_ops po
             ON po.ldud_id = lh.id
+        JOIN lueu_parcel_log log
+            ON log.parcel_op_id = po.id
         WHERE vh.berth_name = ANY(%s)
+          AND log.is_deleted IS NOT TRUE
+          AND log.is_shortclose IS NOT TRUE
+          AND LOWER(COALESCE(log.remarks, '')) NOT LIKE '%%short%%close%%'
           AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
           AND NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
           AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
     """, (berths, period_start, period_end))
 
-    rows = cur.fetchall()
-    qty = _jjltpl_actual_qty_for_rows(cur, rows, label="MONTH")
+    row = cur.fetchone()
+    qty = float(row["qty"] or 0)
 
     return {
         MEDIUM_DRY_BULK: 0.0,
@@ -602,9 +576,8 @@ def _jjltpl_month_bulk_tons(cur, period_start, period_end, berths):
 
 def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
     """
-    DAY vessel count: vessels active/unloading on berth or completed
-    within [period_start, period_end) — came alongside on or before period_end
-    AND still on berth or cast off at/after period_start.
+    DAY vessel count: vessels whose cast_off_datetime (cast off complete)
+    falls strictly within [period_start, period_end).
     """
     cur.execute("""
         SELECT COUNT(DISTINCT vh.id) AS cnt
@@ -612,17 +585,10 @@ def _jjltpl_bulk_vessel_count(cur, period_start, period_end, berths):
         JOIN vcn_header vh
             ON vh.id = lh.vcn_id
         WHERE vh.berth_name = ANY(%s)
-
-          -- Came alongside on or before period_end
-          AND NULLIF(lh.alongside_datetime, '') IS NOT NULL
-          AND NULLIF(lh.alongside_datetime, '')::timestamp <= %s
-
-          -- Still on berth OR cast off at/after period_start
-          AND (
-                NULLIF(lh.cast_off_datetime, '') IS NULL
-                OR NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
-          )
-    """, (berths, period_end, period_start))
+          AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
+          AND NULLIF(lh.cast_off_datetime, '')::timestamp >= %s
+          AND NULLIF(lh.cast_off_datetime, '')::timestamp < %s
+    """, (berths, period_start, period_end))
 
     row = cur.fetchone()
     return row["cnt"] if row and row["cnt"] else 0
