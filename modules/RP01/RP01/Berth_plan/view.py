@@ -368,9 +368,36 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
     is_export = (row or {}).get('operation_type') == 'Export'
     tbl = 'vcn_export_cargo_declaration' if is_export else 'vcn_consigners'
 
-    cur.execute(f'SELECT DISTINCT consigner_name FROM {tbl} '
-                f'WHERE vcn_id=%s AND consigner_name IS NOT NULL', [vcn_id])
-    consigner = ', '.join(r['consigner_name'] for r in cur.fetchall() if r['consigner_name'])
+    cur.execute(f'''
+        SELECT DISTINCT
+            COALESCE(NULLIF(TRIM(vc.customer_code), ''), TRIM(t.consigner_name)) AS code
+        FROM {tbl} t
+        LEFT JOIN vessel_customers vc ON (
+            UPPER(TRIM(vc.name)) = UPPER(TRIM(t.consigner_name))
+            OR UPPER(TRIM(vc.customer_code)) = UPPER(TRIM(t.consigner_name))
+        )
+        WHERE t.vcn_id = %s AND NULLIF(TRIM(t.consigner_name), '') IS NOT NULL
+    ''', [vcn_id])
+    consigner = ', '.join(r['code'] for r in cur.fetchall() if r['code'])
+
+    cur.execute(f'''
+        SELECT DISTINCT
+            COALESCE(
+                NULLIF(TRIM(vc.cargo_code), ''),
+                NULLIF(TRIM(REGEXP_REPLACE(t.cargo_name, '\\s*\\[.*\\]', '')), ''),
+                TRIM(t.cargo_name)
+            ) AS code
+        FROM {tbl} t
+        LEFT JOIN vessel_cargo vc ON (
+            UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(t.cargo_name))
+            OR UPPER(TRIM(vc.cargo_code)) = UPPER(TRIM(t.cargo_name))
+            OR UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(REGEXP_REPLACE(t.cargo_name, '\\s*\\[.*\\]', '')))
+            OR UPPER(TRIM(vc.cargo_code)) = UPPER(TRIM(REGEXP_REPLACE(t.cargo_name, '\\s*\\[.*\\]', '')))
+        )
+        WHERE t.vcn_id = %s AND NULLIF(TRIM(t.cargo_name), '') IS NOT NULL
+    ''', [vcn_id])
+    cargos = [r['code'] for r in cur.fetchall() if r['code']]
+    cargo_code_str = ', '.join(cargos) if cargos else None
 
     cur.execute('''SELECT MIN(po.start_dt::timestamp) AS started
                    FROM ldud_parcel_ops po WHERE po.ldud_id=%s''', [ldud_id])
@@ -535,7 +562,7 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
             display_rate = best_rate
             is_planned = True   # amber highlight, same as before
 
-    return {
+    res = {
         'consigner': consigner,
         'quantity': target_qty,
         'ops_commenced': _fmt_dt(ops_commenced),          # First parcel start
@@ -546,13 +573,37 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
         'expected_completion': expected_completion,
         'present_flow_rate': display_rate,
         'is_planned': is_planned,
-        'present_flow_rate': display_rate,
-        'is_planned': is_planned,
         'remarks': remarks,
     }
+    if cargo_code_str:
+        res['cargo'] = cargo_code_str
+    return res
 
 
-def _base_row(h):
+def _base_row(cur, h):
+    raw_cargo = (h.get('cargo_type') or '').strip()
+    cargo_val = raw_cargo
+    if raw_cargo and cur:
+        cur.execute('''
+            SELECT COALESCE(
+                NULLIF(TRIM(cargo_code), ''),
+                NULLIF(TRIM(REGEXP_REPLACE(%s, '\\s*\\[.*\\]', '')), ''),
+                TRIM(cargo_name)
+            ) AS code
+            FROM vessel_cargo
+            WHERE UPPER(TRIM(cargo_name)) = UPPER(TRIM(%s))
+               OR UPPER(TRIM(cargo_code)) = UPPER(TRIM(%s))
+               OR UPPER(TRIM(cargo_name)) = UPPER(TRIM(REGEXP_REPLACE(%s, '\\s*\\[.*\\]', '')))
+               OR UPPER(TRIM(cargo_code)) = UPPER(TRIM(REGEXP_REPLACE(%s, '\\s*\\[.*\\]', '')))
+            LIMIT 1
+        ''', [raw_cargo, raw_cargo, raw_cargo, raw_cargo, raw_cargo])
+        r = cur.fetchone()
+        if r and r['code']:
+            cargo_val = r['code']
+        else:
+            import re
+            cargo_val = re.sub(r'\\s*\\[.*\\]', '', raw_cargo).strip() or raw_cargo
+
     return {
         # carried through so callers can reach the vessel's own parcels
         # (BPL01 renders them read-only); ignored by this module's own output
@@ -562,7 +613,7 @@ def _base_row(h):
         'loa': h.get('loa'),
         'draft': h.get('draft'),
         'agent': h.get('vessel_agent_name') or '',
-        'cargo': h.get('cargo_type') or '',
+        'cargo': cargo_val,
         'berth_name': h.get('berth_name') or '',
         'imo_num': h.get('imo_num') or '',
         'nationality': h.get('nationality') or '',
@@ -620,7 +671,7 @@ def get_berthed_vessels(window_start, window_end, berths):
 
     out = []
     for h in headers:
-        row = _base_row(h)
+        row = _base_row(cur, h)
         row['alongside'] = _fmt_dt(h['alongside_datetime'])
         row['vessel_agent'] = h['vessel_agent_name']
         row['terminal'] = h['exp_terminal'] if h['operation_type'] == 'Export' else h['imp_terminal']
@@ -690,7 +741,7 @@ def get_sailed_vessels(window_start, window_end, berths):
         if not (window_start <= sail_dt < window_end):
             continue
 
-        row = _base_row(h)
+        row = _base_row(cur, h)
         row['alongside'] = _fmt_dt(h['alongside_datetime'])
         row['cast_off'] = _fmt_dt(sail_dt)
         row['cargo_completion'] = _fmt_dt(completion_dt)
