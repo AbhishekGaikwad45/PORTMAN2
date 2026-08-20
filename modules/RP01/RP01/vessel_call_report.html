@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Vessel Call Report — RP01{% endblock %}
+
+{% block head %}
+<style>
+    .vcr-box {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-bottom: 16px;
+        max-width: 780px;
+    }
+    .vcr-box h3 { margin: 0 0 8px; font-size: 13px; color: var(--text-primary); }
+    .vcr-box p, .vcr-box li { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 4px 0; }
+    .vcr-btn {
+        background: #4a90d9; color: #fff; border: none; border-radius: 4px;
+        padding: 9px 20px; font-size: 12px; font-weight: 600;
+        cursor: pointer; text-decoration: none; display: inline-block;
+    }
+    .vcr-summary { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+    .vcr-chip {
+        background: var(--bg-secondary); border: 1px solid var(--border-color);
+        border-radius: 6px; padding: 10px 16px; min-width: 120px;
+    }
+    .vcr-chip .val { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+    .vcr-chip .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
+    <h2 style="margin:0;font-size:20px;color:var(--text-primary);">Vessel Call Report</h2>
+    <span style="background:#4a90d9;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;">RP01</span>
+    <a href="/module/RP01/" style="margin-left:auto;font-size:12px;color:#4a90d9;">&larr; Back to Reports</a>
+</div>
+
+<div class="vcr-box">
+    <h3>What this sheet contains</h3>
+    <p>Every vessel call in one list — the uploaded <b>Vessel Call Master</b> for calls up to the go-live cut-off, and the <b>live system</b> for everything after it. The two never overlap, so rows are simply appended; the <b>Source</b> column says which side each row came from.</p>
+    <ul style="padding-left:18px;margin:4px 0;">
+        <li>Actual rows are built from <b>VCN01</b> (vessel call, parcels, cargo), <b>LDUD01</b> (SOF timings, parcel ops) and <b>VC01</b> (IMO, flag, GRT).</li>
+        <li><b>Every VCN vessel</b> is listed whatever its state. A call with no LDUD yet still gets a row, with its timings blank — the <b>VCN Status</b> and <b>LDUD Status</b> columns say how far along each one is.</li>
+        <li>Every timing is one cell, <code>DD-MM-YYYY HH:MM</code>, as in the legacy sheet.</li>
+        <li><b>Quantity MT</b> is the master's quantity on master rows and the actual quantity logged in LUEU01 on actual rows, with Declared and Short-Closed shown alongside.</li>
+        <li>The system records a single cast off, reported under <b>Sail Cast Off</b>. The plain <b>Cast Off</b> column is master-only and is blank for actual rows.</li>
+    </ul>
+</div>
+
+<div class="vcr-summary" id="summary"></div>
+
+<div class="vcr-box">
+    <h3>Export</h3>
+    <a class="vcr-btn" href="/api/module/RP01/vessel-call-report/export">Export to Excel</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+fetch('/api/module/RP01/vessel-call-report/summary').then(r => r.json()).then(s => {
+    const fmt = n => Number(n).toLocaleString('en-IN');
+    document.getElementById('summary').innerHTML = `
+        <div class="vcr-chip"><div class="val">${fmt(s.total)}</div><div class="lbl">Total Rows</div></div>
+        <div class="vcr-chip"><div class="val">${fmt(s.master_rows)}</div><div class="lbl">From Master</div></div>
+        <div class="vcr-chip"><div class="val">${fmt(s.actual_rows)}</div><div class="lbl">From System</div></div>
+        <div class="vcr-chip"><div class="val">${fmt(s.closed_rows)}</div><div class="lbl">…of which closed</div></div>
+        <div class="vcr-chip"><div class="val">${fmt(s.columns)}</div><div class="lbl">Columns</div></div>`;
+});
+</script>
+{% endblock %}

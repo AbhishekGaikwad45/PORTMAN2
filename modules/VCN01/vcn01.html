@@ -762,6 +762,33 @@
     }
     let currentModalData = null;
 
+    // Only the trailing number of "VCN-2526-001" is editable — the editor shows
+    // just that part and puts the untouched prefix back on the way out.
+    function docNumEditor(cell, onRendered, success, cancel) {
+        const val = cell.getValue() || '';
+        const cut = val.lastIndexOf('-') + 1;
+        const prefix = val.slice(0, cut), num = val.slice(cut);
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = num;
+        input.style.cssText = 'width:100%;box-sizing:border-box;';
+        onRendered(() => { input.focus(); input.select(); });
+        let done = false;
+        function commit() {
+            if (done) return;
+            done = true;
+            const digits = input.value.replace(/\D/g, '');
+            if (!digits) return cancel();
+            success(prefix + digits.padStart(num.length || 3, '0'));
+        }
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') { done = true; cancel(); }
+        });
+        return input;
+    }
+
     function initTable() {
         isApprover = moduleConfig.approver_id == '{{ session.user_id }}' || isAdmin;
         const canEdit = permissions.can_edit || permissions.can_add;
@@ -799,7 +826,10 @@
             },
             {title: "Operation Type", field: "operation_type", editor: canEdit ? "list" : false,
                 editorParams: {values: {"Import": "Import", "Export": "Export"}, autocomplete: false, allowEmpty: true}, width: 110},
-            {title: "VCN Doc", field: "vcn_doc_num", width: 80},
+            {title: "VCN Doc", field: "vcn_doc_num", width: 110,
+                editor: canEdit ? docNumEditor : false,
+                editable: cell => !!cell.getRow().getData().id,   // new rows are numbered on save
+                headerTooltip: "Only the number part is editable"},
             {title: "VIA No.", field: "via_number", editor: canEdit ? "input" : false, width: 90},
             {title: "Vessel Master Doc", field: "vessel_master_doc", editor: canEdit ? "list" : false,
                 editorParams: {values: vesselOptions, autocomplete: true, allowEmpty: true}, width: 160,
