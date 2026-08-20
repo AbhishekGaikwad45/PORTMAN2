@@ -727,6 +727,10 @@ def get_sailed_vessels(window_start, window_end, berths):
                     2
                 )
 
+        if h['operation_type'] == 'Export':
+            out.append(row)
+            continue
+
         balance = row.get('balance')
         if balance is None or balance > 0:
             continue
