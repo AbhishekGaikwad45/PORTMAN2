@@ -3,16 +3,28 @@ from datetime import datetime
 
 
 def get_next_record_number():
-    """Generate next service record number"""
+    """Next service record number: a plain integer, no series.
+
+    Starts at the admin-set start number (ADMIN > Services) and takes
+    max(existing numeric record number) + 1 after that — so deleting the newest
+    record frees its number for the next one. Legacy SRV#### numbers are left
+    alone and ignored here.
+
+    ponytail: derived from MAX() instead of a stored counter; two records saved
+    at the same instant can pick the same number. Add a sequence if service
+    records are ever created concurrently.
+    """
+    from database import get_module_config
+    start = int((get_module_config('FSTM01') or {}).get('service_start_no') or 1)
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute(
-        "SELECT MAX(CAST(SUBSTR(record_number, 4) AS INTEGER)) FROM service_records WHERE record_number LIKE 'SRV%%'"
+        "SELECT COALESCE(MAX(record_number::bigint), 0) AS mx FROM service_records "
+        "WHERE record_number ~ '^[0-9]+$'"
     )
-    result = cur.fetchone()['max']
+    highest = cur.fetchone()['mx']
     conn.close()
-    next_num = (result or 0) + 1
-    return f"SRV{next_num:04d}"
+    return str(max(start, highest + 1))
 
 
 def get_service_records(page=1, size=20, source_type=None, service_type_id=None, billed_status=None):

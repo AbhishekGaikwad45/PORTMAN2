@@ -1,8 +1,10 @@
-"""FSTM01 record numbers: plain integers starting at the admin start number,
-with the newest number freed for reuse when its row is deleted.
-Uses the dev DB directly; creates throwaway service types and deletes them."""
+"""Service numbers: plain integers starting at the admin start number, with the
+newest number freed for reuse when its row is deleted. Covers both the SRV01
+service record number and the FSTM01 service type code.
+Uses the dev DB directly; creates throwaway rows and deletes them."""
 from database import get_db, get_cursor, get_module_config, save_module_config
 from modules.FSTM01 import model
+from modules.SRV01 import model as srv_model
 
 
 def _code(row_id):
@@ -33,5 +35,34 @@ def test_record_number_starts_at_config_and_reuses_freed_top():
         conn = get_db(); cur = get_cursor(conn)
         for row_id in ids:
             cur.execute('DELETE FROM finance_service_types WHERE id=%s', [row_id])
+        conn.commit(); conn.close()
+        save_module_config('FSTM01', cfg)
+
+
+def test_service_record_number_is_a_plain_number_from_the_start_number():
+    cfg = get_module_config('FSTM01')
+    save_module_config('FSTM01', dict(cfg, service_start_no=999900))
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute('SELECT id FROM finance_service_types ORDER BY id LIMIT 1')
+    svc_id = cur.fetchone()['id']
+    ids = []
+    try:
+        assert srv_model.get_next_record_number() == '999900'
+
+        cur.execute("INSERT INTO service_records (record_number, service_type_id, source_type, source_id) "
+                    "VALUES ('999900', %s, 'VCN', 0) RETURNING id", [svc_id])
+        ids.append(cur.fetchone()['id'])
+        conn.commit()
+        assert srv_model.get_next_record_number() == '999901'
+
+        # Legacy SRV#### numbers are ignored, not continued.
+        cur.execute("INSERT INTO service_records (record_number, service_type_id, source_type, source_id) "
+                    "VALUES ('SRV9999', %s, 'VCN', 0) RETURNING id", [svc_id])
+        ids.append(cur.fetchone()['id'])
+        conn.commit()
+        assert srv_model.get_next_record_number() == '999901'
+    finally:
+        for row_id in ids:
+            cur.execute('DELETE FROM service_records WHERE id=%s', [row_id])
         conn.commit(); conn.close()
         save_module_config('FSTM01', cfg)
