@@ -695,9 +695,9 @@ def get_sailed_vessels(window_start, window_end, berths):
     cur.execute(f'''
         SELECT DISTINCT h.id AS vcn_id, l.id AS ldud_id, h.via_number, h.vessel_name,
                h.loa, h.draft, h.vessel_agent_name, h.cargo_type, h.berth_name,
-               h.operation_type,
+               COALESCE(NULLIF(TRIM(l.operation_type), ''), NULLIF(TRIM(h.operation_type), ''), '') AS operation_type,
                v.imo_num, v.nationality,
-               l.alongside_datetime, l.{SAIL_COLUMN}::timestamp AS sail_dt,
+               l.alongside_datetime, NULLIF(TRIM(l.{SAIL_COLUMN}::text), '')::timestamp AS sail_dt,
                (SELECT STRING_AGG(DISTINCT NULLIF(TRIM(ec.unload_terminal), ''), ', ')
                   FROM vcn_export_cargo_declaration ec
                  WHERE ec.vcn_id = h.id) AS exp_terminal,
@@ -746,14 +746,15 @@ def get_sailed_vessels(window_start, window_end, berths):
         row['cast_off'] = _fmt_dt(sail_dt)
         row['cargo_completion'] = _fmt_dt(completion_dt)
         row['vessel_agent'] = h['vessel_agent_name']
+        is_export = str(h.get('operation_type') or '').strip().lower() == 'export'
         row['terminal'] = (
             h['exp_terminal']
-            if h['operation_type'] == 'Export'
+            if is_export
             else h['imp_terminal']
         )
         row['pipeline'] = (
             h['exp_pipeline']
-            if h['operation_type'] == 'Export'
+            if is_export
             else h['imp_pipeline']
         )
 
@@ -767,24 +768,19 @@ def get_sailed_vessels(window_start, window_end, berths):
             )
         )
         if row.get("ops_commenced") and row.get("cargo_completion") and row.get("quantity"):
-            ops = datetime.strptime(row["ops_commenced"], "%d-%m-%Y %H:%M")
-            completion = datetime.strptime(row["cargo_completion"], "%d-%m-%Y %H:%M")
+            try:
+                ops = datetime.strptime(row["ops_commenced"], "%d-%m-%Y %H:%M")
+                completion = datetime.strptime(row["cargo_completion"], "%d-%m-%Y %H:%M")
 
-            hours = (completion - ops).total_seconds() / 3600
+                hours = (completion - ops).total_seconds() / 3600
 
-            if hours > 0:
-                row["present_flow_rate"] = round(
-                    float(row["quantity"]) / hours,
-                    2
-                )
-
-        if h['operation_type'] == 'Export':
-            out.append(row)
-            continue
-
-        balance = row.get('balance')
-        if balance is None or balance > 0:
-            continue
+                if hours > 0:
+                    row["present_flow_rate"] = round(
+                        float(row["quantity"]) / hours,
+                        2
+                    )
+            except (ValueError, TypeError):
+                pass
 
         out.append(row)
     conn.close()
