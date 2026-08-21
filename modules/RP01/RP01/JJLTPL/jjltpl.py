@@ -369,7 +369,14 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
             po.id AS parcel_op_id,
             po.parcel_ids,
-            po.cargo_name AS cargo_type,
+            COALESCE(
+                NULLIF(TRIM(vc.cargo_code), ''),
+                NULLIF(TRIM(REGEXP_REPLACE(po.cargo_name, '\\s*\\[.*\\]', '')), ''),
+                NULLIF(TRIM(vc2.cargo_code), ''),
+                NULLIF(TRIM(REGEXP_REPLACE(vh.cargo_type, '\\s*\\[.*\\]', '')), ''),
+                TRIM(po.cargo_name),
+                TRIM(vh.cargo_type)
+            ) AS cargo_type,
             po.quantity AS op_qty,
 
             NULLIF(lh.alongside_datetime,'')::timestamp AS alongside_datetime,
@@ -386,6 +393,20 @@ def _jjltpl_vessels_on_berth(cur, window_start, window_end, berths):
 
         LEFT JOIN ldud_parcel_ops po
             ON po.ldud_id = lh.id
+
+        LEFT JOIN vessel_cargo vc ON (
+            UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(po.cargo_name))
+            OR UPPER(TRIM(vc.cargo_code)) = UPPER(TRIM(po.cargo_name))
+            OR UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(REGEXP_REPLACE(po.cargo_name, '\\s*\\[.*\\]', '')))
+            OR UPPER(TRIM(vc.cargo_code)) = UPPER(TRIM(REGEXP_REPLACE(po.cargo_name, '\\s*\\[.*\\]', '')))
+        )
+
+        LEFT JOIN vessel_cargo vc2 ON (
+            UPPER(TRIM(vc2.cargo_name)) = UPPER(TRIM(vh.cargo_type))
+            OR UPPER(TRIM(vc2.cargo_code)) = UPPER(TRIM(vh.cargo_type))
+            OR UPPER(TRIM(vc2.cargo_name)) = UPPER(TRIM(REGEXP_REPLACE(vh.cargo_type, '\\s*\\[.*\\]', '')))
+            OR UPPER(TRIM(vc2.cargo_code)) = UPPER(TRIM(REGEXP_REPLACE(vh.cargo_type, '\\s*\\[.*\\]', '')))
+        )
 
         WHERE vh.berth_name = ANY(%s)
 
