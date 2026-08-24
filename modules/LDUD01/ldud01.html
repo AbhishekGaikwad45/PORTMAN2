@@ -1230,7 +1230,8 @@
             if (!ids.length) return '<span style="color:#94a3b8;">—</span>';
             return ids.map(id => {
                 const p = parcelById[id];
-                const label = p ? (p.parcel_no || ('#' + id)) : ('#' + id);
+                let label = p ? (p.parcel_no || ('#' + id)) : ('#' + id);
+                if (p && p.consigner_name) label += ` / ${p.consigner_name}`;
                 return `<span style="background:#3182ce;color:white;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:3px;">${label}</span>`;
             }).join('');
         };
@@ -1264,6 +1265,13 @@
                 cb.style.cssText = 'margin:0;width:14px;height:14px;cursor:pointer;';
                 lbl.appendChild(cb);
                 lbl.appendChild(document.createTextNode(`${p.parcel_no || ('#' + p.id)}${p.quantity != null ? ' — ' + p.quantity + ' MT' : ''}`));
+                // consignee disambiguates parcels that share a number/cargo
+                if (p.consigner_name) {
+                    const who = document.createElement('span');
+                    who.style.cssText = 'color:#64748b;margin-left:auto;padding-left:8px;';
+                    who.textContent = p.consigner_name;
+                    lbl.appendChild(who);
+                }
                 dd.appendChild(lbl); boxes.push(cb);
             });
             const btnRow = document.createElement('div');
