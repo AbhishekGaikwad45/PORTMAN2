@@ -93,7 +93,14 @@ def get_expected_waiting_vessels(window_start, window_end):
                     STRING_AGG(DISTINCT NULLIF(TRIM(p.unload_terminal), ''), ', ') AS terminal_name,
                     STRING_AGG(DISTINCT NULLIF(TRIM(p.equipment_names), ''), ', ') AS equipment_names,
                     STRING_AGG(DISTINCT NULLIF(TRIM(COALESCE(NULLIF(TRIM(vc.customer_code), ''), NULLIF(TRIM(p.consigner_name), ''))), ''), ', ') AS consignee_codes,
-                    SUM(NULLIF(p.quantity, '')::numeric) AS total_quantity
+                    (
+                        SELECT SUM(NULLIF(q.quantity, '')::numeric)
+                        FROM (
+                            SELECT quantity FROM vcn_consigners WHERE vcn_id = vh.id
+                            UNION ALL
+                            SELECT quantity FROM vcn_export_cargo_declaration WHERE vcn_id = vh.id
+                        ) q
+                    ) AS total_quantity
                 FROM (
                     SELECT unload_terminal, equipment_names, quantity, consigner_name
                     FROM vcn_consigners
