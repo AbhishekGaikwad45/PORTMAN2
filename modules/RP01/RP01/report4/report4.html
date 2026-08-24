@@ -232,7 +232,11 @@ function fmtPct(val) {
 function populateYearSelect() {
     const yearSelect = document.getElementById("yearSelect");
     yearSelect.innerHTML = META.years.map(y => `<option value="${y}">${y}</option>`).join("");
-    if (META.years.length) yearSelect.value = META.years[META.years.length - 1];
+    if (META.current_fy && META.years.includes(META.current_fy)) {
+        yearSelect.value = META.current_fy;
+    } else if (META.years.length) {
+        yearSelect.value = META.years[META.years.length - 1];
+    }
 }
 
 function populateMonthSelect() {
@@ -240,7 +244,11 @@ function populateMonthSelect() {
     const year = document.getElementById("yearSelect").value;
     const months = META.months[year] || [];
     monthSelect.innerHTML = months.map(m => `<option value="${m.idx}">${m.label}</option>`).join("");
-    if (months.length) monthSelect.value = months[months.length - 1].idx;
+    if (year === META.current_fy && META.current_month_idx !== undefined && months.some(m => m.idx === META.current_month_idx)) {
+        monthSelect.value = META.current_month_idx;
+    } else if (months.length) {
+        monthSelect.value = months[months.length - 1].idx;
+    }
 }
 
 function onYearChange() { populateMonthSelect(); }
