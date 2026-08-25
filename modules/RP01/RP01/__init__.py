@@ -33,4 +33,5 @@ from.report11 import report11 as report_11_views
 from .report12 import report12 as report_12_views
 from .report5 import report5 as report_05_views
 from .report10 import report10 as report_10_views
+from .report_budget import report_budget as report_budget_views
 
