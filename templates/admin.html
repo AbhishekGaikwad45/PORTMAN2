@@ -222,11 +222,10 @@
                     </label>
                 </div>
                 <p style="font-size:12px;color:#718096;margin:8px 0 0;">
-                    New service records (SRV01) and new service types (FSTM01) each get a
-                    plain number — no series, no prefix — starting here and counting up.
-                    Delete the newest one and its number is reused next time.
-                    Existing SRV#### records keep their old numbers, and lowering this
-                    below numbers already in use has no effect.
+                    New service records (SRV01) get a plain number — no series, no prefix —
+                    starting here and counting up. Delete the newest record and its number
+                    is reused next time. Existing SRV#### records keep their old numbers,
+                    and lowering this below numbers already in use has no effect.
                 </p>
             </div>
         </div>
@@ -1060,15 +1059,15 @@ async function saveGstConfig() {
 // ── Service Record Numbering (FSTM01) ───────────────────────────────────────
 
 async function loadServiceConfig() {
-    const config = await (await fetch('/admin/api/config/FSTM01')).json();
+    const config = await (await fetch('/admin/api/config/SRV01')).json();
     document.getElementById('serviceStartNo').value = config.service_start_no || '';
 }
 
 async function saveServiceConfig() {
     const start = parseInt(document.getElementById('serviceStartNo').value, 10);
     if (!start || start < 1) { alert('Enter a start number of 1 or more'); return; }
-    // Endpoint merges into the existing FSTM01 config server-side.
-    const res = await fetch('/admin/api/config/FSTM01/save', {
+    // Endpoint merges into the existing SRV01 config server-side.
+    const res = await fetch('/admin/api/config/SRV01/save', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({service_start_no: start})

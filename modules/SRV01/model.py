@@ -15,7 +15,7 @@ def get_next_record_number():
     records are ever created concurrently.
     """
     from database import get_module_config
-    start = int((get_module_config('FSTM01') or {}).get('service_start_no') or 1)
+    start = int((get_module_config('SRV01') or {}).get('service_start_no') or 1)
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute(
