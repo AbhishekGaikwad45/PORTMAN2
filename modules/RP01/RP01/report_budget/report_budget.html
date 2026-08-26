@@ -337,7 +337,18 @@
         </div>
 
         <div class="filter-item">
-            <label for="commoditySelect">Commodity / Cargo Sub Category-2</label>
+            <label for="columnSelect">Column Filter</label>
+            <select id="columnSelect" onchange="onColumnChange()">
+                <option value="cargo_sub_category_2">Cargo Sub Category 2</option>
+                <option value="cargo_sub_category">Cargo Sub Category</option>
+                <option value="cargo_category_2">Cargo Category 2</option>
+                <option value="cargo_category">Cargo Category</option>
+                <option value="cargo_type">Cargo Type</option>
+            </select>
+        </div>
+
+        <div class="filter-item">
+            <label for="commoditySelect" id="commoditySelectLabel">Commodity / Cargo Sub Category-2</label>
             <select id="commoditySelect"></select>
         </div>
 
@@ -453,6 +464,43 @@
 
     function onYearChange() {
         populateMonthSelect();
+    }
+
+    function onColumnChange() {
+        const col = document.getElementById("columnSelect").value;
+        const colLblMap = {
+            "cargo_sub_category_2": "Cargo Sub Category 2",
+            "cargo_sub_category": "Cargo Sub Category",
+            "cargo_category_2": "Cargo Category 2",
+            "cargo_category": "Cargo Category",
+            "cargo_type": "Cargo Type"
+        };
+        const commLbl = document.getElementById("commoditySelectLabel");
+        if (commLbl) {
+            commLbl.textContent = (colLblMap[col] || "Commodity");
+        }
+
+        fetch(`/api/module/RP01/report-budget/cargo-master-values?column=${col}`)
+            .then(r => r.json())
+            .then(j => {
+                const sel = document.getElementById("commoditySelect");
+                let html = '<option value="ALL">All Items</option>';
+                if (j.values && j.values.length > 0) {
+                    j.values.forEach(v => {
+                        html += `<option value="${v}">${v}</option>`;
+                    });
+                } else {
+                    (META.canonical_commodities || []).forEach(c => {
+                        html += `<option value="${c}">${c}</option>`;
+                    });
+                }
+                sel.innerHTML = html;
+                loadReport();
+            })
+            .catch(err => {
+                console.error(err);
+                loadReport();
+            });
     }
 
     function loadMetaThenReport() {
@@ -575,6 +623,7 @@
     function loadReport() {
         const fin_year = document.getElementById("yearSelect").value;
         const month_idx = document.getElementById("monthSelect").value;
+        const column = document.getElementById("columnSelect").value;
         const commodity = document.getElementById("commoditySelect").value;
         const port = document.getElementById("portSelect").value;
         const detailed = document.getElementById("detailToggle").checked;
@@ -584,7 +633,7 @@
         if (!fin_year) { status.textContent = "Select a financial year."; return; }
         status.textContent = "Loading multi-month report...";
 
-        let url = `/api/module/RP01/report-budget/report?fin_year=${fin_year}&commodity=${encodeURIComponent(commodity)}&port=${port}&detailed=${detailed}`;
+        let url = `/api/module/RP01/report-budget/report?fin_year=${fin_year}&column=${column}&commodity=${encodeURIComponent(commodity)}&port=${port}&detailed=${detailed}`;
         if (month_idx !== "") {
             url += `&month_idx=${month_idx}`;
         }
@@ -615,12 +664,13 @@
     function exportReport() {
         const fin_year = document.getElementById("yearSelect").value;
         const month_idx = document.getElementById("monthSelect").value;
+        const column = document.getElementById("columnSelect").value;
         const commodity = document.getElementById("commoditySelect").value;
         const port = document.getElementById("portSelect").value;
         const detailed = document.getElementById("detailToggle").checked;
 
         if (!fin_year) return;
-        let url = `/api/module/RP01/report-budget/export?fin_year=${fin_year}&commodity=${encodeURIComponent(commodity)}&port=${port}&detailed=${detailed}`;
+        let url = `/api/module/RP01/report-budget/export?fin_year=${fin_year}&column=${column}&commodity=${encodeURIComponent(commodity)}&port=${port}&detailed=${detailed}`;
         if (month_idx !== "") {
             url += `&month_idx=${month_idx}`;
         }
