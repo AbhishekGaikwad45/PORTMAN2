@@ -466,7 +466,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                 to_char(NULLIF(lh.cast_off_datetime, '')::timestamp, '{DATETIME_FMT}') AS cast_off_time,
                 to_char(NULLIF(lh.pilot_disembarked, '')::timestamp, '{DATETIME_FMT}') AS pilot_disembarked,
 
-                pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0) AS quantity,
+                COALESCE(pa.discharged_quantity, 0) AS quantity,
                 COALESCE(pa.discharged_quantity, 0) AS discharged_quantity,
                 pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0) AS bl_quantity,
                 (pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0)) - COALESCE(pa.discharged_quantity, 0) AS remaining_qty
