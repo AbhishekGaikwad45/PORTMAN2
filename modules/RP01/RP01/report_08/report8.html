@@ -249,10 +249,8 @@ function populateYearSelect3() {
         .map(y => `<option value="${y}">${y}</option>`)
         .join("");
 
-    const currentFY = currentFinYear3();
-
-    if (META3.years.includes(currentFY)) {
-        sel.value = currentFY;
+    if (META3.current_fy && META3.years.includes(META3.current_fy)) {
+        sel.value = META3.current_fy;
     } else if (META3.years.length) {
         sel.value = META3.years[META3.years.length - 1];
     }
@@ -270,22 +268,9 @@ function populateMonthSelect3() {
 
     if (!months.length) return;
 
-    if (year === currentFinYear3()) {
-        const now = new Date();
-        const currentMonth = now.getMonth();
-
-        // Apr = 0 ... Mar = 11
-        const currentFYMonthIndex =
-            currentMonth >= 3 ? currentMonth - 3 : currentMonth + 9;
-
-        const exists = months.find(
-            m => Number(m.idx) === currentFYMonthIndex
-        );
-
-        sel.value = exists
-            ? currentFYMonthIndex
-            : months[months.length - 1].idx;
-    } else {
+    if (year === META3.current_fy && META3.current_month_idx !== undefined && months.some(m => Number(m.idx) === META3.current_month_idx)) {
+        sel.value = META3.current_month_idx;
+    } else if (months.length) {
         sel.value = months[months.length - 1].idx;
     }
 }
@@ -349,7 +334,7 @@ function renderRow(r) {
         let cls = "val";
         if (r.split_unavailable) {
             cls += " split-na";
-        } else if (v) {
+        } else if (v !== null && v !== undefined && v !== "") {
             cls += " highlight-cell";
         }
         return `<td class="${cls}">${fmtVal(v, r.unit)}</td>`;

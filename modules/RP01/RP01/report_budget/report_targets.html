@@ -1,0 +1,463 @@
+{% extends "base.html" %}
+
+{% block title %}Maintain Financial Year Targets — RP01{% endblock %}
+
+{% block head %}
+<style>
+    .rp-budget-wrap {
+        --rp-blue: #2F6FED;
+        --rp-blue-dark: #1D4FB8;
+        --rp-red: #DC2626;
+        --rp-ink: #1F2937;
+        --rp-muted: #6B7280;
+        --rp-border: #DDE3EA;
+        --rp-bg: #F6F8FA;
+        --rp-card: #FFFFFF;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    .rp-budget-wrap * {
+        box-sizing: border-box;
+    }
+
+    /* Header */
+    .module-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--rp-border);
+    }
+
+    .module-header h2 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--rp-ink);
+    }
+
+    .module-header .rp-badge {
+        background: var(--rp-blue);
+        color: #fff;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 700;
+    }
+
+    .module-header .nav-link {
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--rp-blue);
+        text-decoration: none;
+    }
+
+    .module-header .nav-link:hover {
+        text-decoration: underline;
+    }
+
+    /* Simple Card */
+    .rp-card-section {
+        background: var(--rp-card);
+        border: 1px solid var(--rp-border);
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-bottom: 20px;
+    }
+
+    .rp-card-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--rp-ink);
+        margin-bottom: 14px;
+    }
+
+    /* Form Grid */
+    .target-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+        margin-bottom: 14px;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .form-group label {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--rp-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+
+    .form-group select,
+    .form-group input {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--rp-ink);
+        background: var(--rp-bg);
+        border: 1px solid var(--rp-border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        outline: none;
+    }
+
+    .form-group select:focus,
+    .form-group input:focus {
+        border-color: var(--rp-blue);
+        background: #fff;
+    }
+
+    .form-btn-group {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 10px;
+    }
+
+    .btn-save {
+        background: var(--rp-blue);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 9px 20px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .btn-save:hover {
+        background: var(--rp-blue-dark);
+    }
+
+    /* Table */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        white-space: nowrap;
+        font-size: 13px;
+    }
+
+    .data-table th,
+    .data-table td {
+        border: 1px solid var(--rp-border);
+        padding: 8px 12px;
+    }
+
+    .data-table thead th {
+        background: var(--rp-bg);
+        font-weight: 700;
+        color: var(--rp-ink);
+        text-align: left;
+    }
+
+    .data-table tbody td {
+        color: var(--rp-ink);
+    }
+
+    .btn-edit {
+        background: var(--rp-blue);
+        color: #fff;
+        border: none;
+        padding: 4px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .btn-delete {
+        background: var(--rp-red);
+        color: #fff;
+        border: none;
+        padding: 4px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        margin-left: 4px;
+    }
+
+    #targetStatus {
+        font-size: 13px;
+        color: var(--rp-muted);
+        min-height: 18px;
+        margin-bottom: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp-budget-wrap">
+
+    <div class="module-header">
+        <h2>Maintain Financial Year Targets</h2>
+        <span class="rp-badge">RP01 TARGETS</span>
+        <a href="/module/RP01/" class="nav-link">&larr; Back to Report</a>
+    </div>
+
+    <!-- 1. BUDGET TARGET ENTRY CARD -->
+    <div class="rp-card-section">
+        <div class="rp-card-title">Input / Edit Financial Year Target</div>
+
+        <div id="targetStatus"></div>
+
+        <div class="target-form-grid">
+            <div class="form-group">
+                <label for="formFinYear">Financial Year *</label>
+                <select id="formFinYear" onchange="loadSavedTargets()"></select>
+            </div>
+
+            <div class="form-group">
+                <label for="formColumn">Column *</label>
+                <select id="formColumn" onchange="onColumnChange()">
+                    <option value="">-- Loading Columns... --</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="formName">Name *</label>
+                <select id="formName">
+                    <option value="">-- Select Column First --</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="formMonth">Month *</label>
+                <select id="formMonth">
+                    <option value="Apr">April</option>
+                    <option value="May">May</option>
+                    <option value="Jun">June</option>
+                    <option value="Jul">July</option>
+                    <option value="Aug">August</option>
+                    <option value="Sep">September</option>
+                    <option value="Oct">October</option>
+                    <option value="Nov">November</option>
+                    <option value="Dec">December</option>
+                    <option value="Jan">January</option>
+                    <option value="Feb">February</option>
+                    <option value="Mar">March</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="formOutlook">Outlook (MT) *</label>
+                <input type="number" id="formOutlook" placeholder="e.g. 2000" min="0" step="any" />
+            </div>
+
+            <div class="form-group">
+                <label for="formTarget">Target (MT) *</label>
+                <input type="number" id="formTarget" placeholder="e.g. 1800" min="0" step="any" />
+            </div>
+        </div>
+
+        <div class="form-btn-group">
+            <button class="btn-save" onclick="saveTarget()">Save Target</button>
+        </div>
+    </div>
+
+    <!-- 2. SAVED TARGETS GRID -->
+    <div class="rp-card-section">
+        <div class="rp-card-title">Saved Financial Year Targets (`financial_year_targets`)</div>
+        <div style="overflow-x:auto;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Financial Year</th>
+                        <th>Column</th>
+                        <th>Name</th>
+                        <th>Month</th>
+                        <th style="text-align:right;">Outlook (MT)</th>
+                        <th style="text-align:right;">Target (MT)</th>
+                        <th style="text-align:center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="targetsGridBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let META = { years: [], current_fy: "" };
+    const COLUMN_LABEL_MAP = {
+        "cargo_type": "Cargo Type",
+        "cargo_category": "Cargo Category",
+        "cargo_category_2": "Cargo Category 2",
+        "cargo_sub_category": "Cargo Sub Category",
+        "cargo_sub_category_2": "Cargo Sub Category 2"
+    };
+
+    function fmtNum(v) {
+        if (v === null || v === undefined || v === 0) return "0";
+        return Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    }
+
+    function populateColumnSelect() {
+        fetch('/api/module/RP01/report-budget/cargo-master-columns')
+            .then(function (response) {
+                return response.json();
+            })
+            .then(function (data) {
+                const sel = document.getElementById("formColumn");
+                let html = '<option value="">-- Select Column --</option>';
+                const cols = data.columns || [];
+                for (let i = 0; i < cols.length; i++) {
+                    html += '<option value="' + cols[i].field + '">' + cols[i].label + '</option>';
+                }
+                sel.innerHTML = html;
+            });
+    }
+
+    function initTargetsPage() {
+        populateColumnSelect();
+        fetch('/api/module/RP01/report-budget/meta')
+            .then(function (response) {
+                return response.json();
+            })
+            .then(function (data) {
+                META = data;
+                populateYearSelect();
+                loadSavedTargets();
+            });
+    }
+
+    function populateYearSelect() {
+        const sel = document.getElementById("formFinYear");
+        sel.innerHTML = META.years.map(y => `<option value="${y}">${y}</option>`).join("");
+        if (META.current_fy) {
+            sel.value = META.current_fy;
+        }
+    }
+
+    function onColumnChange(selectedName = "") {
+        const col = document.getElementById("formColumn").value;
+        const nameSel = document.getElementById("formName");
+        if (!col) {
+            nameSel.innerHTML = '<option value="">-- Select Column First --</option>';
+            return;
+        }
+
+        fetch(`/api/module/RP01/report-budget/cargo-master-values?column=${col}`)
+            .then(r => r.json())
+            .then(j => {
+                const vals = j.values || [];
+                nameSel.innerHTML = '<option value="">-- Select Name --</option>' +
+                    vals.map(v => `<option value="${v}">${v}</option>`).join("");
+                if (selectedName && vals.includes(selectedName)) {
+                    nameSel.value = selectedName;
+                }
+            });
+    }
+
+    function saveTarget() {
+        const financial_year = document.getElementById("formFinYear").value;
+        const column = document.getElementById("formColumn").value;
+        const name = document.getElementById("formName").value;
+        const month = document.getElementById("formMonth").value;
+        const outlook = document.getElementById("formOutlook").value;
+        const target = document.getElementById("formTarget").value;
+
+        const status = document.getElementById("targetStatus");
+        status.style.color = "var(--rp-muted)";
+        status.textContent = "Saving target...";
+
+        fetch(`/api/module/RP01/report-budget/target-save`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                financial_year: financial_year,
+                column: column,
+                name: name,
+                month: month,
+                outlook: parseFloat(outlook || 0),
+                target: parseFloat(target || 0)
+            })
+        })
+            .then(r => r.json().then(j => ({ ok: r.ok, j })))
+            .then(({ ok, j }) => {
+                if (!ok) {
+                    status.style.color = "var(--rp-red)";
+                    status.textContent = j.error || "Failed to save budget target.";
+                    return;
+                }
+                status.style.color = "green";
+                status.textContent = "✔ Financial Year target saved successfully!";
+                loadSavedTargets();
+            })
+            .catch(err => {
+                status.style.color = "var(--rp-red)";
+                status.textContent = "Error connecting to server.";
+                console.error(err);
+            });
+    }
+
+    function loadSavedTargets() {
+        const fy = document.getElementById("formFinYear").value;
+        fetch(`/api/module/RP01/report-budget/targets?financial_year=${fy}`)
+            .then(r => r.json())
+            .then(j => {
+                const list = j.targets || [];
+                const body = document.getElementById("targetsGridBody");
+                if (list.length === 0) {
+                    body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--rp-muted);padding:16px;">No budget targets saved for ${fy}.</td></tr>`;
+                    return;
+                }
+                body.innerHTML = list.map(t => `
+                <tr>
+                    <td><b>${t.financial_year}</b></td>
+                    <td>${COLUMN_LABEL_MAP[t.column] || t.column}</td>
+                    <td><b>${t.name}</b></td>
+                    <td>${t.month}</td>
+                    <td style="text-align:right;">${fmtNum(t.outlook)} MT</td>
+                    <td style="text-align:right;"><b>${fmtNum(t.target)} MT</b></td>
+                    <td style="text-align:center;">
+                        <button class="btn-edit" onclick="editTarget('${t.financial_year}', '${t.column}', '${t.name.replace(/'/g, "\\'")}', '${t.month}', ${t.outlook}, ${t.target})">Edit</button>
+                        <button class="btn-delete" onclick="deleteTarget('${t.financial_year}', '${t.column}', '${t.name.replace(/'/g, "\\'")}', '${t.month}')">Delete</button>
+                    </td>
+                </tr>
+            `).join("");
+            });
+    }
+
+    function editTarget(fy, col, name, month, outlook, target) {
+        document.getElementById("formFinYear").value = fy;
+        document.getElementById("formColumn").value = col;
+        document.getElementById("formMonth").value = month;
+        document.getElementById("formOutlook").value = outlook;
+        document.getElementById("formTarget").value = target;
+        onColumnChange(name);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function deleteTarget(fy, col, name, month) {
+        if (!confirm(`Delete ${fy} ${month} target for ${COLUMN_LABEL_MAP[col] || col} = ${name}?`)) return;
+
+        fetch(`/api/module/RP01/report-budget/target-delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                financial_year: fy,
+                column: col,
+                name: name,
+                month: month
+            })
+        })
+            .then(r => r.json())
+            .then(j => {
+                loadSavedTargets();
+            });
+    }
+
+    initTargetsPage();
+</script>
+{% endblock %}

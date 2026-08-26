@@ -93,7 +93,14 @@ def get_expected_waiting_vessels(window_start, window_end):
                     STRING_AGG(DISTINCT NULLIF(TRIM(p.unload_terminal), ''), ', ') AS terminal_name,
                     STRING_AGG(DISTINCT NULLIF(TRIM(p.equipment_names), ''), ', ') AS equipment_names,
                     STRING_AGG(DISTINCT NULLIF(TRIM(COALESCE(NULLIF(TRIM(vc.customer_code), ''), NULLIF(TRIM(p.consigner_name), ''))), ''), ', ') AS consignee_codes,
-                    SUM(NULLIF(p.quantity, '')::numeric) AS total_quantity
+                    (
+                        SELECT SUM(NULLIF(q.quantity, '')::numeric)
+                        FROM (
+                            SELECT quantity FROM vcn_consigners WHERE vcn_id = vh.id
+                            UNION ALL
+                            SELECT quantity FROM vcn_export_cargo_declaration WHERE vcn_id = vh.id
+                        ) q
+                    ) AS total_quantity
                 FROM (
                     SELECT unload_terminal, equipment_names, quantity, consigner_name
                     FROM vcn_consigners
@@ -154,12 +161,21 @@ def get_expected_waiting_vessels(window_start, window_end):
 
     out = []
 
+    def _fmt_q(q_val):
+        try:
+            f = float(q_val)
+            return str(int(f)) if f.is_integer() else str(f)
+        except (ValueError, TypeError):
+            return str(q_val)
+
     for r in rows:
         tank_terminal = "JJLTPL"
         load_port =  r.get("declared_terminal_name") or ""
 
         # CONS shows consignee customer code(s) assigned to the vessel
         cons = (r.get("consignee_codes") or '').strip()
+
+        tot = r.get("cargo_quantity")
 
         out.append({
             "terminal":     tank_terminal,
@@ -170,7 +186,7 @@ def get_expected_waiting_vessels(window_start, window_end):
             "agt_tnk_cons": f"{r.get('agents') or ''} / {load_port or ''} / {cons}",
             "cargo":        r.get("cargo_name"),
             "mla":          r.get("equipment_names"),
-            "quantity":     r.get("cargo_quantity"),
+            "quantity":     _fmt_q(tot) if tot is not None else "",
             "eta":          _fmt_dt(r.get("doc_date"), fmt='%d-%m-%Y'),
             "ata":          _fmt_dt(r.get("anchored_datetime")),
             "nor":          _fmt_dt(r.get("nor_accepted")),

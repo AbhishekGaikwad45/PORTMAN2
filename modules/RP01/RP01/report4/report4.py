@@ -930,13 +930,47 @@ def report4_index():
     return render_template("report4/report4.html", port_name="Jawahalal Nehru Port Authority")
 
 
+def get_current_fy_and_month_idx():
+    from datetime import datetime
+    now = datetime.now()
+    y, m = now.year, now.month
+    if m >= 4:
+        cur_fy = f"{y}-{str((y + 1) % 100).zfill(2)}"
+        cur_m_idx = m - 4
+    else:
+        cur_fy = f"{y - 1}-{str(y % 100).zfill(2)}"
+        cur_m_idx = m + 8
+    return cur_fy, cur_m_idx
+
+
 @bp.route("/api/module/RP01/report4/meta")
 @login_required
 def report4_api_meta():
     try:
         _, years = _get_df_and_years()
-        months = {fy: month_options_for(fy) for fy in years}
-        return jsonify({"years": years, "months": months})
+        cur_fy, cur_m_idx = get_current_fy_and_month_idx()
+
+        filtered_years = [y for y in years if fy_start_year(y) <= fy_start_year(cur_fy)]
+        if cur_fy not in filtered_years and cur_fy in years:
+            filtered_years.append(cur_fy)
+        res_years = filtered_years if filtered_years else years
+
+        months = {}
+        for fy in res_years:
+            all_opts = month_options_for(fy)
+            if fy_start_year(fy) > fy_start_year(cur_fy):
+                months[fy] = []
+            elif fy == cur_fy:
+                months[fy] = [o for o in all_opts if o["idx"] <= cur_m_idx]
+            else:
+                months[fy] = all_opts
+
+        return jsonify({
+            "years": res_years,
+            "months": months,
+            "current_fy": cur_fy,
+            "current_month_idx": cur_m_idx
+        })
     except ReportDataError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -949,8 +983,16 @@ def report4_api_meta():
 def report4_api_report():
     try:
         df, years = _get_df_and_years()
-        fin_year = request.args.get("fin_year", years[-1])
-        month_idx = int(request.args.get("month_idx", 2))
+        cur_fy, cur_m_idx = get_current_fy_and_month_idx()
+        default_fy = cur_fy if cur_fy in years else (years[-1] if years else "2026-27")
+
+        fin_year = request.args.get("fin_year", default_fy)
+        month_idx_arg = request.args.get("month_idx")
+        if month_idx_arg is not None and month_idx_arg != "":
+            month_idx = int(month_idx_arg)
+        else:
+            month_idx = cur_m_idx if fin_year == cur_fy else 2
+
         if fin_year not in years:
             return jsonify({"error": f"Unknown fin_year '{fin_year}'. Available: {', '.join(years)}"}), 400
 
