@@ -170,7 +170,7 @@ let META = { years: [], months: {} };
 
 function fmtNum(val) {
     if (val === null || val === undefined || val === "") return "";
-    return Number(val).toLocaleString(undefined, { maximumFractionDigits: 3 });
+    return Number(val).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 function fmtDt(val) {
     if (!val) return "";
