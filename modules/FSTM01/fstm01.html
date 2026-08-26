@@ -57,7 +57,7 @@
     <thead>
         <tr>
             <th style="width:30px"><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
-            <th style="min-width:90px">Record No</th>
+            <th style="min-width:90px">Service Code</th>
             <th style="min-width:160px">Service Name</th>
             <th style="min-width:110px">Category</th>
             <th style="min-width:110px">GL Code</th>
@@ -88,7 +88,7 @@
         {% set locked = (row.is_system == 1 and not is_admin) or (not perms.can_edit and not is_admin) %}
         <tr data-id="{{ row.id }}" {% if row.is_system %}class="system-row" data-system="1"{% endif %}>
             <td>{% if not row.is_system %}<input type="checkbox" class="row-select">{% else %}<span title="System-managed — cannot be deleted">🔒</span>{% endif %}</td>
-            <td><input type="text" name="service_code[]" value="{{ row.service_code }}" readonly title="System-assigned record number"></td>
+            <td><input type="text" name="service_code[]" value="{{ row.service_code }}" {% if locked %}readonly{% endif %}></td>
             <td>
                 <input type="text" name="service_name[]" value="{{ row.service_name }}" {% if locked %}readonly{% endif %}>
                 {% if row.is_system %}<span class="lock-badge">SYSTEM</span>{% endif %}
@@ -254,7 +254,7 @@ function addRow() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
         <td><input type="checkbox" class="row-select"></td>
-        <td><input type="text" name="service_code[]" placeholder="auto" readonly title="Assigned on save"></td>
+        <td><input type="text" name="service_code[]" required></td>
         <td><input type="text" name="service_name[]" required></td>
         <td><input type="text" name="service_category[]"></td>
         <td><input type="text" name="gl_code[]"></td>
@@ -344,6 +344,14 @@ async function saveAll() {
         };
 
         if (!data.service_name) continue;
+
+        // Service Code is required and must be unique. fetch() bypasses the
+        // input's HTML5 'required', so validate explicitly before posting.
+        if (!data.service_code || !data.service_code.trim()) {
+            alert('Service Code is required for "' + data.service_name + '". Please enter a unique code.');
+            row.querySelector('[name="service_code[]"]').focus();
+            return;
+        }
 
         const res = await fetch('/api/module/FSTM01/save', {
             method: 'POST',

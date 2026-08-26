@@ -51,27 +51,6 @@ def get_service_type_data(page=1, size=20):
     return [dict(r) for r in rows], total
 
 
-def _next_service_code(cur):
-    """Record number for a new service: plain integer, no series.
-
-    Starts at the admin-set start number (ADMIN > Services) and takes
-    max(existing numeric code) + 1 after that — so deleting the newest row
-    frees its number for the next add.
-
-    ponytail: derived from MAX() instead of a stored counter; two concurrent
-    inserts can pick the same number and the second hits the unique index and
-    is told to retry. Add a sequence if services are ever added concurrently.
-    """
-    from database import get_module_config
-    start = int((get_module_config('FSTM01') or {}).get('service_start_no') or 1)
-    cur.execute("""
-        SELECT COALESCE(MAX(service_code::bigint), 0) AS mx
-        FROM finance_service_types
-        WHERE service_code ~ '^[0-9]+$'
-    """)
-    return str(max(start, cur.fetchone()['mx'] + 1))
-
-
 def save_service_type(data):
     """Save service type record"""
     conn = get_db()
@@ -128,8 +107,13 @@ def save_service_type(data):
             ])
             row_id = data['id']
         else:
-            # Record number is assigned by the system, never by the client.
-            data['service_code'] = _next_service_code(cur)
+            # service_code is required and must be unique for new rows.
+            # The UI marks the field required, but saveAll() posts via fetch(),
+            # which bypasses HTML5 validation — so enforce it here too.
+            service_code = (data.get('service_code') or '').strip()
+            if not service_code:
+                raise ValueError('Service code is required')
+            data['service_code'] = service_code
 
             cur.execute('''
                 INSERT INTO finance_service_types
@@ -174,8 +158,7 @@ def save_service_type(data):
         return row_id
     except psycopg2.errors.UniqueViolation:
         conn.rollback()
-        raise ValueError('Record number "%s" already exists — please save again'
-                         % data.get('service_code', ''))
+        raise ValueError('Service code "%s" already exists' % data.get('service_code', ''))
     except Exception:
         conn.rollback()
         raise
