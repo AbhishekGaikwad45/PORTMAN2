@@ -657,9 +657,7 @@ def report13_export():
         cell.border = header_border
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # -- Data rows --------------------------------------------------------
-    # Blank (None) for any workbook column with no matching field in the
-    # current row dicts (per EXPORT_FIELD_MAP), instead of guessing.
+    from decimal import Decimal
     for i, row in enumerate(rows, start=1):
         out_row = []
         for key in EXPORT_FIELD_MAP:
@@ -669,6 +667,11 @@ def report13_export():
                 out_row.append(row.get(key))
         out_row[0] = i  # SR. NO.
         ws.append(out_row)
+
+        curr_row = header_row_idx + i
+        for col_idx, val in enumerate(out_row, start=1):
+            if isinstance(val, (int, float, Decimal)) and col_idx != 1:
+                ws.cell(row=curr_row, column=col_idx).number_format = "#,##0.000"
 
     # -- Column widths, matching the reference workbook ------------------
     for idx, width in enumerate(EXPORT_COL_WIDTHS, start=1):
