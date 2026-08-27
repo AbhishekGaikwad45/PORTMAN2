@@ -4,32 +4,52 @@
 
 {% block head %}
 <style>
-.bpl-wrap { display: flex; gap: 14px; align-items: flex-start; }
-.bpl-side { flex: 0 0 232px; }
+.bpl-wrap { display: flex; gap: 16px; align-items: flex-start; }
+.bpl-side {
+    flex: 0 0 250px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
 .bpl-lanes { flex: 1; min-width: 0; }
 
 .bpl-panel-hdr {
-    font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
-    color: #64748B; margin: 0 0 8px; display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+    color: #64748B; margin: 0 0 10px; display: flex; align-items: center; justify-content: space-between;
 }
-.bpl-panel-hdr label { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 10px; }
+.bpl-panel-hdr label { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 11px; color: #334155; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.bpl-panel-hdr label input[type="checkbox"] { accent-color: #2563eb; cursor: pointer; }
 
-/* vessel cards — the drag sources */
+/* vessel cards — drag sources */
 .bpl-ev {
-    border: 1px solid #CBD5E1; border-left: 3px solid #2563EB; border-radius: 6px;
-    background: #fff; padding: 8px 10px; margin-bottom: 6px; cursor: grab;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #2563eb;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: grab;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
-.bpl-ev.vcn { border-left-color: #7C3AED; }
+.bpl-ev.vcn { border-left-color: #7c3aed; }
+.bpl-ev:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    border-color: #cbd5e1;
+}
 .bpl-ev:active { cursor: grabbing; }
-.bpl-ev.dragging { opacity: .4; }
-.bpl-ev-name { font-size: 12px; font-weight: 700; color: #0F172A; display: flex; gap: 6px; align-items: baseline; }
-.bpl-ev-meta { font-size: 10px; color: #64748B; margin-top: 2px; }
+.bpl-ev.dragging { opacity: .4; transform: scale(0.98); }
+.bpl-ev-name { font-size: 12px; font-weight: 700; color: #0f172a; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.bpl-ev-meta { font-size: 11px; color: #64748b; margin-top: 4px; line-height: 1.4; }
 .bpl-src {
-    font-size: 8px; font-weight: 700; letter-spacing: .5px; padding: 1px 5px;
-    border-radius: 999px; background: #EFF6FF; color: #1D4ED8;
+    font-size: 9px; font-weight: 700; letter-spacing: .5px; padding: 2px 6px;
+    border-radius: 999px; background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe;
 }
-.bpl-src.vcn { background: #F5F3FF; color: #6D28D9; }
-.bpl-empty { font-size: 11px; color: #94A3B8; font-style: italic; padding: 6px 2px; }
+.bpl-src.vcn { background: #f5f3ff; color: #7c3aed; border-color: #ddd6fe; }
+.bpl-empty { font-size: 11px; color: #94a3b8; font-style: italic; padding: 6px 2px; }
 
 /* berth lanes — the drop targets */
 .bpl-lane {
@@ -110,7 +130,7 @@
 <div class="bpl-wrap">
     <div class="bpl-side">
         <p class="bpl-panel-hdr">
-            Vessels
+            <span>VESSELS</span>
             <label style="margin-left:auto"><input type="checkbox" id="bpl-show-all" onchange="load()"> show berthed</label>
         </p>
         <div id="bpl-expected"></div>
@@ -189,7 +209,11 @@ function renderExpected() {
         el.innerHTML = '<p class="bpl-empty">Nothing waiting to be planned.</p>';
         return;
     }
-    el.innerHTML = canvas.expected.map(v => `
+    el.innerHTML = canvas.expected.map(v => {
+        const qtyDisplay = (v.quantity !== null && v.quantity !== undefined && v.quantity !== '' && !isNaN(+v.quantity))
+            ? (+v.quantity).toLocaleString()
+            : (v.quantity || '—');
+        return `
         <div class="bpl-ev ${v.source === 'VCN' ? 'vcn' : ''}" ${CAN_WRITE ? 'draggable="true"' : ''}
              data-source="${v.source}" data-id="${v.source_id}">
             <div class="bpl-ev-name">
@@ -197,10 +221,11 @@ function renderExpected() {
                 <span class="bpl-src ${v.source === 'VCN' ? 'vcn' : ''}">${v.source}</span>
             </div>
             <div class="bpl-ev-meta">
-                ${esc(v.cargo_name || '—')}<br>
-                ${esc(v.quantity || '—')} MT &middot; ETA ${v.eta ? fmt(v.eta) : '—'}
+                <b>${esc(v.cargo_name || '—')}</b><br>
+                ${esc(qtyDisplay)} MT &middot; ETA ${v.eta ? fmt(v.eta) : '—'}
             </div>
-        </div>`).join('');
+        </div>`;
+    }).join('');
     el.querySelectorAll('.bpl-ev').forEach(card => {
         card.addEventListener('dragstart', e => {
             e.dataTransfer.setData('text/plain', `${card.dataset.source}:${card.dataset.id}`);
