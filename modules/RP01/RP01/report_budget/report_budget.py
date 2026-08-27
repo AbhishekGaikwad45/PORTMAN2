@@ -125,9 +125,12 @@ def get_month_date_range(fin_year: str, month_idx: int):
 
 
 def get_jsw_0700_date_range(fin_year: str, month_idx: int):
-    """Returns (start_ts_str, end_ts_str) formatted as YYYY-MM-DD 07:00:00 for JSW 07:00 AM operational window."""
+    """Returns (start_ts_str, end_ts_str) formatted as YYYY-MM-DD 07:00:00 for 07:00 AM monthly operational window."""
     start_dt, end_dt = get_month_date_range(fin_year, month_idx)
     return f"{start_dt} 07:00:00", f"{end_dt} 07:00:00"
+
+
+get_jnpt_0700_date_range = get_jsw_0700_date_range
 
 
 def load_all_actuals_and_budgets(fin_year: str, detailed: bool = False, column: str = None):
@@ -205,11 +208,12 @@ def load_all_actuals_and_budgets(fin_year: str, detailed: bool = False, column: 
                             budget_data[m_idx][cat] = budget_data[m_idx].get(cat, 0.0) + val
 
         # 2. Load Historical MIS Actuals (JNPT Actual by month_jnpt, JSW Actual by month_jsw)
+        fy_month_labels = [month_label_from_idx(fin_year, m) for m in range(12)]
         cur.execute("""
             SELECT month_jnpt, month_jsw, cargo_name, cargo_type, cargo_category, cargo_category_2, cargo_sub_category, cargo_sub_category_2, quantity
             FROM mis_history
-            WHERE fin_year = %s;
-        """, (fin_year,))
+            WHERE fin_year = %s OR month_jnpt = ANY(%s) OR month_jsw = ANY(%s);
+        """, (fin_year, fy_month_labels, fy_month_labels))
         mis_rows = cur.fetchall()
 
         for r in mis_rows:
@@ -253,9 +257,9 @@ def load_all_actuals_and_budgets(fin_year: str, detailed: bool = False, column: 
             has_mis_jsw = (cur.fetchone()["cnt"] > 0)
 
             start_dt, end_dt = get_month_date_range(fin_year, m_idx)
-            jsw_start_ts, jsw_end_ts = get_jsw_0700_date_range(fin_year, m_idx)
+            jnpt_start_ts, jnpt_end_ts = get_jnpt_0700_date_range(fin_year, m_idx)
 
-            # A. JNPT Live Actual (Evaluated against 07:00 AM to 07:00 AM monthly operational window)
+            # A. JNPT Live Actual (Filtered directly on ldud_header.cast_off_datetime with 07:00 AM to 07:00 AM monthly operational window)
             if not has_mis_jnpt:
                 cur.execute("""
                     SELECT 
@@ -270,23 +274,14 @@ def load_all_actuals_and_budgets(fin_year: str, detailed: bool = False, column: 
                     JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
                     JOIN ldud_header ld ON ld.id = po.ldud_id
                     LEFT JOIN vessel_cargo vc ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(po.cargo_name))
-                    WHERE COALESCE(l.is_deleted, false) = false
+                    WHERE ld.cast_off_datetime IS NOT NULL
+                      AND NULLIF(TRIM(ld.cast_off_datetime), '') IS NOT NULL
+                      AND REPLACE(TRIM(ld.cast_off_datetime), 'T', ' ')::timestamp >= %s::timestamp
+                      AND REPLACE(TRIM(ld.cast_off_datetime), 'T', ' ')::timestamp < %s::timestamp
+                      AND COALESCE(l.is_deleted, false) = false
                       AND COALESCE(l.is_shortclose, false) = false
-                      AND (
-                          COALESCE(
-                              CASE WHEN l.entry_date IS NOT NULL AND TRIM(l.entry_date) != '' THEN (TRIM(l.entry_date) || ' ' || COALESCE(NULLIF(TRIM(l.to_time), ''), NULLIF(TRIM(l.from_time), ''), '07:00'))::timestamp ELSE NULL END,
-                              CASE WHEN l.created_date IS NOT NULL AND TRIM(l.created_date) != '' THEN (TRIM(l.created_date) || ' 07:00:00')::timestamp ELSE NULL END,
-                              REPLACE(ld.cast_off_datetime, 'T', ' ')::timestamp
-                          ) >= %s::timestamp
-                          AND
-                          COALESCE(
-                              CASE WHEN l.entry_date IS NOT NULL AND TRIM(l.entry_date) != '' THEN (TRIM(l.entry_date) || ' ' || COALESCE(NULLIF(TRIM(l.to_time), ''), NULLIF(TRIM(l.from_time), ''), '07:00'))::timestamp ELSE NULL END,
-                              CASE WHEN l.created_date IS NOT NULL AND TRIM(l.created_date) != '' THEN (TRIM(l.created_date) || ' 07:00:00')::timestamp ELSE NULL END,
-                              REPLACE(ld.cast_off_datetime, 'T', ' ')::timestamp
-                          ) < %s::timestamp
-                      )
                     GROUP BY po.cargo_name, vc.cargo_type, vc.cargo_category, vc.cargo_category_2, vc.cargo_sub_category, vc.cargo_sub_category_2;
-                """, (jsw_start_ts, jsw_end_ts))
+                """, (jnpt_start_ts, jnpt_end_ts))
                 for r in cur.fetchall():
                     cn = (r["cargo_name"] or "").strip()
                     sub = (r["sub"] or "").strip()
