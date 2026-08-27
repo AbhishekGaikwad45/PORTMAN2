@@ -220,7 +220,10 @@ def get_berths():
     cur.execute('SELECT berth_name FROM port_berth_master ORDER BY berth_name')
     berths = [r['berth_name'] for r in cur.fetchall()]
     conn.close()
-    return berths
+    for b in ['LB-01', 'LB-02']:
+        if b not in berths:
+            berths.append(b)
+    return sorted(berths)
 
 
 def get_pipelines():
