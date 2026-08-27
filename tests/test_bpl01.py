@@ -1,10 +1,16 @@
-"""BPL01 berth planning: the draft-plan timeline math, lane conflict detection,
-queueing behind an occupied berth, and the payload guard on the JSONB parcels
-column. Uses the dev DB for the cascade + validation tests, cleaned up after.
+"""BPL01 berth planning.
 
-A planned parcel carries the hours the planner expects it to take, plus delay
-line items (delay type + hours, the same delay master LUEU01 picks from).
-end = start + hours + delay hours.
+A vessel's plan is an ordered list of line items that run one after another:
+
+    Prior Documentation   (fixed bookend, typed hours)
+    ... parcels and delays the planner inserts ...
+    Post Documentation    (fixed bookend, typed hours)
+
+A parcel's hours are derived from qty / flow rate; a doc or delay line carries
+typed hours. Each item starts when the one before it ends, and each vessel in a
+berth starts when the vessel before it ends.
+
+DB-backed tests use the dev DB with throwaway rows, cleaned up after.
 """
 from datetime import datetime
 
@@ -16,6 +22,19 @@ from modules.BPL01 import model
 
 def _dt(s):
     return datetime.strptime(s, '%Y-%m-%d %H:%M')
+
+
+def _doc(name, hours=4):
+    return {'kind': 'doc', 'name': name, 'hours': hours}
+
+
+def _parcel(name, qty, rate, pipeline=None, parcel_id=None):
+    return {'kind': 'parcel', 'name': name, 'qty': qty, 'rate': rate,
+            'pipeline': pipeline, 'parcel_id': parcel_id}
+
+
+def _delay(name, hours):
+    return {'kind': 'delay', 'name': name, 'hours': hours}
 
 
 @pytest.fixture
@@ -38,10 +57,9 @@ def berths():
 
 @pytest.fixture
 def ev_id():
-    """A throwaway expected-vessel row to hang a plan off."""
     conn = get_db(); cur = get_cursor(conn)
-    cur.execute("INSERT INTO expected_vessels (vessel_name, doc_status) "
-                "VALUES ('ZZ TEST VESSEL', 'Pending') RETURNING id")
+    cur.execute("INSERT INTO expected_vessels (vessel_name, doc_status, cargo_name, quantity) "
+                "VALUES ('ZZ TEST VESSEL', 'Pending', 'HSD', '9600') RETURNING id")
     row_id = cur.fetchone()['id']
     conn.commit(); conn.close()
     try:
@@ -55,7 +73,6 @@ def ev_id():
 
 @pytest.fixture
 def vcn_id():
-    """A throwaway VCN — planning now accepts VCN vessels too, not just EV01."""
     conn = get_db(); cur = get_cursor(conn)
     cur.execute("INSERT INTO vcn_header (operation_type, vessel_name) "
                 "VALUES ('Import', 'ZZ TEST VCN VESSEL') RETURNING id")
@@ -70,274 +87,526 @@ def vcn_id():
         conn.commit(); conn.close()
 
 
-# ── planning math: end = start + hours + delay hours ─────────────────────────
+# ── item hours: parcels derive from qty/rate, everything else is typed ──
 
-def test_parcel_end_is_start_plus_hours():
-    assert model.parcel_end({'start': '2026-08-14T22:00', 'hours': 20}) \
-        == _dt('2026-08-15 18:00')
-
-
-def test_parcel_end_adds_delay_line_items_to_the_hours():
-    # 20 h of work + 2 h rain + 1.5 h tank change = 23.5 h
-    parcel = {'start': '2026-08-14T22:00', 'hours': 20,
-              'delays': [{'name': 'Rain', 'hours': 2},
-                         {'name': 'Tank change', 'hours': 1.5}]}
-    assert model.parcel_end(parcel) == _dt('2026-08-15 21:30')
+def test_parcel_hours_come_from_quantity_over_flow_rate():
+    assert model.item_hours(_parcel('Furnace Oil', 15000, 1000)) == 15.0
 
 
-def test_parcel_end_ignores_delay_lines_with_no_hours_yet():
-    parcel = {'start': '2026-08-14T22:00', 'hours': 20,
-              'delays': [{'name': 'Rain', 'hours': None}, {'name': '', 'hours': ''}]}
-    assert model.parcel_end(parcel) == _dt('2026-08-15 18:00')
+def test_parcel_hours_can_be_fractional():
+    # 1050 MT at 250 MT/hr = 4.2 h = 4 h 12 min
+    assert model.item_hours(_parcel('Tolune', 1050, 250)) == 4.2
 
 
-def test_parcel_end_is_none_without_hours():
-    # the planner has not said how long it takes — no end time, not an error
-    assert model.parcel_end({'start': '2026-08-14T22:00', 'hours': None}) is None
-    assert model.parcel_end({'start': '2026-08-14T22:00', 'hours': 0}) is None
+def test_parcel_hours_are_none_without_a_usable_rate():
+    assert model.item_hours(_parcel('Furnace Oil', 15000, None)) is None
+    assert model.item_hours(_parcel('Furnace Oil', 15000, 0)) is None
+    assert model.item_hours(_parcel('Furnace Oil', None, 1000)) is None
 
 
-def test_parcel_end_is_none_without_a_start():
-    assert model.parcel_end({'start': None, 'hours': 20}) is None
+def test_doc_and_delay_hours_are_typed_not_derived():
+    assert model.item_hours(_doc('Prior Documentation', 4)) == 4.0
+    assert model.item_hours(_delay('Rain', 2)) == 2.0
+    assert model.item_hours(_delay('Rain', None)) is None
 
 
-def test_a_date_only_stamp_is_read_as_midnight():
-    """vcn_header.doc_date is date-only text. Dropping it on the floor would
-    leave every VCN vessel showing no ETA."""
-    assert model.parcel_end({'start': '2026-08-14', 'hours': 10}) == _dt('2026-08-14 10:00')
+def test_a_typed_rate_never_overrides_a_parcels_derived_hours():
+    """Hours is computed for parcels; a stale 'hours' on the payload must not
+    win, or the table would disagree with its own qty and rate."""
+    stale = {**_parcel('Furnace Oil', 15000, 1000), 'hours': 999}
+    assert model.item_hours(stale) == 15.0
 
 
-def test_delay_only_parcel_has_no_end_without_working_hours():
-    # a parcel that is nothing but delay is not a schedule
-    assert model.parcel_end({'start': '2026-08-14T22:00', 'hours': None,
-                             'delays': [{'name': 'Rain', 'hours': 4}]}) is None
+# ── chaining: each item starts when the previous one ends ──
 
-
-def test_vessel_end_is_the_latest_parcel_because_parcels_run_in_parallel():
-    parcels = [
-        {'start': '2026-08-14T22:00', 'hours': 10},   # ends 08-15 08:00
-        {'start': '2026-08-14T22:00', 'hours': 20},   # ends 08-15 18:00
+def test_chain_runs_items_back_to_back():
+    """The DAWN MANSAROVA R row from the planner's sheet, start to finish."""
+    items = [_doc('Prior Documentation', 4),
+             _parcel('Furnace Oil', 15000, 1000),
+             _doc('Post Documentation', 4),
+             _delay('Select Delay if any', 2)]
+    out = model.chain(items, _dt('2026-08-15 02:00'))
+    assert [(i['start'], i['end']) for i in out] == [
+        (_dt('2026-08-15 02:00'), _dt('2026-08-15 06:00')),
+        (_dt('2026-08-15 06:00'), _dt('2026-08-15 21:00')),
+        (_dt('2026-08-15 21:00'), _dt('2026-08-16 01:00')),
+        (_dt('2026-08-16 01:00'), _dt('2026-08-16 03:00')),
     ]
-    assert model.vessel_end(parcels) == _dt('2026-08-15 18:00')
 
 
-def test_vessel_end_ignores_parcels_with_no_hours_but_still_uses_the_rest():
-    parcels = [
-        {'start': '2026-08-14T22:00', 'hours': 10},
-        {'start': '2026-08-14T22:00', 'hours': None},
-    ]
-    assert model.vessel_end(parcels) == _dt('2026-08-15 08:00')
+def test_chain_carries_fractional_hours_through_to_later_items():
+    """SOUTHERN UNICORN: Tolune must start when SM ends, not when SM starts —
+    this is what makes the plan sequential rather than parallel."""
+    items = [_doc('Prior Documentation', 4),
+             _parcel('SM', 2000, 250),        # 8 h
+             _parcel('Tolune', 1050, 250),    # 4.2 h
+             _doc('Post Documentation', 4)]
+    out = model.chain(items, _dt('2026-08-16 03:00'))
+    assert out[1]['start'] == _dt('2026-08-16 07:00')
+    assert out[2]['start'] == _dt('2026-08-16 15:00')
+    assert out[2]['end'] == _dt('2026-08-16 19:12')
+    assert out[3]['end'] == _dt('2026-08-16 23:12')
 
 
-def test_vessel_end_is_none_when_no_parcel_has_both_start_and_hours():
-    assert model.vessel_end([{'start': None, 'hours': None}]) is None
-    assert model.vessel_end([]) is None
+def test_chain_stops_dead_at_an_item_with_no_hours():
+    """An un-costed line has no end, so nothing after it has a known time —
+    better a visible gap than a schedule built on a guess."""
+    items = [_doc('Prior Documentation', 4),
+             _parcel('Furnace Oil', 15000, None),
+             _doc('Post Documentation', 4)]
+    out = model.chain(items, _dt('2026-08-15 02:00'))
+    assert out[0]['end'] == _dt('2026-08-15 06:00')
+    assert out[1]['start'] == _dt('2026-08-15 06:00') and out[1]['end'] is None
+    assert out[2]['start'] is None and out[2]['end'] is None
 
 
-def test_vessel_start_is_the_earliest_parcel_start():
-    parcels = [
-        {'start': '2026-08-15T06:00', 'hours': 1},
-        {'start': '2026-08-14T22:00', 'hours': 1},
-        {'start': None, 'hours': 1},
-    ]
-    assert model.vessel_start(parcels) == _dt('2026-08-14 22:00')
+def test_chain_with_no_start_gives_every_item_no_time():
+    items = [_doc('Prior Documentation', 4), _parcel('Furnace Oil', 15000, 1000)]
+    out = model.chain(items, None)
+    assert all(i['start'] is None and i['end'] is None for i in out)
 
 
-# ── lane conflicts: a planned vessel starting before the one ahead of it ends ──
-
-def _plan(source_id, start, hours=10, delays=None):
-    return {'source': 'EV', 'source_id': source_id,
-            'parcels': [{'cargo': 'HSD', 'qty': 4800, 'start': start,
-                         'hours': hours, 'delays': delays or []}]}
-
-
-def test_plan_conflicts_when_it_starts_before_the_berthed_vessel_finishes():
-    lane = model.annotate_lane(
-        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
-        plans=[_plan(1, '2026-08-15T12:00')],
-    )
-    assert lane[0]['conflict_with'] == 'SC GARNET'
+def test_vessel_end_is_the_last_items_end_not_the_longest():
+    items = [_doc('Prior Documentation', 4),
+             _parcel('SM', 2000, 250),
+             _parcel('Tolune', 1050, 250),
+             _doc('Post Documentation', 4)]
+    assert model.vessel_end(items, _dt('2026-08-16 03:00')) == _dt('2026-08-16 23:12')
 
 
-def test_plan_is_clear_when_it_starts_after_the_berthed_vessel_finishes():
-    lane = model.annotate_lane(
-        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
-        plans=[_plan(1, '2026-08-15T19:00')],
-    )
-    assert lane[0]['conflict_with'] is None
+def test_vessel_end_is_none_when_the_chain_breaks():
+    items = [_doc('Prior Documentation', 4), _parcel('X', 100, None)]
+    assert model.vessel_end(items, _dt('2026-08-16 03:00')) is None
 
 
-def test_plan_starting_exactly_at_the_previous_end_is_not_a_conflict():
-    lane = model.annotate_lane(
-        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
-        plans=[_plan(1, '2026-08-15T18:00')],
-    )
-    assert lane[0]['conflict_with'] is None
+# ── pipelines are resources: same pipe queues, different pipes overlap ──
+
+def test_parcels_on_different_pipelines_run_at_the_same_time():
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 10 h
+             _parcel('B1', 600, 100, 'P-2')]       # 6 h
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[1]['start'] == _dt('2026-08-16 12:00')
+    assert out[2]['start'] == _dt('2026-08-16 12:00'), 'P-2 was free — should not wait for P-1'
+    assert out[1]['end'] == _dt('2026-08-16 22:00')
+    assert out[2]['end'] == _dt('2026-08-16 18:00')
 
 
-def test_second_plan_conflicts_with_the_first_plan_ahead_of_it():
-    # MT ASHOK runs 08-15 18:00 -> 08-16 04:00 (10 h)
-    lane = model.annotate_lane(
-        occupied=[],
-        plans=[
-            {**_plan(1, '2026-08-15T18:00'), 'vessel_name': 'MT ASHOK'},
-            {**_plan(2, '2026-08-16T00:00'), 'vessel_name': 'NEW HOPE'},
-        ],
-    )
-    assert lane[0]['conflict_with'] is None
-    assert lane[1]['conflict_with'] == 'MT ASHOK'
+def test_a_second_parcel_on_the_same_pipeline_waits_for_the_first():
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 12:00 -> 22:00
+             _parcel('A2', 500, 100, 'P-1')]       # must wait: same pipe
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[2]['start'] == _dt('2026-08-16 22:00')
+    assert out[2]['end'] == _dt('2026-08-17 03:00')
 
 
-def test_a_delay_line_can_push_the_next_vessel_into_conflict():
-    """The point of delay lines: 4 h of rain on the vessel ahead means the one
-    behind it no longer fits where it was planned."""
-    ahead_clean = {**_plan(1, '2026-08-15T18:00'), 'vessel_name': 'MT ASHOK'}
-    behind = {**_plan(2, '2026-08-16T04:00'), 'vessel_name': 'NEW HOPE'}
-    assert model.annotate_lane([], [ahead_clean, behind])[1]['conflict_with'] is None
-
-    ahead_delayed = {**_plan(1, '2026-08-15T18:00', delays=[{'name': 'Rain', 'hours': 4}]),
-                     'vessel_name': 'MT ASHOK'}
-    assert model.annotate_lane([], [ahead_delayed, behind])[1]['conflict_with'] == 'MT ASHOK'
-
-
-def test_unhoured_plan_ahead_does_not_falsely_clear_the_one_behind_it():
-    lane = model.annotate_lane(
-        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
-        plans=[
-            {**_plan(1, '2026-08-15T20:00', hours=None), 'vessel_name': 'MT ASHOK'},
-            {**_plan(2, '2026-08-15T12:00'), 'vessel_name': 'NEW HOPE'},
-        ],
-    )
-    assert lane[1]['conflict_with'] == 'SC GARNET'
+def test_post_documentation_waits_for_every_pipeline_to_finish():
+    """A documentation line is a barrier — it cannot start while any line is
+    still running, and nothing may start before it ends."""
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 12:00 -> 22:00
+             _parcel('B1', 600, 100, 'P-2'),       # 12:00 -> 18:00
+             _parcel('A2', 500, 100, 'P-1'),       # 22:00 -> 03:00
+             _doc('Post Documentation', 4)]
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[4]['start'] == _dt('2026-08-17 03:00'), 'must wait for the last line'
+    assert out[4]['end'] == _dt('2026-08-17 07:00')
+    assert model.vessel_end(items, _dt('2026-08-16 08:00')) == _dt('2026-08-17 07:00')
 
 
-# ── queueing: a vessel dropped behind another starts when the berth frees ──
-
-def test_lane_free_at_is_the_latest_end_in_the_lane():
-    assert model.lane_free_at(
-        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
-        plans=[_plan(1, '2026-08-15T18:00')],          # 10 h -> 08-16 04:00
-    ) == _dt('2026-08-16 04:00')
-
-
-def test_lane_free_at_is_none_for_an_empty_berth():
-    assert model.lane_free_at(occupied=[], plans=[]) is None
+def test_a_barrier_frees_every_pipeline_behind_it():
+    items = [_parcel('A1', 1000, 100, 'P-1'),      # 08:00 -> 18:00
+             _doc('Post Documentation', 4),        # 18:00 -> 22:00
+             _parcel('A2', 200, 100, 'P-1')]       # P-1 is free again after the barrier
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[2]['start'] == _dt('2026-08-16 22:00')
 
 
-def test_lane_free_at_ignores_plans_with_no_hours_yet():
-    assert model.lane_free_at(
-        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
-        plans=[_plan(1, '2026-08-15T20:00', hours=None)],
-    ) == _dt('2026-08-15 18:00')
+def test_a_parcel_with_no_pipeline_named_blocks_everything():
+    """Without a pipeline we cannot know what it competes with, so it is
+    treated as a barrier — conservative, never optimistic."""
+    items = [_parcel('A1', 1000, 100, 'P-1'),      # 08:00 -> 18:00
+             _parcel('Unknown', 200, 100, None),   # barrier: waits for P-1
+             _parcel('B1', 300, 100, 'P-2')]
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[1]['start'] == _dt('2026-08-16 18:00')
+    assert out[2]['start'] == _dt('2026-08-16 20:00'), 'must wait for the barrier'
 
 
-def test_seed_parcels_starts_the_new_vessel_when_the_berth_frees(berths, ev_id):
+def test_a_delay_on_one_pipeline_only_holds_that_pipeline():
+    items = [_parcel('A1', 1000, 100, 'P-1'),                     # 08:00 -> 18:00
+             {**_delay('Cargo Pigging', 2), 'pipeline': 'P-1'},   # 18:00 -> 20:00
+             _parcel('A2', 100, 100, 'P-1'),                      # 20:00 -> 21:00
+             _parcel('B1', 300, 100, 'P-2')]                      # unaffected
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[1]['start'] == _dt('2026-08-16 18:00')
+    assert out[2]['start'] == _dt('2026-08-16 20:00')
+    assert out[3]['start'] == _dt('2026-08-16 08:00'), 'P-2 never touched P-1'
+
+
+def test_a_vessel_that_cannot_discharge_simultaneously_runs_one_line_at_a_time():
+    """Some ships cannot work two lines at once whatever the berth offers —
+    the limit is their own pumps, so the pipelines stop granting any overlap."""
+    items = [_doc('Prior Documentation', 4),
+             _parcel('A1', 1000, 100, 'P-1'),      # 10 h
+             _parcel('B1', 600, 100, 'P-2')]       # 6 h, different pipeline
+    out = model.chain(items, _dt('2026-08-16 08:00'), simultaneous=False)
+    assert out[1]['start'] == _dt('2026-08-16 12:00')
+    assert out[2]['start'] == _dt('2026-08-16 22:00'), 'must wait: vessel works one line'
+    assert out[2]['end'] == _dt('2026-08-17 04:00')
+
+
+def test_simultaneous_discharge_is_the_default():
+    items = [_parcel('A1', 1000, 100, 'P-1'), _parcel('B1', 600, 100, 'P-2')]
+    assert model.chain(items, _dt('2026-08-16 08:00'))[1]['start'] == _dt('2026-08-16 08:00')
+
+
+def test_vessel_end_respects_a_non_simultaneous_vessel():
+    items = [_parcel('A1', 1000, 100, 'P-1'), _parcel('B1', 600, 100, 'P-2')]
+    start = _dt('2026-08-16 08:00')
+    assert model.vessel_end(items, start, simultaneous=True) == _dt('2026-08-16 18:00')
+    assert model.vessel_end(items, start, simultaneous=False) == _dt('2026-08-17 00:00')
+
+
+def test_a_non_simultaneous_vessel_still_queues_the_next_vessel_correctly(berths, ev_id):
+    model.save_plan('EV', ev_id, berths[0],
+                    [_parcel('A1', 1000, 100, 'P-1'), _parcel('B1', 600, 100, 'P-2')],
+                    '2026-08-16T08:00', 'tester', simultaneous=False)
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    plan = lane['plans'][0]
+    assert plan['simultaneous'] is False
+    # 4 h prior doc, then 10 h + 6 h back to back, then 4 h post doc
+    assert plan['end'] == '2026-08-17T08:00'
+
+
+def test_a_plan_defaults_to_allowing_simultaneous_discharge(berths, ev_id):
+    model.save_plan('EV', ev_id, berths[0], model.default_items(), None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    assert lane['plans'][0]['simultaneous'] is True
+
+
+def test_a_broken_line_only_poisons_its_own_pipeline_until_the_next_barrier():
+    items = [_parcel('A1', 1000, None, 'P-1'),     # no rate: no end
+             _parcel('A2', 100, 100, 'P-1'),       # behind the broken one
+             _parcel('B1', 300, 100, 'P-2')]       # a different pipe, still fine
+    out = model.chain(items, _dt('2026-08-16 08:00'))
+    assert out[0]['end'] is None
+    assert out[1]['start'] is None, 'same pipeline as the broken line'
+    assert out[2]['start'] == _dt('2026-08-16 08:00')
+    assert out[2]['end'] == _dt('2026-08-16 11:00')
+
+
+# ── the fixed bookends ──
+
+def test_default_items_are_the_two_documentation_bookends():
+    items = model.default_items()
+    assert [i['name'] for i in items] == ['Prior Documentation', 'Post Documentation']
+    assert all(i['kind'] == 'doc' and i['fixed'] is True for i in items)
+    assert [i['hours'] for i in items] == [model.DOC_HOURS, model.DOC_HOURS]
+
+
+def test_seeded_parcels_land_between_the_bookends(berths, ev_id):
+    items = model.seed_items('EV', ev_id, berths[0])
+    assert [i['name'] for i in items] == ['Prior Documentation', 'HSD', 'Post Documentation']
+    assert items[1]['kind'] == 'parcel' and items[1]['qty'] == 9600.0
+
+
+def test_stored_items_always_carry_the_full_key_set(berths, ev_id):
+    """Callers may omit keys that don't apply to their kind; storing a ragged
+    shape pushes the missing-key handling onto every reader."""
+    model.save_plan('EV', ev_id, berths[0],
+                    [{'kind': 'delay', 'name': 'Rain', 'hours': 2}], None, 'tester')
     conn = get_db(); cur = get_cursor(conn)
-    cur.execute("INSERT INTO expected_vessels (vessel_name, doc_status, cargo_name, quantity) "
-                "VALUES ('ZZ AHEAD', 'Pending', 'HSD', '4800') RETURNING id")
-    ahead = cur.fetchone()['id']
-    cur.execute("UPDATE expected_vessels SET cargo_name='MS', quantity='2400' WHERE id=%s", [ev_id])
+    cur.execute('SELECT items FROM berth_plan WHERE ev_id=%s', [ev_id])
+    items = cur.fetchone()['items']; conn.close()
+    for it in items:
+        assert set(it) == model.ITEM_KEYS, it
+
+
+def test_save_plan_reinstates_missing_bookends(berths, ev_id):
+    """The bookends are fixed for every vessel — a payload without them is
+    repaired rather than rejected, so the plan can never lose its documentation."""
+    model.save_plan('EV', ev_id, berths[0], [_parcel('HSD', 9600, 800)], None, 'tester')
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute('SELECT items FROM berth_plan WHERE ev_id=%s', [ev_id])
+    items = cur.fetchone()['items']; conn.close()
+    assert [i['name'] for i in items] == ['Prior Documentation', 'HSD', 'Post Documentation']
+
+
+# ── lane chaining: a vessel starts when the one before it ends ──
+
+def test_second_vessel_in_a_lane_starts_when_the_first_ends():
+    """DAWN ends 16/08 03:00, so SOUTHERN starts there — no retyping."""
+    dawn = {'source': 'EV', 'source_id': 1, 'vessel_name': 'DAWN MANSAROVA R',
+            'start_dt': _dt('2026-08-15 02:00'),
+            'items': [_doc('Prior Documentation', 4),
+                      _parcel('Furnace Oil', 15000, 1000),
+                      _doc('Post Documentation', 4),
+                      _delay('Select Delay if any', 2)]}
+    southern = {'source': 'EV', 'source_id': 2, 'vessel_name': 'SOUTHERN UNICORN',
+                'start_dt': None,
+                'items': [_doc('Prior Documentation', 4),
+                          _parcel('SM', 2000, 250),
+                          _parcel('Tolune', 1050, 250),
+                          _doc('Post Documentation', 4)]}
+    lane = model.annotate_lane([], [dawn, southern])
+    assert lane[0]['end'] == _dt('2026-08-16 03:00')
+    assert lane[1]['start'] == _dt('2026-08-16 03:00')
+    assert lane[1]['end'] == _dt('2026-08-16 23:12')
+
+
+def test_the_first_vessel_starts_after_the_berthed_vessel_finishes():
+    plan = {'source': 'EV', 'source_id': 1, 'vessel_name': 'MT ASHOK', 'start_dt': None,
+            'items': [_doc('Prior Documentation', 4)]}
+    lane = model.annotate_lane(
+        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
+        plans=[plan])
+    assert lane[0]['start'] == _dt('2026-08-15 18:00')
+    assert lane[0]['end'] == _dt('2026-08-15 22:00')
+
+
+def test_an_explicit_start_overrides_the_chain():
+    """The planner can pin a vessel's start; the sheet's first vessel is typed."""
+    first = {'source': 'EV', 'source_id': 1, 'vessel_name': 'A', 'start_dt': None,
+             'items': [_doc('Prior Documentation', 4)]}
+    pinned = {'source': 'EV', 'source_id': 2, 'vessel_name': 'B',
+              'start_dt': _dt('2026-08-20 09:00'),
+              'items': [_doc('Prior Documentation', 4)]}
+    lane = model.annotate_lane(
+        occupied=[{'vessel_name': 'SC GARNET', 'end': _dt('2026-08-15 18:00')}],
+        plans=[first, pinned])
+    assert lane[0]['start'] == _dt('2026-08-15 18:00')
+    assert lane[1]['start'] == _dt('2026-08-20 09:00')
+
+
+def test_a_pinned_start_before_the_previous_vessel_ends_is_flagged():
+    first = {'source': 'EV', 'source_id': 1, 'vessel_name': 'A',
+             'start_dt': _dt('2026-08-15 02:00'),
+             'items': [_doc('Prior Documentation', 4)]}          # ends 06:00
+    clash = {'source': 'EV', 'source_id': 2, 'vessel_name': 'B',
+             'start_dt': _dt('2026-08-15 04:00'),
+             'items': [_doc('Prior Documentation', 4)]}
+    lane = model.annotate_lane([], [first, clash])
+    assert lane[0]['conflict_with'] is None
+    assert lane[1]['conflict_with'] == 'A'
+
+
+def test_a_broken_chain_leaves_the_next_vessel_unscheduled():
+    """No end on the vessel ahead means no derived start for the one behind."""
+    broken = {'source': 'EV', 'source_id': 1, 'vessel_name': 'A',
+              'start_dt': _dt('2026-08-15 02:00'),
+              'items': [_parcel('X', 100, None)]}
+    behind = {'source': 'EV', 'source_id': 2, 'vessel_name': 'B', 'start_dt': None,
+              'items': [_doc('Prior Documentation', 4)]}
+    lane = model.annotate_lane([], [broken, behind])
+    assert lane[0]['end'] is None
+    assert lane[1]['start'] is None and lane[1]['conflict_with'] is None
+
+
+# ── a vessel actually alongside shows on the plan, read-only ──
+
+@pytest.fixture
+def berthed(berths):
+    """A vessel actually at a berth: VCN -> parcel -> LDUD -> parcel op, with
+    an alongside time so RP01 counts it as berthed."""
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("""INSERT INTO vcn_header (operation_type, vessel_name, berth_name, cargo_type)
+                   VALUES ('Import', 'ZZ BERTHED VESSEL', %s, 'HSD') RETURNING id""", [berths[0]])
+    vcn = cur.fetchone()['id']
+    cur.execute("""INSERT INTO vcn_consigners (vcn_id, cargo_name, quantity, parcel_seq,
+                                               parcel_no, pipeline_name)
+                   VALUES (%s,'HSD','5000',1,'P1','P1') RETURNING id""", [vcn])
+    parcel = cur.fetchone()['id']
+    cur.execute("""INSERT INTO ldud_header (vcn_id, alongside_datetime)
+                   VALUES (%s, now() - interval '6 hours') RETURNING id""", [vcn])
+    ldud = cur.fetchone()['id']
+    cur.execute("""INSERT INTO ldud_parcel_ops (ldud_id, parcel_ids, cargo_name, quantity, start_dt)
+                   VALUES (%s,%s,'HSD','5000',
+                           to_char(now() - interval '5 hours', 'YYYY-MM-DD"T"HH24:MI'))
+                   RETURNING id""", [ldud, str(parcel)])
+    op = cur.fetchone()['id']
+    # some logged progress, so there is an actual rate and therefore an ETC
+    cur.execute("""INSERT INTO lueu_parcel_log (parcel_op_id, entry_date, from_time, to_time, quantity)
+                   VALUES (%s, to_char(now() - interval '5 hours', 'YYYY-MM-DD'),
+                           '08:00', '12:00', 1000)""", [op])
     conn.commit(); conn.close()
     try:
-        model.save_plan('EV', ahead, berths[0],
-                        [{'cargo': 'HSD', 'qty': 4800, 'start': '2026-08-15T18:00',
-                          'hours': 10, 'delays': []}], 'tester')
-        parcels = model.seed_parcels('EV', ev_id, berths[0])
-        assert [p['start'] for p in parcels] == ['2026-08-16T04:00']
+        yield {'vcn_id': vcn, 'berth': berths[0], 'parcel_op': op}
     finally:
         conn = get_db(); cur = get_cursor(conn)
-        cur.execute('DELETE FROM berth_plan WHERE ev_id=%s', [ahead])
-        cur.execute('DELETE FROM expected_vessels WHERE id=%s', [ahead])
+        cur.execute('DELETE FROM lueu_parcel_log WHERE parcel_op_id=%s', [op])
+        cur.execute('DELETE FROM ldud_parcel_ops WHERE id=%s', [op])
+        cur.execute('DELETE FROM ldud_header WHERE id=%s', [ldud])
+        cur.execute('DELETE FROM vcn_header WHERE id=%s', [vcn])
         conn.commit(); conn.close()
 
 
-def test_seed_parcels_leaves_start_and_hours_blank_on_a_free_berth(berths, ev_id):
-    conn = get_db(); cur = get_cursor(conn)
-    cur.execute("UPDATE expected_vessels SET cargo_name='HSD,MS', quantity='9600,4800' "
-                "WHERE id=%s", [ev_id])
-    conn.commit(); conn.close()
-    parcels = model.seed_parcels('EV', ev_id, berths[0])
-    assert [p['cargo'] for p in parcels] == ['HSD', 'MS']
-    assert [p['start'] for p in parcels] == [None, None]
-    assert [p['hours'] for p in parcels] == [None, None]
-    assert [p['delays'] for p in parcels] == [[], []]
+def test_a_berthed_vessel_appears_in_its_lane(berthed):
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berthed['berth'])
+    names = [o['vessel_name'] for o in lane['occupied']]
+    assert 'ZZ BERTHED VESSEL' in names
 
 
-def test_seed_parcels_for_a_vcn_uses_its_own_declared_parcels(berths, vcn_id):
-    """A VCN already declares its parcels — seed from those rather than make
-    the planner retype what the system knows."""
+def test_a_berthed_vessel_is_marked_read_only(berthed):
+    """It is what is happening, not what someone plans — the page must not
+    offer to edit it."""
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berthed['berth'])
+    occ = next(o for o in lane['occupied'] if o['vessel_name'] == 'ZZ BERTHED VESSEL')
+    assert occ['readonly'] is True
+
+
+def test_a_berthed_vessel_carries_its_actual_parcel_rows(berthed):
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berthed['berth'])
+    occ = next(o for o in lane['occupied'] if o['vessel_name'] == 'ZZ BERTHED VESSEL')
+    assert [i['name'] for i in occ['items']] == ['P1']
+    assert occ['items'][0]['qty'] == 5000.0
+    assert occ['items'][0]['kind'] == 'parcel'
+
+
+def test_planned_vessels_queue_behind_the_berthed_ones_etc(berths, berthed, ev_id):
+    """The whole point of showing it: the plan starts where reality ends."""
+    model.save_plan('EV', ev_id, berths[0], model.default_items(), None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    occ_end = next(o['end'] for o in lane['occupied'] if o['vessel_name'] == 'ZZ BERTHED VESSEL')
+    assert occ_end, 'berthed vessel should have an ETC to queue behind'
+    assert lane['plans'][0]['start'] == occ_end
+
+
+# ── linkage: a planned parcel on a VCN points at a real declared parcel ──
+
+@pytest.fixture
+def vcn_with_parcels(vcn_id):
+    """A VCN with two declared parcels, and their row ids."""
     conn = get_db(); cur = get_cursor(conn)
+    ids = []
     for seq, (cargo, qty) in enumerate([('HSD', '9600'), ('MS', '4800')], start=1):
         cur.execute('''INSERT INTO vcn_consigners (vcn_id, cargo_name, quantity, parcel_seq, parcel_no)
-                       VALUES (%s,%s,%s,%s,%s)''', [vcn_id, cargo, qty, seq, f'P{seq}'])
+                       VALUES (%s,%s,%s,%s,%s) RETURNING id''',
+                    [vcn_id, cargo, qty, seq, f'P{seq}'])
+        ids.append(cur.fetchone()['id'])
     conn.commit(); conn.close()
-    parcels = model.seed_parcels('VCN', vcn_id, berths[0])
-    assert [(p['cargo'], p['qty']) for p in parcels] == [('HSD', 9600.0), ('MS', 4800.0)]
-    assert [p['hours'] for p in parcels] == [None, None]
+    return {'vcn_id': vcn_id, 'parcel_ids': ids}
 
 
-# ── payload guard: parcels is JSONB written straight from the browser ──
+def test_seeded_vcn_parcels_are_linked_to_their_source_rows(berths, vcn_with_parcels):
+    items = model.seed_items('VCN', vcn_with_parcels['vcn_id'], berths[0])
+    parcels = [i for i in items if i['kind'] == 'parcel']
+    assert [i['parcel_id'] for i in parcels] == vcn_with_parcels['parcel_ids']
+
+
+def test_a_linked_parcel_tracks_the_vcn_rather_than_its_stored_copy(berths, vcn_with_parcels):
+    """The whole point of linking: when the VCN parcel changes, the plan
+    follows instead of quietly holding a stale number."""
+    vcn, pid = vcn_with_parcels['vcn_id'], vcn_with_parcels['parcel_ids'][0]
+    model.save_plan('VCN', vcn, berths[0],
+                    [_parcel('WRONG NAME', 1, 100, 'P-1', parcel_id=pid)], None, 'tester')
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("UPDATE vcn_consigners SET quantity='7777' WHERE id=%s", [pid])
+    conn.commit(); conn.close()
+
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    item = next(i for i in lane['plans'][0]['items'] if i['kind'] == 'parcel')
+    assert item['qty'] == 7777.0, 'linked qty must come from the VCN parcel'
+    assert item['name'] == 'P1', 'linked name must come from the VCN parcel'
+
+
+def test_a_vcn_plan_offers_its_declared_parcels_to_pick_from(berths, vcn_with_parcels):
+    model.save_plan('VCN', vcn_with_parcels['vcn_id'], berths[0],
+                    model.default_items(), None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    available = lane['plans'][0]['available_parcels']
+    assert [a['id'] for a in available] == vcn_with_parcels['parcel_ids']
+    assert [a['name'] for a in available] == ['P1', 'P2']
+
+
+def test_save_plan_rejects_a_parcel_id_from_another_vessel(berths, vcn_with_parcels, ev_id):
+    """A trust-boundary check: the link must be to this vessel's own parcel."""
+    other = vcn_with_parcels['parcel_ids'][0]
+    with pytest.raises(ValueError, match='parcel_id'):
+        model.save_plan('EV', ev_id, berths[0],
+                        [_parcel('X', 1, 1, 'P-1', parcel_id=other)], None, 'tester')
+
+
+def test_an_ev01_vessel_keeps_free_text_parcels(berths, ev_id):
+    """Pre-VCN there is nothing to link to, so the name stays as typed."""
+    model.save_plan('EV', ev_id, berths[0],
+                    [_parcel('SOME CARGO', 500, 100, 'P-1')], None, 'tester')
+    lane = next(l for l in model.get_canvas()['lanes'] if l['berth_name'] == berths[0])
+    item = next(i for i in lane['plans'][0]['items'] if i['kind'] == 'parcel')
+    assert item['name'] == 'SOME CARGO' and item['qty'] == 500.0
+    assert lane['plans'][0]['available_parcels'] == []
+
+
+# ── payload guard: items is JSONB written straight from the browser ──
 
 def test_save_plan_rejects_a_berth_that_is_not_in_the_master(ev_id):
     with pytest.raises(ValueError, match='berth'):
-        model.save_plan('EV', ev_id, 'NOT A REAL BERTH', [], 'tester')
+        model.save_plan('EV', ev_id, 'NOT A REAL BERTH', [], None, 'tester')
 
 
 def test_save_plan_rejects_an_unknown_source(berths, ev_id):
     with pytest.raises(ValueError, match='source'):
-        model.save_plan('BARGE', ev_id, berths[0], [], 'tester')
+        model.save_plan('BARGE', ev_id, berths[0], [], None, 'tester')
 
 
-def test_save_plan_rejects_parcels_that_are_not_a_list(berths, ev_id):
-    with pytest.raises(ValueError, match='parcels'):
-        model.save_plan('EV', ev_id, berths[0], {'cargo': 'HSD'}, 'tester')
+def test_save_plan_rejects_items_that_are_not_a_list(berths, ev_id):
+    with pytest.raises(ValueError, match='items'):
+        model.save_plan('EV', ev_id, berths[0], {'kind': 'parcel'}, None, 'tester')
 
 
-def test_save_plan_rejects_a_parcel_with_an_unknown_key(berths, ev_id):
-    with pytest.raises(ValueError, match='parcels'):
+def test_save_plan_rejects_an_item_with_an_unknown_key(berths, ev_id):
+    with pytest.raises(ValueError, match='items'):
         model.save_plan('EV', ev_id, berths[0],
-                        [{'cargo': 'HSD', 'qty': 1, 'start': None, 'hours': 1,
-                          'delays': [], 'evil': 'x'}], 'tester')
+                        [{**_parcel('HSD', 1, 1), 'evil': 'x'}], None, 'tester')
 
 
-def test_save_plan_rejects_non_numeric_hours(berths, ev_id):
-    with pytest.raises(ValueError, match='parcels'):
+def test_save_plan_rejects_an_unknown_item_kind(berths, ev_id):
+    with pytest.raises(ValueError, match='kind'):
         model.save_plan('EV', ev_id, berths[0],
-                        [{'cargo': 'HSD', 'qty': 1, 'start': None,
-                          'hours': 'ages', 'delays': []}], 'tester')
+                        [{'kind': 'sabotage', 'name': 'x'}], None, 'tester')
 
 
-def test_save_plan_rejects_delays_that_are_not_a_list(berths, ev_id):
-    with pytest.raises(ValueError, match='delays'):
+def test_save_plan_rejects_a_non_numeric_flow_rate(berths, ev_id):
+    with pytest.raises(ValueError, match='items'):
         model.save_plan('EV', ev_id, berths[0],
-                        [{'cargo': 'HSD', 'qty': 1, 'start': None, 'hours': 1,
-                          'delays': 'Rain'}], 'tester')
+                        [_parcel('HSD', 100, 'fast')], None, 'tester')
 
 
-def test_save_plan_rejects_a_delay_line_with_a_bad_shape(berths, ev_id):
-    with pytest.raises(ValueError, match='delays'):
-        model.save_plan('EV', ev_id, berths[0],
-                        [{'cargo': 'HSD', 'qty': 1, 'start': None, 'hours': 1,
-                          'delays': [{'name': 'Rain', 'hours': 'lots'}]}], 'tester')
+def test_save_plan_rejects_a_bad_start(berths, ev_id):
+    with pytest.raises(ValueError, match='start'):
+        model.save_plan('EV', ev_id, berths[0], [], 'whenever', 'tester')
 
 
 # ── sources: a plan hangs off exactly one of EV01 or a VCN ──
 
 def test_a_vcn_vessel_can_be_planned(berths, vcn_id):
-    model.save_plan('VCN', vcn_id, berths[0],
-                    [{'cargo': 'HSD', 'qty': 4800, 'start': '2026-08-15T18:00',
-                      'hours': 10, 'delays': []}], 'tester')
+    model.save_plan('VCN', vcn_id, berths[0], model.default_items(),
+                    '2026-08-15T02:00', 'tester')
     conn = get_db(); cur = get_cursor(conn)
-    cur.execute('SELECT ev_id, vcn_id, berth_name FROM berth_plan WHERE vcn_id=%s', [vcn_id])
+    cur.execute('SELECT ev_id, vcn_id, start_dt FROM berth_plan WHERE vcn_id=%s', [vcn_id])
     row = cur.fetchone(); conn.close()
     assert row['ev_id'] is None and row['vcn_id'] == vcn_id
-    assert row['berth_name'] == berths[0]
+    assert row['start_dt'] == _dt('2026-08-15 02:00')
+
+
+def test_seed_items_for_a_vcn_uses_its_own_declared_parcels(berths, vcn_id):
+    conn = get_db(); cur = get_cursor(conn)
+    for seq, (cargo, qty) in enumerate([('HSD', '9600'), ('MS', '4800')], start=1):
+        cur.execute('''INSERT INTO vcn_consigners (vcn_id, cargo_name, quantity, parcel_seq, parcel_no)
+                       VALUES (%s,%s,%s,%s,%s)''', [vcn_id, cargo, qty, seq, f'P{seq}'])
+    conn.commit(); conn.close()
+    items = model.seed_items('VCN', vcn_id, berths[0])
+    # a linked line is named by the parcel it points at, not by its cargo —
+    # the parcel number is the identity the plan has to track
+    assert [i['name'] for i in items] == \
+        ['Prior Documentation', 'P1', 'P2', 'Post Documentation']
+    assert [i['qty'] for i in items[1:3]] == [9600.0, 4800.0]
+    assert all(i['rate'] is None for i in items[1:3]), 'flow rate is the planner\'s to set'
 
 
 def test_plan_is_deleted_when_its_expected_vessel_is_deleted(berths, ev_id):
-    """EV01 deletes the expected_vessels row on move-to-VCN. The ON DELETE
-    CASCADE is the entire cleanup story, so it must actually be there."""
-    model.save_plan('EV', ev_id, berths[0], [], 'tester')
+    model.save_plan('EV', ev_id, berths[0], [], None, 'tester')
     conn = get_db(); cur = get_cursor(conn)
     cur.execute('DELETE FROM expected_vessels WHERE id=%s', [ev_id])
     conn.commit()
@@ -347,7 +616,7 @@ def test_plan_is_deleted_when_its_expected_vessel_is_deleted(berths, ev_id):
 
 
 def test_plan_is_deleted_when_its_vcn_is_deleted(berths, vcn_id):
-    model.save_plan('VCN', vcn_id, berths[0], [], 'tester')
+    model.save_plan('VCN', vcn_id, berths[0], [], None, 'tester')
     conn = get_db(); cur = get_cursor(conn)
     cur.execute('DELETE FROM vcn_header WHERE id=%s', [vcn_id])
     conn.commit()
@@ -357,7 +626,6 @@ def test_plan_is_deleted_when_its_vcn_is_deleted(berths, vcn_id):
 
 
 def test_a_plan_row_cannot_carry_both_sources(berths, ev_id, vcn_id):
-    """The CHECK constraint is what stops a plan being two vessels at once."""
     conn = get_db(); cur = get_cursor(conn)
     with pytest.raises(Exception):
         cur.execute('INSERT INTO berth_plan (ev_id, vcn_id, berth_name) VALUES (%s,%s,%s)',
@@ -367,20 +635,10 @@ def test_a_plan_row_cannot_carry_both_sources(berths, ev_id, vcn_id):
 
 
 def test_saving_the_same_vessel_twice_moves_it_rather_than_duplicating_it(berths, ev_id):
-    model.save_plan('EV', ev_id, berths[0], [], 'tester')
-    model.save_plan('EV', ev_id, berths[1], [], 'tester')
+    model.save_plan('EV', ev_id, berths[0], [], None, 'tester')
+    model.save_plan('EV', ev_id, berths[1], [], None, 'tester')
     conn = get_db(); cur = get_cursor(conn)
     cur.execute('SELECT berth_name FROM berth_plan WHERE ev_id=%s', [ev_id])
     rows = cur.fetchall(); conn.close()
     assert len(rows) == 1, 'UNIQUE(ev_id) missing — vessel planned at two berths'
-    assert rows[0]['berth_name'] == berths[1]
-
-
-def test_saving_the_same_vcn_twice_moves_it_rather_than_duplicating_it(berths, vcn_id):
-    model.save_plan('VCN', vcn_id, berths[0], [], 'tester')
-    model.save_plan('VCN', vcn_id, berths[1], [], 'tester')
-    conn = get_db(); cur = get_cursor(conn)
-    cur.execute('SELECT berth_name FROM berth_plan WHERE vcn_id=%s', [vcn_id])
-    rows = cur.fetchall(); conn.close()
-    assert len(rows) == 1, 'UNIQUE(vcn_id) missing — VCN planned at two berths'
     assert rows[0]['berth_name'] == berths[1]

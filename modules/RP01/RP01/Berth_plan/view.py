@@ -621,6 +621,9 @@ def _base_row(cur, h):
             cargo_val = re.sub(r'\\s*\\[.*\\]', '', raw_cargo).strip() or raw_cargo
 
     return {
+        # carried through so callers can reach the vessel's own parcels
+        # (BPL01 renders them read-only); ignored by this module's own output
+        'vcn_id': h.get('vcn_id'),
         'via_no': h.get('via_number') or '',
         'vessel_name': h.get('vessel_name') or '',
         'loa': h.get('loa'),

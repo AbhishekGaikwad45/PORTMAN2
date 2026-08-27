@@ -62,62 +62,71 @@
     font-size: 11px; font-weight: 700; color: #0F172A;
     display: flex; align-items: center; gap: 8px;
 }
-.bpl-lane-hdr .axis { margin-left: auto; font-size: 9px; font-weight: 500; color: #94A3B8; }
-.bpl-lane-body { padding: 8px 12px; min-height: 34px; }
+.bpl-lane-hdr .free { margin-left: auto; font-size: 9px; font-weight: 500; color: #94A3B8; }
+.bpl-lane-body { padding: 10px 12px; min-height: 34px; }
 
-.bpl-vessel { margin-bottom: 12px; }
+/* one vessel block: title bar + its line-item table */
+.bpl-vessel { margin-bottom: 14px; }
 .bpl-vessel:last-child { margin-bottom: 0; }
-.bpl-vessel-hdr { display: flex; align-items: baseline; gap: 8px; font-size: 11px; margin-bottom: 4px; }
+.bpl-vessel-hdr {
+    display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 4px;
+    border: 1px solid #F59E0B; border-radius: 4px; padding: 3px 8px; background: #FFFBEB;
+}
 .bpl-vessel-hdr b { color: #0F172A; }
+.bpl-vessel-hdr .times { margin-left: auto; font-family: 'DM Mono', monospace; color: #475569; }
+.bpl-sim { font-size: 10px; color: #475569; display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.bpl-sim input { cursor: pointer; }
 .bpl-tag {
     font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
     padding: 1px 6px; border-radius: 999px;
 }
 .bpl-tag.actual { background: #DCFCE7; color: #15803D; }
-.bpl-tag.plan   { background: #DBEAFE; color: #1D4ED8; }
-.bpl-etc { font-size: 10px; color: #64748B; }
 .bpl-conflict {
     font-size: 10px; font-weight: 600; color: #B91C1C;
     background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; padding: 1px 6px;
 }
-.bpl-vessel.conflict { outline: 2px solid #FCA5A5; outline-offset: 3px; border-radius: 4px; }
+.bpl-vessel.conflict .bpl-vessel-hdr { border-color: #DC2626; background: #FEF2F2; }
+/* actuals: rendered, never editable */
+table.bpl-items.readonly td { background: #F8FAFC; color: #475569; }
+table.bpl-items.readonly td.time { color: #15803D; }
 
-/* per-parcel mini gantt */
-.bpl-parcel { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 10px; }
-.bpl-parcel input { font-family: 'DM Mono', monospace; font-size: 10px;
-    border: 1px solid #CBD5E1; border-radius: 4px; padding: 2px 5px; outline: none; }
-.bpl-parcel input:focus, .bpl-delay select:focus, .bpl-delay input:focus { border-color: #2563EB; }
-.bpl-parcel .cargo { flex: 0 0 88px; }
-.bpl-parcel .qty   { flex: 0 0 64px; text-align: right; }
-.bpl-parcel .track {
-    flex: 1; min-width: 60px; height: 14px; position: relative;
-    background: #F8FAFC; border: 1px solid #F1F5F9; border-radius: 3px;
+table.bpl-items { border-collapse: collapse; width: 100%; font-size: 10px; }
+table.bpl-items th {
+    background: #F1F5F9; border: 1px solid #E2E8F0; padding: 3px 6px;
+    font-weight: 700; color: #334155; text-align: center; white-space: nowrap;
 }
-.bpl-bar { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; min-width: 3px; }
-.bpl-bar.actual { background: #22C55E; }
-.bpl-bar.plan   { background: #60A5FA; }
-.bpl-bar.delay  { background: #FBBF24; }
-.bpl-bar.nohours { background: #CBD5E1; width: 3px !important; }
-.bpl-muted { color: #94A3B8; }
+table.bpl-items td { border: 1px solid #E2E8F0; padding: 1px 4px; text-align: center; }
+table.bpl-items td.particular { text-align: left; padding-left: 8px; }
+table.bpl-items tr.doc td { background: #F8FAFC; font-weight: 600; color: #475569; }
+table.bpl-items tr.delay td { background: #FFFBEB; }
+table.bpl-items tr.broken td.time { color: #B91C1C; font-style: italic; }
+table.bpl-items input, table.bpl-items select {
+    font-family: 'DM Mono', monospace; font-size: 10px; width: 100%;
+    border: 1px solid transparent; border-radius: 3px; padding: 2px 4px;
+    background: transparent; outline: none; text-align: center;
+}
+table.bpl-items input:hover, table.bpl-items select:hover { border-color: #CBD5E1; }
+table.bpl-items input:focus, table.bpl-items select:focus { border-color: #2563EB; background: #fff; }
+table.bpl-items input.name { text-align: left; }
+table.bpl-items td.time { font-family: 'DM Mono', monospace; color: #1D4ED8; white-space: nowrap; }
+table.bpl-items td.hours { font-family: 'DM Mono', monospace; background: #F1F5F9; font-weight: 700; }
 
-/* delay line items */
-.bpl-delay { display: flex; align-items: center; gap: 6px; margin: 0 0 3px 94px; font-size: 10px; }
-.bpl-delay select, .bpl-delay input {
-    font-size: 10px; border: 1px solid #E2E8F0; border-radius: 4px; padding: 2px 5px;
-    outline: none; background: #FFFBEB;
-}
-.bpl-delay select { width: 150px; }
-.bpl-delay .lbl { color: #B45309; font-weight: 600; flex: 0 0 auto; }
+.bpl-addrow { margin-top: 4px; display: flex; gap: 10px; align-items: center; }
 .bpl-linkbtn {
     border: none; background: none; cursor: pointer; color: #2563EB;
     font-size: 10px; padding: 0; text-decoration: underline;
 }
-.bpl-linkbtn.sub { margin-left: 94px; color: #B45309; }
+.bpl-linkbtn.warn { color: #B45309; }
 .bpl-remove {
     border: none; background: none; cursor: pointer; color: #CBD5E1; font-size: 12px;
     padding: 0 2px; line-height: 1;
 }
 .bpl-remove:hover { color: #DC2626; }
+.bpl-start-input {
+    font-family: 'DM Mono', monospace; font-size: 10px; border: 1px solid #CBD5E1;
+    border-radius: 3px; padding: 1px 4px; outline: none;
+}
+.bpl-muted { color: #94A3B8; }
 </style>
 {% endblock %}
 
@@ -151,7 +160,6 @@ let canvas = null;
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const num = v => (v === null || v === undefined || v === '') ? null : (isNaN(+v) ? null : +v);
 const key = p => `${p.source}:${p.source_id}`;
 
 function fmt(iso) {
@@ -159,49 +167,13 @@ function fmt(iso) {
     const d = new Date(iso);
     if (isNaN(d)) return '—';
     const p = n => String(n).padStart(2, '0');
-    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return `${p(d.getDate())} ${mon[d.getMonth()]}, ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-// end = start + hours + delay hours — the same formula the server computes with.
-// Recomputed here only to draw the bars; the server's value is authoritative.
-const delayHours = p => (p.delays || []).reduce((t, d) => t + (num(d.hours) || 0), 0);
-
-function parcelEnd(p) {
-    const start = p.start ? new Date(p.start) : null, hours = num(p.hours);
-    if (!start || isNaN(start) || !hours || hours <= 0) return null;
-    return new Date(start.getTime() + (hours + delayHours(p)) * 3600 * 1000);
-}
-
-// One shared time axis per lane, so vessels in the same berth are comparable.
-function laneAxis(lane) {
-    const times = [new Date(canvas.now)];
-    lane.occupied.forEach(o => { if (o.end) times.push(new Date(o.end)); });
-    lane.plans.forEach(pl => (pl.parcels || []).forEach(p => {
-        if (p.start) times.push(new Date(p.start));
-        const e = parcelEnd(p); if (e) times.push(e);
-    }));
-    const valid = times.filter(t => !isNaN(t));
-    let lo = new Date(Math.min(...valid)), hi = new Date(Math.max(...valid));
-    if (hi - lo < 3600 * 1000) hi = new Date(lo.getTime() + 3600 * 1000);  // never divide by zero
-    return {lo, hi, span: hi - lo};
-}
-
-// Work segment then delay segment, so held-up time reads as its own colour.
-function bars(axis, p) {
-    if (!p.start) return '';
-    const s = new Date(p.start);
-    if (isNaN(s)) return '';
-    const left = ((s - axis.lo) / axis.span) * 100;
-    const hours = num(p.hours);
-    if (!hours || hours <= 0)
-        return `<div class="bpl-bar nohours" style="left:${left}%" title="No hours set — no end time"></div>`;
-    const wWork  = ((hours * 3600 * 1000) / axis.span) * 100;
-    const dh = delayHours(p);
-    const wDelay = ((dh * 3600 * 1000) / axis.span) * 100;
-    return `<div class="bpl-bar plan" style="left:${left}%;width:${wWork}%" title="${hours} h work"></div>`
-         + (dh > 0 ? `<div class="bpl-bar delay" style="left:${left + wWork}%;width:${wDelay}%" title="${dh} h delay"></div>` : '');
-}
+// Hours come from the server (parcels: qty/rate; docs and delays: typed).
+// Shown to 2 dp only when fractional, so "15" stays "15" and 4.2 stays "4.2".
+const fmtHours = h => (h === null || h === undefined) ? ''
+    : (Math.round(h * 100) / 100).toString();
 
 function renderExpected() {
     const el = document.getElementById('bpl-expected');
@@ -235,98 +207,168 @@ function renderExpected() {
     });
 }
 
-function delayOptions(selected) {
-    const opts = (canvas.delay_types || []).map(n =>
+function options(list, selected, placeholder) {
+    return `<option value="">${placeholder}</option>` + (list || []).map(n =>
         `<option value="${esc(n)}" ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('');
-    return `<option value="">— delay —</option>${opts}`;
 }
 
-function renderDelay(k, pi, di, d) {
-    const dis = CAN_WRITE ? '' : 'disabled';
-    return `
-        <div class="bpl-delay">
-            <span class="lbl">delay</span>
-            <select ${dis} onchange="editDelay('${k}', ${pi}, ${di}, 'name', this.value)">
-                ${delayOptions(d.name)}
-            </select>
-            <input type="number" min="0" step="0.25" placeholder="hrs" value="${esc(d.hours ?? '')}" ${dis}
-                   onchange="editDelay('${k}', ${pi}, ${di}, 'hours', this.value)" style="width:56px">
-            <span class="bpl-muted">h</span>
-            ${CAN_WRITE ? `<button class="bpl-remove" title="Remove delay"
-                              onclick="removeDelay('${k}', ${pi}, ${di})">&#10005;</button>` : ''}
-        </div>`;
+// Parcels declared on the VCN this plan belongs to, as picker options.
+// Labelled "P1 — HSD" so the planner sees the cargo while the plan stores the
+// parcel's identity.
+function parcelOptions(pl, selected) {
+    const opts = (pl.available_parcels || []).map(p =>
+        `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${
+            esc(p.name)}${p.cargo_name ? ' — ' + esc(p.cargo_name) : ''}</option>`).join('');
+    return `<option value="">— select parcel —</option>${opts}`;
 }
 
-function renderParcel(k, pi, p, axis) {
+function renderItem(pl, k, idx, it) {
     const dis = CAN_WRITE ? '' : 'disabled';
+    const isParcel = it.kind === 'parcel';
+    const linkable = isParcel && (pl.available_parcels || []).length > 0;
+    const broken = it.start && !it.end;
+
+    // Particular: fixed docs are label-only; delays pick from the delay master;
+    // a parcel on a VCN picks a real declared parcel, so the plan row keeps its
+    // identity; an EV01 vessel is pre-VCN and has nothing to link to, so it
+    // stays free text.
+    let particular;
+    if (it.fixed) particular = esc(it.name);
+    else if (it.kind === 'delay')
+        particular = `<select ${dis} onchange="editItem('${k}',${idx},'name',this.value)">
+                        ${options(canvas.delay_types, it.name, '— select delay —')}</select>`;
+    else if (linkable)
+        particular = `<select ${dis} onchange="linkParcel('${k}',${idx},this.value)">
+                        ${parcelOptions(pl, it.parcel_id)}</select>`;
+    else
+        particular = `<input class="name" ${dis} value="${esc(it.name ?? '')}" placeholder="cargo"
+                        onchange="editItem('${k}',${idx},'name',this.value)">`;
+
+    // a linked parcel's qty is the VCN's, shown but not editable here
+    const qtyCell = !isParcel ? ''
+        : (it.parcel_id
+            ? `<span class="bpl-muted" title="From the VCN parcel">${esc(it.qty ?? '')}</span>`
+            : `<input type="number" step="0.001" ${dis} value="${esc(it.qty ?? '')}"
+                 onchange="editItem('${k}',${idx},'qty',this.value)">`);
+
+    // delays may name a pipeline too — then they hold only that line
+    const pipeCell = (isParcel || it.kind === 'delay')
+        ? `<select ${dis} onchange="editItem('${k}',${idx},'pipeline',this.value)">
+             ${options(canvas.pipelines, it.pipeline, isParcel ? '—' : '— whole vessel —')}</select>`
+        : '';
+
     return `
-        <div class="bpl-parcel">
-            <input class="cargo" placeholder="cargo" value="${esc(p.cargo ?? '')}" ${dis}
-                   onchange="editParcel('${k}', ${pi}, 'cargo', this.value)">
-            <input class="qty" type="number" step="0.001" placeholder="qty" value="${esc(p.qty ?? '')}" ${dis}
-                   onchange="editParcel('${k}', ${pi}, 'qty', this.value)">
-            <span class="bpl-muted">MT</span>
-            <input type="datetime-local" value="${esc((p.start || '').slice(0, 16))}" ${dis}
-                   onchange="editParcel('${k}', ${pi}, 'start', this.value)" style="width:148px">
-            <input type="number" min="0" step="0.25" placeholder="hrs" value="${esc(p.hours ?? '')}" ${dis}
-                   onchange="editParcel('${k}', ${pi}, 'hours', this.value)" style="width:56px">
-            <span class="bpl-muted">h</span>
-            <span class="track">${bars(axis, p)}</span>
-            ${CAN_WRITE ? `<button class="bpl-remove" title="Remove parcel"
-                              onclick="removeParcel('${k}', ${pi})">&#10005;</button>` : ''}
+    <tr class="${it.kind} ${broken ? 'broken' : ''}">
+        <td class="particular">${particular}</td>
+        <td>${qtyCell}</td>
+        <td>${pipeCell}</td>
+        <td>${isParcel ? `<input type="number" step="0.01" min="0" ${dis} value="${esc(it.rate ?? '')}"
+                onchange="editItem('${k}',${idx},'rate',this.value)">` : ''}</td>
+        <td class="hours">${isParcel
+            ? fmtHours(it.hours)
+            : `<input type="number" step="0.25" min="0" ${dis} value="${esc(it.hours ?? '')}"
+                 onchange="editItem('${k}',${idx},'hours',this.value)">`}</td>
+        <td class="time">${it.start ? fmt(it.start) : (broken ? 'no hours' : '—')}</td>
+        <td class="time">${it.end ? fmt(it.end) : '—'}</td>
+        <td style="width:18px">${(CAN_WRITE && !it.fixed)
+            ? `<button class="bpl-remove" title="Remove line" onclick="removeItem('${k}',${idx})">&#10005;</button>`
+            : ''}</td>
+    </tr>`;
+}
+
+function renderVessel(pl) {
+    const k = key(pl);
+    const items = pl.items || [];
+    return `
+    <div class="bpl-vessel ${pl.conflict_with ? 'conflict' : ''}">
+        <div class="bpl-vessel-hdr">
+            <b>${esc(pl.vessel_name)}</b>
+            <span class="bpl-src ${pl.source === 'VCN' ? 'vcn' : ''}">${pl.source}</span>
+            ${pl.conflict_with
+                ? `<span class="bpl-conflict">starts before ${esc(pl.conflict_with)} frees the berth</span>` : ''}
+            <label class="bpl-sim" title="Uncheck for a vessel that cannot work two lines at once, whatever the berth offers">
+                <input type="checkbox" ${pl.simultaneous ? 'checked' : ''}
+                       ${CAN_WRITE ? '' : 'disabled'}
+                       onchange="editSimultaneous('${k}', this.checked)">
+                simultaneous
+            </label>
+            <span class="times">
+                start
+                <input type="datetime-local" class="bpl-start-input" ${CAN_WRITE ? '' : 'disabled'}
+                       value="${esc((pl.start_dt || pl.start || '').slice(0, 16))}"
+                       title="${pl.start_dt ? 'Pinned start' : 'Derived from the vessel ahead — set to pin'}"
+                       onchange="editStart('${k}', this.value)">
+                &rarr; ${fmt(pl.end)}
+            </span>
+            ${CAN_DELETE ? `<button class="bpl-remove" title="Remove from plan"
+                               onclick="removePlan('${k}')">&#10005;</button>` : ''}
         </div>
-        ${(p.delays || []).map((d, di) => renderDelay(k, pi, di, d)).join('')}
-        ${CAN_WRITE ? `<button class="bpl-linkbtn sub" onclick="addDelay('${k}', ${pi})">+ delay line</button>` : ''}`;
+        <table class="bpl-items">
+            <tr>
+                <th style="width:26%">Particular</th><th style="width:9%">Qty</th>
+                <th style="width:15%">Pipeline</th><th style="width:13%">Flow Rate in MT/Hr</th>
+                <th style="width:6%">Hrs</th><th style="width:15%">Start time</th>
+                <th style="width:15%">End Time</th><th></th>
+            </tr>
+            ${items.map((it, i) => renderItem(pl, k, i, it)).join('')}
+        </table>
+        ${CAN_WRITE ? `<div class="bpl-addrow">
+            <button class="bpl-linkbtn" onclick="addItem('${k}','parcel')">+ parcel</button>
+            <button class="bpl-linkbtn warn" onclick="addItem('${k}','delay')">+ delay</button>
+            <span class="bpl-muted">inserted before ${esc(POST_DOC)}</span>
+        </div>` : ''}
+    </div>`;
+}
+
+// A vessel actually alongside. Shown in the same table so the lane reads as
+// one story, but every cell is plain text — these are actuals from LUEU01,
+// not something the planner may edit here.
+function renderBerthed(o) {
+    const items = o.items || [];
+    return `
+    <div class="bpl-vessel berthed">
+        <div class="bpl-vessel-hdr" style="border-color:#22C55E;background:#F0FDF4">
+            <b>${esc(o.vessel_name)}</b>
+            <span class="bpl-tag actual">Berthed</span>
+            <span class="bpl-muted">${esc(o.cargo || '')}</span>
+            <span class="times">alongside ${esc(o.alongside || '—')}
+                &rarr; ETC ${fmt(o.end)}${o.is_planned ? ' (Exp)' : ''}</span>
+        </div>
+        ${items.length ? `
+        <table class="bpl-items readonly">
+            <tr>
+                <th style="width:26%">Particular</th><th style="width:9%">Qty</th>
+                <th style="width:15%">Pipeline</th><th style="width:13%">Actual Rate MT/Hr</th>
+                <th style="width:6%">Hrs</th><th style="width:15%">Start time</th>
+                <th style="width:15%">End Time</th><th></th>
+            </tr>
+            ${items.map(i => `
+            <tr class="parcel">
+                <td class="particular">${esc(i.name)}</td>
+                <td>${esc(i.qty ?? '')}</td>
+                <td>${esc(i.pipeline || '')}</td>
+                <td>${esc(i.rate ?? '')}</td>
+                <td class="hours">${fmtHours(i.hours)}</td>
+                <td class="time">${i.start ? fmt(i.start) : '—'}</td>
+                <td class="time">${i.end ? fmt(i.end) : 'in progress'}</td>
+                <td></td>
+            </tr>`).join('')}
+        </table>` : ''}
+    </div>`;
 }
 
 function renderLane(lane) {
-    const axis = laneAxis(lane);
+    const occupied = lane.occupied.map(renderBerthed).join('');
 
-    const occupied = lane.occupied.map(o => `
-        <div class="bpl-vessel">
-            <div class="bpl-vessel-hdr">
-                <b>${esc(o.vessel_name)}</b>
-                <span class="bpl-tag actual">Berthed</span>
-                <span class="bpl-etc">${esc(o.cargo || '')} &middot;
-                    ETC ${fmt(o.end)}${o.is_planned ? ' (Exp)' : ''}</span>
-            </div>
-            <div class="bpl-parcel">
-                <span class="cargo bpl-muted">alongside</span>
-                <span class="qty bpl-muted">${esc(o.quantity ?? '—')}</span>
-                <span class="bpl-muted" style="flex:0 0 210px">${esc(o.alongside || '—')}</span>
-                <span class="track">${o.end
-                    ? `<div class="bpl-bar actual" style="left:0;width:${
-                        Math.max(0, ((new Date(o.end) - axis.lo) / axis.span) * 100)}%"></div>`
-                    : ''}</span>
-            </div>
-        </div>`).join('');
-
-    const plans = lane.plans.map(pl => {
-        const k = key(pl);
-        return `
-        <div class="bpl-vessel ${pl.conflict_with ? 'conflict' : ''}">
-            <div class="bpl-vessel-hdr">
-                <b>${esc(pl.vessel_name)}</b>
-                <span class="bpl-src ${pl.source === 'VCN' ? 'vcn' : ''}">${pl.source}</span>
-                <span class="bpl-tag plan">Planned</span>
-                <span class="bpl-etc">ends ${fmt(pl.end)}</span>
-                ${pl.conflict_with
-                    ? `<span class="bpl-conflict">starts before ${esc(pl.conflict_with)} frees the berth</span>`
-                    : ''}
-                ${CAN_DELETE ? `<button class="bpl-remove" title="Remove from plan"
-                                   onclick="removePlan('${k}')">&#10005;</button>` : ''}
-            </div>
-            ${(pl.parcels || []).map((p, i) => renderParcel(k, i, p, axis)).join('')}
-            ${CAN_WRITE ? `<button class="bpl-linkbtn" onclick="addParcel('${k}')">+ parcel</button>` : ''}
-        </div>`;
-    }).join('');
-
+    const plans = lane.plans.map(renderVessel).join('');
     const body = (occupied + plans) || '<p class="bpl-empty">Drop a vessel here.</p>';
+    const free = lane.plans.length ? lane.plans[lane.plans.length - 1].end
+               : (lane.occupied.length ? lane.occupied[lane.occupied.length - 1].end : null);
     return `
         <div class="bpl-lane" data-berth="${esc(lane.berth_name)}">
             <div class="bpl-lane-hdr">
                 ${esc(lane.berth_name)}
-                <span class="axis">${fmt(axis.lo.toISOString())} → ${fmt(axis.hi.toISOString())}</span>
+                <span class="free">${free ? 'free from ' + fmt(free) : 'free'}</span>
             </div>
             <div class="bpl-lane-body">${body}</div>
         </div>`;
@@ -364,9 +406,9 @@ async function post(url, body) {
     return true;
 }
 
-// Find a plan by "SOURCE:id" and re-POST the whole vessel after any edit —
-// the same save-then-refresh shape LUEU01 uses, so the server stays the
-// single source of truth and there is no client state to drift.
+// Every edit re-POSTs the whole vessel and re-renders from the response —
+// the same save-then-refresh shape LUEU01 uses, so the server owns the chain
+// and there is no client-side state to drift out of step.
 function findPlan(k) {
     for (const lane of canvas.lanes) {
         const pl = lane.plans.find(p => key(p) === k);
@@ -375,64 +417,76 @@ function findPlan(k) {
     return null;
 }
 
-function savePlan(pl, parcels) {
+// strip server-computed fields — the API only accepts an item's own keys
+const clean = items => items.map(i => ({
+    kind: i.kind, name: i.name, qty: i.qty, pipeline: i.pipeline,
+    rate: i.rate, hours: i.kind === 'parcel' ? null : i.hours, fixed: i.fixed,
+    parcel_id: i.parcel_id
+}));
+
+function savePlan(pl, items, startDt, sim) {
     return post('/api/module/BPL01/plan', {
-        source: pl.source, source_id: pl.source_id,
-        berth_name: pl.berth_name, parcels
+        source: pl.source, source_id: pl.source_id, berth_name: pl.berth_name,
+        items, start_dt: startDt === undefined ? pl.start_dt : startDt,
+        simultaneous: sim === undefined ? pl.simultaneous : sim
     });
 }
 
-// strip server-computed fields — the API only accepts the parcel's own keys
-const clean = parcels => parcels.map(p => ({
-    cargo: p.cargo, qty: p.qty, start: p.start, hours: p.hours,
-    delays: (p.delays || []).map(d => ({name: d.name, hours: d.hours}))
-}));
-
-function editParcel(k, pi, field, value) {
+// Off for a vessel whose own pumps cannot work two lines at once — the
+// pipelines then grant no overlap and every line queues.
+function editSimultaneous(k, checked) {
     const pl = findPlan(k); if (!pl) return;
-    const parcels = clean(pl.parcels);
-    parcels[pi][field] = value === '' ? null : value;
-    savePlan(pl, parcels);
+    savePlan(pl, clean(pl.items), undefined, checked);
 }
 
-function addParcel(k) {
+function editItem(k, idx, field, value) {
     const pl = findPlan(k); if (!pl) return;
-    savePlan(pl, [...clean(pl.parcels),
-                  {cargo: null, qty: null, start: null, hours: null, delays: []}]);
+    const items = clean(pl.items);
+    items[idx][field] = value === '' ? null : value;
+    savePlan(pl, items);
 }
 
-function removeParcel(k, pi) {
+// Point a plan row at a real VCN parcel. Name and quantity then come from the
+// VCN itself on every read, so the plan can't drift from the declaration.
+function linkParcel(k, idx, value) {
     const pl = findPlan(k); if (!pl) return;
-    const parcels = clean(pl.parcels);
-    parcels.splice(pi, 1);
-    savePlan(pl, parcels);
+    const items = clean(pl.items);
+    const src = (pl.available_parcels || []).find(p => String(p.id) === String(value));
+    items[idx].parcel_id = src ? src.id : null;
+    if (src && !items[idx].pipeline) items[idx].pipeline = src.pipeline;
+    savePlan(pl, items);
 }
 
-function editDelay(k, pi, di, field, value) {
+function addItem(k, kind) {
     const pl = findPlan(k); if (!pl) return;
-    const parcels = clean(pl.parcels);
-    parcels[pi].delays[di][field] = value === '' ? null : value;
-    savePlan(pl, parcels);
+    const items = clean(pl.items);
+    const at = items.findIndex(i => i.fixed && i.name === POST_DOC);
+    items.splice(at < 0 ? items.length : at, 0, {
+        kind, name: null, qty: null, pipeline: null, rate: null,
+        hours: kind === 'parcel' ? null : canvas.doc_hours, fixed: false,
+        parcel_id: null
+    });
+    savePlan(pl, items);
 }
 
-function addDelay(k, pi) {
+function removeItem(k, idx) {
     const pl = findPlan(k); if (!pl) return;
-    const parcels = clean(pl.parcels);
-    parcels[pi].delays.push({name: null, hours: null});
-    savePlan(pl, parcels);
+    const items = clean(pl.items);
+    items.splice(idx, 1);
+    savePlan(pl, items);
 }
 
-function removeDelay(k, pi, di) {
+function editStart(k, value) {
     const pl = findPlan(k); if (!pl) return;
-    const parcels = clean(pl.parcels);
-    parcels[pi].delays.splice(di, 1);
-    savePlan(pl, parcels);
+    savePlan(pl, clean(pl.items), value || null);
 }
 
 function removePlan(k) {
     const pl = findPlan(k); if (!pl) return;
     post('/api/module/BPL01/plan/delete', {source: pl.source, source_id: pl.source_id});
 }
+
+const POST_DOC = 'Post Documentation';
 
 async function load() {
     const showAll = document.getElementById('bpl-show-all').checked ? '?show_all=1' : '';

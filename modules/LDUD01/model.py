@@ -63,12 +63,18 @@ def get_data(page=1, size=20, filters=None):
 
     allowed = {'doc_num','vessel_name','doc_status','doc_date','vcn_doc_num',
                'operation_type','cargo_type'}
+    # VCN doc numbers are editable in VCN01, so ldud_header.vcn_doc_num is only a
+    # snapshot taken at link time. Display and filtering both use the live value.
+    live_vcn_doc = ("COALESCE((SELECT h.vcn_doc_num FROM vcn_header h WHERE h.id = ldud_header.vcn_id),"
+                    " ldud_header.vcn_doc_num)")
+    col_sql = {'vcn_doc_num': live_vcn_doc}
     # soft-deleted LDUDs (VCN sent back to Expected) stay hidden
     where_clauses, params = ['is_deleted IS NOT TRUE'], []
     for f in (filters or []):
         field = f.get('field', '')
         if field not in allowed:
             continue
+        field = col_sql.get(field, field)
         ftype = f.get('type')
         if ftype == 'contains' and f.get('value'):
             where_clauses.append(f"{field} ILIKE %s")
@@ -113,9 +119,10 @@ def get_data(page=1, size=20, filters=None):
 
         if vcn_ids:
             # Fetch doc_date for display
-            cur.execute('SELECT id, doc_date, doc_status FROM vcn_header WHERE id = ANY(%s)', (vcn_ids,))
+            cur.execute('SELECT id, doc_date, doc_status, vcn_doc_num FROM vcn_header WHERE id = ANY(%s)', (vcn_ids,))
             for v in cur.fetchall():
-                vcn_meta[v['id']] = {'doc_date': v['doc_date'] or '', 'doc_status': v['doc_status'] or ''}
+                vcn_meta[v['id']] = {'doc_date': v['doc_date'] or '', 'doc_status': v['doc_status'] or '',
+                                     'vcn_doc_num': v['vcn_doc_num']}
 
             # Cargo names, BL quantities and UOM from VCN cargo declarations (Import + Export)
             cur.execute('''SELECT vcn_id, cargo_name, bl_quantity, quantity_uom FROM vcn_cargo_declaration
@@ -183,6 +190,9 @@ def get_data(page=1, size=20, filters=None):
             vm = vcn_meta.get(vid, {})
             r['vcn_doc_date'] = vm.get('doc_date', '')
             r['vcn_doc_status'] = vm.get('doc_status', '')
+            # renamed in VCN01 after linking → show the current number, don't rewrite the row
+            if vm.get('vcn_doc_num'):
+                r['vcn_doc_num'] = vm['vcn_doc_num']
 
             # Agent and Stevedore
             ai = vcn_agents.get(vid, {})

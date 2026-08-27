@@ -39,6 +39,16 @@
                 {title: "ID", field: "id", width: 60},
                 {title: "Pipeline Name", field: "pipeline_name", editor: canEdit ? "input" : false, widthGrow: 2},
                 {title: "Description", field: "description", editor: canEdit ? "input" : false, widthGrow: 3},
+                {title: "Hydro Test Valid Until", field: "hydro_test_valid_until", widthGrow: 2,
+                    editor: canEdit ? "input" : false,
+                    editorParams: {elementAttributes: {type: "datetime-local"}},
+                    // expired pipelines are dropped from the VCN01 picker; blank = never tested, still selectable
+                    formatter: function(cell) {
+                        const v = cell.getValue();
+                        if (!v) return '<span style="color:#94a3b8;font-style:italic;">not recorded</span>';
+                        const expired = new Date(v) < new Date();
+                        return `<span style="color:${expired ? '#dc2626' : '#16a34a'}">${v.replace('T', ' ')}${expired ? ' (expired)' : ''}</span>`;
+                    }},
                 {title: "Active", field: "is_active", editor: canEdit ? "tickCross" : false, formatter: "tickCross", hozAlign: "center", width: 80}
             ],
             pagination: true,

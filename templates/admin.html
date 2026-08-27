@@ -15,6 +15,7 @@
     <button class="tab-btn" onclick="showTab('vessels')">Vessel Closure</button>
     <button class="tab-btn" onclick="showTab('mbc')">MBC Approval</button>
     <button class="tab-btn" onclick="showTab('gst')">GST Config</button>
+    <button class="tab-btn" onclick="showTab('services')">Services</button>
     <button class="tab-btn" onclick="showTab('sap')">SAP Config</button>
     <button class="tab-btn" onclick="showTab('banks')">Bank Accounts</button>
     <button class="tab-btn" onclick="showTab('mail')">Mail</button>
@@ -201,6 +202,31 @@
                 <div class="config-row">
                     <label>Email:<br><input type="text" id="gstSellerEmail" placeholder="Optional" style="width:100%;padding:6px;"></label>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Services (FSTM01) Tab -->
+<div id="services-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Service Record Numbering</h3>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="saveServiceConfig()">Save</button>
+        </div>
+        <div class="config-panel" style="display:block;">
+            <div class="config-group">
+                <div class="config-row">
+                    <label>Start Number:<br>
+                        <input type="number" id="serviceStartNo" min="1" step="1" placeholder="e.g., 700" style="width:200px;padding:6px;">
+                    </label>
+                </div>
+                <p style="font-size:12px;color:#718096;margin:8px 0 0;">
+                    New service records (SRV01) get a plain number — no series, no prefix —
+                    starting here and counting up. Delete the newest record and its number
+                    is reused next time. Existing SRV#### records keep their old numbers,
+                    and lowering this below numbers already in use has no effect.
+                </p>
             </div>
         </div>
     </div>
@@ -663,6 +689,7 @@ function showTab(tab) {
     if (tab === 'vessels') loadLdudVessels();
     if (tab === 'mbc') loadMbcApprovals();
     if (tab === 'gst') loadGstConfig();
+    if (tab === 'services') loadServiceConfig();
     if (tab === 'sap') loadSapConfig();
     if (tab === 'banks') loadBankAccounts();
     if (tab === 'config') loadAllConfigs();
@@ -1027,6 +1054,25 @@ async function saveGstConfig() {
     });
     if (res.ok) alert('GST config saved!');
     else alert('Failed to save GST config');
+}
+
+// ── Service Record Numbering (FSTM01) ───────────────────────────────────────
+
+async function loadServiceConfig() {
+    const config = await (await fetch('/admin/api/config/SRV01')).json();
+    document.getElementById('serviceStartNo').value = config.service_start_no || '';
+}
+
+async function saveServiceConfig() {
+    const start = parseInt(document.getElementById('serviceStartNo').value, 10);
+    if (!start || start < 1) { alert('Enter a start number of 1 or more'); return; }
+    // Endpoint merges into the existing SRV01 config server-side.
+    const res = await fetch('/admin/api/config/SRV01/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({service_start_no: start})
+    });
+    alert(res.ok ? 'Start number saved!' : 'Failed to save start number');
 }
 
 // ── Port Bank Accounts ──────────────────────────────────────────────────────

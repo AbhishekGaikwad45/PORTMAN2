@@ -38,7 +38,8 @@ def get_data():
 @bp.route('/api/module/PLM01/all')
 @login_required
 def get_all():
-    return jsonify([r['pipeline_name'] for r in model.get_all_active()])
+    # Only pipelines with a live hydro test are offered for selection (VCN01).
+    return jsonify([r['pipeline_name'] for r in model.get_all_active(hydro_valid_only=True)])
 
 @bp.route('/api/module/PLM01/save', methods=['POST'])
 @login_required
