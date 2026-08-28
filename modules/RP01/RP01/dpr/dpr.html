@@ -1,0 +1,661 @@
+{% extends "base.html" %}
+
+{% block title %}Daily Performance Report (DPR) — JJLTPL{% endblock %}
+
+{% block content %}
+<style>
+    .dpr-wrapper {
+        padding: 8px 0 40px 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        color: var(--text-primary, #1e293b);
+    }
+
+    .dpr-actions-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        background: var(--bg-secondary, #ffffff);
+        padding: 14px 20px;
+        border-radius: 10px;
+        border: 1px solid var(--border-color, #e2e8f0);
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    }
+
+    .dpr-date-picker-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .dpr-date-input {
+        padding: 8px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color, #cbd5e1);
+        background: var(--bg-primary, #f8fafc);
+        color: var(--text-primary, #0f172a);
+        font-size: 14px;
+        font-weight: 600;
+        outline: none;
+    }
+
+    .btn-action {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-decoration: none;
+    }
+
+    .btn-action-primary {
+        background: #2563eb;
+        color: #ffffff;
+    }
+    .btn-action-primary:hover {
+        background: #1d4ed8;
+    }
+
+    .btn-action-secondary {
+        background: var(--bg-primary, #f1f5f9);
+        color: var(--text-primary, #334155);
+        border-color: var(--border-color, #cbd5e1);
+    }
+    .btn-action-secondary:hover {
+        background: #e2e8f0;
+    }
+
+    .btn-action-excel {
+        background: #107c41;
+        color: #ffffff;
+    }
+    .btn-action-excel:hover {
+        background: #0b6a36;
+    }
+
+    .dpr-window-badge {
+        font-size: 12px;
+        font-weight: 600;
+        background: #e0f2fe;
+        color: #0369a1;
+        padding: 4px 10px;
+        border-radius: 20px;
+        border: 1px solid #bae6fd;
+    }
+
+    /* Print styling & Report Layout */
+    .dpr-paper {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        overflow: hidden;
+        margin-bottom: 24px;
+        color: #000000;
+    }
+
+    .dpr-header-title {
+        background: #1F4E78;
+        color: #ffffff;
+        text-align: center;
+        padding: 14px 20px;
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        border-bottom: 2px solid #163a59;
+    }
+
+    .dpr-meta-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 20px;
+        background: #f8fafc;
+        border-bottom: 1px solid #cbd5e1;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    .dpr-meta-box {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .dpr-brand-logo {
+        height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .dpr-brand-logo span {
+        color: #0056b3;
+    }
+
+    .dpr-section-bar {
+        background: #C6E0B4;
+        color: #1e4620;
+        font-weight: 700;
+        font-size: 14px;
+        padding: 8px 16px;
+        border-top: 1px solid #a9d08e;
+        border-bottom: 1px solid #a9d08e;
+    }
+
+    .dpr-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+
+    .dpr-table th, .dpr-table td {
+        border: 1px solid #b7b7b7;
+        padding: 6px 10px;
+        text-align: left;
+    }
+
+    .dpr-table th {
+        background: #D9E1F2;
+        color: #000000;
+        font-weight: 700;
+    }
+
+    .dpr-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .dpr-table td.center {
+        text-align: center;
+    }
+
+    .dpr-table tr.total-row td {
+        font-weight: 700;
+        background: #F2F2F2;
+    }
+
+    .dpr-table tr.highlight-row td {
+        font-weight: 700;
+        background: #FFF2A8;
+    }
+
+    /* Section A table specifics */
+    .sec-a-table {
+        table-layout: fixed;
+        width: 100%;
+    }
+    .sec-a-table th,
+    .sec-a-table td {
+        width: 20% !important;
+        box-sizing: border-box;
+    }
+    .sec-a-table td.label-col {
+        background: #F2F2F2;
+        font-weight: 700;
+        width: 20% !important;
+    }
+
+    .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(0,0,0,0.1);
+        border-radius: 50%;
+        border-top-color: #2563eb;
+        animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    /* ---------- Module header ---------- */
+    .module-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border-color, #e2e8f0);
+    }
+    .module-header h2 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary, #1e293b);
+    }
+    .module-header .rp-badge {
+        background: #4a90d9;
+        color: #fff;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .module-header .rp-back {
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 500;
+        color: #4a90d9;
+        text-decoration: none;
+    }
+    .module-header .rp-back:hover {
+        text-decoration: underline;
+    }
+
+    /* ---------- Toolbar ---------- */
+    .jjltpl-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        background: var(--bg-secondary, #ffffff);
+        border: 1px solid var(--border-color, #e2e8f0);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 8px;
+    }
+    .jjltpl-toolbar label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary, #64748b);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-right: 2px;
+    }
+    .jjltpl-toolbar input[type="date"] {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary, #0f172a);
+        background: var(--bg-primary, #f8fafc);
+        border: 1px solid var(--border-color, #cbd5e1);
+        border-radius: 6px;
+        padding: 6px 10px;
+        outline: none;
+    }
+    .jjltpl-load-btn {
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: 8px 18px;
+        border: none;
+        cursor: pointer;
+        color: #fff;
+        background: #3b82f6;
+        transition: background 0.2s ease;
+    }
+    .jjltpl-load-btn:hover {
+        background: #2563eb;
+    }
+
+    .jjltpl-export-btn {
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: 8px 18px;
+        border: none;
+        cursor: pointer;
+        color: #fff;
+        background: #16a34a;
+        margin-left: auto;
+        transition: background 0.2s ease;
+    }
+    .jjltpl-export-btn:hover {
+        background: #15803d;
+    }
+
+    #reportStatus {
+        font-size: 12px;
+        color: var(--text-secondary, #64748b);
+        margin-bottom: 16px;
+        padding-left: 2px;
+    }
+</style>
+
+<div class="dpr-wrapper">
+
+    <!-- Module Header with Title, Badge, and Back to Reports -->
+    <div class="module-header">
+        <h2>Daily Performance Report</h2>
+        <span class="rp-badge">RP01</span>
+        <a href="/module/RP01/" class="rp-back">&larr; Back to Reports</a>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="jjltpl-toolbar">
+        <label for="dprDate">Report Date</label>
+        <input type="date" id="dprDate">
+        <button class="jjltpl-load-btn" onclick="loadData()">Load</button>
+        <button class="jjltpl-export-btn" onclick="exportExcel()">Export to Excel</button>
+    </div>
+
+    <!-- Status / Window Range text -->
+    <div id="reportStatus">
+        Showing data from <span id="lblWindowStart">--</span> to <span id="lblWindowEnd">--</span> (07:00 &rarr; 07:00 operational day)
+    </div>
+
+
+
+    <!-- Main Report Content Paper -->
+    <div class="dpr-paper" id="dprPaper">
+        <!-- Title Banner -->
+        <div class="dpr-header-title">
+            DAILY REPORT - JSW JNPT LIQUID TERMINAL PRIVATE LIMITED (JJLTPL)
+        </div>
+
+        <!-- Meta info strip -->
+        <div class="dpr-meta-row">
+            <div class="dpr-meta-box">
+                <span>Report Date:</span>
+                <span id="lblReportDate" style="color:#0056b3;">-</span>
+            </div>
+            <div class="dpr-brand-logo">
+                <img src="{{ url_for('static', filename='img/logo31.png') }}" alt="JSW Infrastructure Logo" style="max-height: 36px; width: auto; object-fit: contain;">
+            </div>
+            <div class="dpr-meta-box">
+                <span>Reporting Date:</span>
+                <span id="lblReportingDate" style="color:#0056b3;">-</span>
+            </div>
+        </div>
+
+        <div id="loadingState" style="text-align:center;padding:40px;">
+            <div class="spinner"></div>
+            <div style="margin-top:10px;font-weight:600;color:var(--text-secondary);">Loading Daily Performance Report...</div>
+        </div>
+
+        <div id="reportContent" style="display:none;">
+
+            <!-- SECTION A -->
+            <div class="dpr-section-bar">
+                Section A: Berth Operations at JJLTPL
+            </div>
+            <table class="dpr-table sec-a-table">
+                <tbody id="tblSecA">
+                    <!-- Rendered by JS -->
+                </tbody>
+            </table>
+
+            <!-- SECTION B -->
+            <div class="dpr-section-bar" style="margin-top: 16px;">
+                Section B: Cargo Handled
+            </div>
+            <table class="dpr-table">
+                <thead>
+                    <tr>
+                        <th style="width:35%;">Particulars</th>
+                        <th style="width:11%;text-align:right;">Edible Oil</th>
+                        <th style="width:11%;text-align:right;">Phosphoric</th>
+                        <th style="width:11%;text-align:right;">Lube Oil</th>
+                        <th style="width:11%;text-align:right;">Chemicals</th>
+                        <th style="width:11%;text-align:right;">POL</th>
+                        <th style="width:10%;text-align:right;">Total</th>
+                    </tr>
+                </thead>
+                <tbody id="tblSecB">
+                    <!-- Rendered by JS -->
+                </tbody>
+            </table>
+
+            <!-- SECTION C -->
+            <div class="dpr-section-bar" style="margin-top: 16px;">
+                Section C: Vessels Expected
+            </div>
+            <table class="dpr-table">
+                <thead>
+                    <tr>
+                        <th style="width:20%;">Vessel</th>
+                        <th style="width:12%;">Cargo</th>
+                        <th style="width:10%;">Berth</th>
+                        <th style="width:12%;text-align:right;">B/L Qty</th>
+                        <th style="width:8%;">EXIM</th>
+                        <th style="width:18%;">Agent</th>
+                        <th style="width:10%;">ETA</th>
+                        <th style="width:10%;">Remarks</th>
+                    </tr>
+                </thead>
+                <tbody id="tblSecC">
+                    <!-- Rendered by JS -->
+                </tbody>
+            </table>
+
+            <!-- SECTION D -->
+            <div class="dpr-section-bar" style="margin-top: 16px;" id="secDHeader">
+                Section D: Vessels Handled / operations / declared
+            </div>
+            <table class="dpr-table">
+                <thead>
+                    <tr>
+                        <th style="width:4%;text-align:center;">#</th>
+                        <th style="width:22%;">Vessel</th>
+                        <th style="width:14%;">Cargo</th>
+                        <th style="width:26%;">Customer</th>
+                        <th style="width:12%;text-align:right;">Quantity</th>
+                        <th style="width:8%;">Berth</th>
+                        <th style="width:14%;">Agent</th>
+                        <th style="width:10%;">Remarks</th>
+                    </tr>
+                </thead>
+                <tbody id="tblSecD">
+                    <!-- Rendered by JS -->
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPayload = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const today = new Date().toISOString().split('T')[0];
+        const dateInput = document.getElementById('dprDate');
+        dateInput.value = today;
+
+        dateInput.addEventListener('change', loadData);
+        loadData();
+    });
+
+    function setToday() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('dprDate').value = today;
+        loadData();
+    }
+
+    function shiftDate(days) {
+        const dateInput = document.getElementById('dprDate');
+        if (!dateInput.value) return;
+        const dt = new Date(dateInput.value);
+        dt.setDate(dt.getDate() + days);
+        dateInput.value = dt.toISOString().split('T')[0];
+        loadData();
+    }
+
+    function fmtNum(val) {
+        if (val === null || val === undefined || isNaN(val)) return '0';
+        return Number(val).toLocaleString('en-IN', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 3
+        });
+    }
+
+    async function loadData() {
+        const dateVal = document.getElementById('dprDate').value;
+        const loadingState = document.getElementById('loadingState');
+        const reportContent = document.getElementById('reportContent');
+
+        loadingState.style.display = 'block';
+        reportContent.style.display = 'none';
+
+        try {
+            const resp = await fetch(`/api/module/RP01/dpr/data?date=${dateVal}`);
+            const data = await resp.json();
+
+            if (data.error) {
+                alert('Error loading DPR data: ' + data.error);
+                loadingState.style.display = 'none';
+                return;
+            }
+
+            currentPayload = data;
+            renderReport(data);
+
+            loadingState.style.display = 'none';
+            reportContent.style.display = 'block';
+
+        } catch (err) {
+            console.error(err);
+            alert('Failed to connect to DPR backend service.');
+            loadingState.style.display = 'none';
+        }
+    }
+
+    function renderReport(data) {
+        document.getElementById('lblReportDate').textContent = data.report_date_display;
+        document.getElementById('lblReportingDate').textContent = data.reporting_date_display;
+        const winStart = document.getElementById('lblWindowStart');
+        const winEnd = document.getElementById('lblWindowEnd');
+        if (winStart) winStart.textContent = data.window_start_display;
+        if (winEnd) winEnd.textContent = data.window_end_display;
+
+
+
+        // Render Section A
+        const secABody = document.getElementById('tblSecA');
+        const secA = data.section_a || [];
+        
+        let htmlA = `
+            <tr>
+                <td class="label-col" style="width:20%;">Berth</td>
+                ${secA.map(v => `<td class="center" style="width:20%;font-weight:700;">${v.berth}</td>`).join('')}
+            </tr>
+            <tr>
+                <td class="label-col" style="width:20%;">Vessel Name</td>
+                ${secA.map(v => `<td class="center" style="width:20%;font-weight:700;">${v.vessel_name || '-'}</td>`).join('')}
+            </tr>
+            <tr>
+                <td class="label-col" style="width:20%;">Cargo</td>
+                ${secA.map(v => `<td class="center" style="width:20%;">${v.cargo || '-'}</td>`).join('')}
+            </tr>
+            <tr>
+                <td class="label-col" style="width:20%;">BL Quantity</td>
+                ${secA.map(v => `<td class="center" style="width:20%;">${v.bl_quantity ? fmtNum(v.bl_quantity) : '-'}</td>`).join('')}
+            </tr>
+            <tr>
+                <td class="label-col" style="width:20%;">Discharge Commenced</td>
+                ${secA.map(v => `<td class="center" style="width:20%;">${v.discharge_commenced || '-'}</td>`).join('')}
+            </tr>
+            <tr>
+                <td class="label-col" style="width:20%;">Discharge Completed (ETC)</td>
+                ${secA.map(v => `<td class="center" style="width:20%;">${v.discharge_completed || '-'}</td>`).join('')}
+            </tr>
+            <tr>
+                <td class="label-col" style="width:20%;">Status</td>
+                ${secA.map(v => `<td class="center" style="width:20%;font-weight:600;color:${v.status === 'Operations' ? '#0b6a36' : '#334155'};">${v.status || '-'}</td>`).join('')}
+            </tr>
+        `;
+        secABody.innerHTML = htmlA;
+
+        // Render Section B
+        const secBBody = document.getElementById('tblSecB');
+        const secB = data.section_b || [];
+        let htmlB = '';
+
+        secB.forEach(row => {
+            const isTotalRow = row.particulars.toLowerCase().includes('till date');
+            const isMonthRow = row.particulars.toLowerCase().includes('month');
+            const trClass = isTotalRow ? 'total-row' : (isMonthRow ? 'highlight-row' : '');
+
+            htmlB += `
+                <tr class="${trClass}">
+                    <td style="font-weight:${isTotalRow ? '700' : '600'};">${row.particulars}</td>
+                    <td class="num">${fmtNum(row['Edible Oil'])}</td>
+                    <td class="num">${fmtNum(row['Phosphoric'])}</td>
+                    <td class="num">${fmtNum(row['Lube Oil'])}</td>
+                    <td class="num">${fmtNum(row['Chemicals'])}</td>
+                    <td class="num">${fmtNum(row['POL'])}</td>
+                    <td class="num" style="font-weight:700;background:${isTotalRow ? '#fce0cd' : 'transparent'};">${fmtNum(row['total'])}</td>
+                </tr>
+            `;
+        });
+        secBBody.innerHTML = htmlB;
+
+        // Render Section C
+        const secCBody = document.getElementById('tblSecC');
+        const secC = data.section_c || [];
+        let htmlC = '';
+
+        if (secC.length === 0) {
+            htmlC = `<tr><td colspan="8" class="center" style="color:#64748b;">No expected vessels for selected month.</td></tr>`;
+        } else {
+            secC.forEach(v => {
+                htmlC += `
+                    <tr>
+                        <td style="font-weight:700;">${v.vessel}</td>
+                        <td>${v.cargo}</td>
+                        <td class="center">${v.berth}</td>
+                        <td class="num">${fmtNum(v.bl_qty)}</td>
+                        <td class="center">${v.exim}</td>
+                        <td>${v.agent}</td>
+                        <td class="center">${v.eta}</td>
+                        <td>${v.remarks}</td>
+                    </tr>
+                `;
+            });
+        }
+        secCBody.innerHTML = htmlC;
+
+        // Render Section D
+        const secDBody = document.getElementById('tblSecD');
+        const secD = data.section_d || { month_name: '', vessels: [], total_quantity: 0 };
+        document.getElementById('secDHeader').textContent = `Section D: Monthly Operations Statement for ${secD.month_name}`;
+
+        let htmlD = '';
+        if (secD.vessels.length === 0) {
+            htmlD = `<tr><td colspan="8" class="center" style="color:#64748b;">No vessels handled in this month.</td></tr>`;
+        } else {
+            secD.vessels.forEach(v => {
+                let vNameHtml = v.vessel || '';
+                if (vNameHtml.includes('(In progress)')) {
+                    const baseName = vNameHtml.replace('(In progress)', '').trim();
+                    vNameHtml = `${baseName} <span style="color:#0b6a36;font-weight:600;">(In progress)</span>`;
+                }
+                htmlD += `
+                    <tr>
+                        <td class="center">${v.sr_no}</td>
+                        <td style="font-weight:600;">${vNameHtml}</td>
+                        <td>${v.cargo}</td>
+                        <td>${v.customer}</td>
+                        <td class="num">${fmtNum(v.quantity)}</td>
+                        <td class="center">${v.berth}</td>
+                        <td>${v.agent}</td>
+                        <td>${v.remarks || ''}</td>
+                    </tr>
+                `;
+            });
+            // Total Row
+            htmlD += `
+                <tr class="total-row">
+                    <td colspan="4" style="font-weight:800;text-align:left;">Total</td>
+                    <td class="num" style="font-weight:800;color:#0f172a;">${fmtNum(secD.total_quantity)}</td>
+                    <td colspan="3"></td>
+                </tr>
+            `;
+        }
+        secDBody.innerHTML = htmlD;
+    }
+
+    function exportExcel() {
+        const dateVal = document.getElementById('dprDate').value;
+        window.location.href = `/api/module/RP01/dpr/export?date=${dateVal}`;
+    }
+</script>
+{% endblock %}
