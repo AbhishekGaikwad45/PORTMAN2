@@ -1013,7 +1013,7 @@ def report4_api_report():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="import",
+            operation_type="export",
             total_key="import_total",
         )
 
@@ -1025,7 +1025,7 @@ def report4_api_report():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="export",
+            operation_type="import",
             total_key="export_total",
         )
 
@@ -1229,9 +1229,10 @@ def report4_api_export():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="import",
+            operation_type="export",
             total_key="import_total",
         )
+        
 
         import_total = import_result["import_total"]
 
@@ -1241,7 +1242,7 @@ def report4_api_export():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="export",
+            operation_type="import",
             total_key="export_total",
         )
 
