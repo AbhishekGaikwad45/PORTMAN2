@@ -432,9 +432,18 @@ def _get_section_b(cur, selected_date, window_start, window_end):
                 cur.execute("""
                     SELECT SUM(COALESCE(quantity, 0)) AS q
                     FROM lueu_parcel_log
-                    WHERE parcel_op_id = %s AND is_deleted IS NOT TRUE
-                      AND (is_shortclose IS NOT TRUE AND LOWER(COALESCE(remarks, '')) NOT LIKE '%%short%%close%%')
-                """, (pid,))
+                    WHERE parcel_op_id = %s
+                      AND is_deleted IS NOT TRUE
+                      AND is_shortclose IS NOT TRUE
+                      AND LOWER(COALESCE(remarks, '')) NOT LIKE '%%short%%close%%'
+                      AND NULLIF(entry_date, '') IS NOT NULL
+                      AND (
+                          CASE
+                              WHEN LENGTH(TRIM(entry_date)) > 10 THEN TRIM(entry_date)::timestamp
+                              ELSE (TRIM(entry_date) || ' ' || COALESCE(NULLIF(TRIM(to_time), ''), NULLIF(TRIM(from_time), ''), '00:00'))::timestamp
+                          END
+                      ) <= %s
+                """, (pid, window_end))
                 lr = cur.fetchone()
                 if lr and lr.get('q'):
                     real_qty = float(lr['q'])
@@ -446,7 +455,7 @@ def _get_section_b(cur, selected_date, window_start, window_end):
         cat = categorize(vc_cat, c_name)
         grid['balance_on_board'][cat] += rem
 
-    # 2. Cargo discharged during Day (window_start to window_end)
+    # 2. Cargo discharged during Day (window_start <= log_timestamp < window_end)
     cur.execute("""
         SELECT
             po.cargo_name,
@@ -459,9 +468,19 @@ def _get_section_b(cur, selected_date, window_start, window_end):
         WHERE log.is_deleted IS NOT TRUE
           AND log.is_shortclose IS NOT TRUE
           AND LOWER(COALESCE(log.remarks, '')) NOT LIKE '%%short%%close%%'
-          AND log.entry_date IS NOT NULL
-          AND NULLIF(log.entry_date::text, '')::timestamp >= %s
-          AND NULLIF(log.entry_date::text, '')::timestamp <= %s
+          AND NULLIF(log.entry_date, '') IS NOT NULL
+          AND (
+              CASE
+                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN TRIM(log.entry_date)::timestamp
+                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.to_time), ''), NULLIF(TRIM(log.from_time), ''), '00:00'))::timestamp
+              END
+          ) >= %s
+          AND (
+              CASE
+                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN TRIM(log.entry_date)::timestamp
+                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.to_time), ''), NULLIF(TRIM(log.from_time), ''), '00:00'))::timestamp
+              END
+          ) < %s
         GROUP BY po.cargo_name, vh.cargo_type
     """, (window_start, window_end))
     for r in cur.fetchall():
