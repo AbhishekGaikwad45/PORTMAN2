@@ -223,30 +223,34 @@ def calculate_section_metrics(rlist):
         pbw_port = round(pbw_total - pbw_non_port, 2)
         pbw_non_port = round(pbw_non_port, 2)
 
-    # 4. Working Time (in Days or Hrs matching physical excel sheet)
+    # 4. Working Time (in Days and Hrs)
     wt_days_sum = 0.0
+    wt_hrs_sum = 0.0
     for r in rlist:
         ops_start = _parse_dt(r.get('ops_commenced'))
         ops_end = _parse_dt(r.get('cargo_completion'))
         if ops_start and ops_end and ops_end > ops_start:
+            wt_hrs_sum += (ops_end - ops_start).total_seconds() / 3600.0
             wt_days_sum += (ops_end - ops_start).total_seconds() / 86400.0
         else:
+            wt_hrs_sum += float(r.get('working_time') or 0) * 24.0
             wt_days_sum += float(r.get('working_time') or 0)
 
     working_time = round(wt_days_sum, 2)
 
-    # Stay at berth (alongside to castoff) in hours
+    # 5. Stay at berth in hours (using stay_at_berth column if present, else Cast Off - Alongside timestamp)
     sab_hrs_sum = 0.0
     for r in rlist:
-        along = _parse_dt(r.get('alongside'))
-        cast = _parse_dt(r.get('cast_off'))
-        if along and cast and cast > along:
-            sab_hrs_sum += (cast - along).total_seconds() / 3600.0
-        else:
+        if r.get('stay_at_berth') is not None:
             sab_hrs_sum += float(r.get('stay_at_berth') or 0) * 24.0
+        else:
+            along = _parse_dt(r.get('alongside'))
+            cast = _parse_dt(r.get('cast_off'))
+            if along and cast and cast > along:
+                sab_hrs_sum += (cast - along).total_seconds() / 3600.0
 
-    # 5. N.W Time at working berth (Hrs) = (Alongside - Castoff in hrs) - (Working Time in days * 24)
-    nw_working_total = round(sab_hrs_sum - (working_time * 24.0), 2)
+    # N.W Time at working berth (Hrs) = Stay at berth (in Hrs) - Working Time (in Hrs)
+    nw_working_total = round(sab_hrs_sum - wt_hrs_sum, 2)
     if nw_working_total < 0:
         nw_working_total = 0.0
     nw_working_port = nw_working_total
@@ -278,15 +282,16 @@ def calculate_section_metrics(rlist):
 
     inward_movement = round(in_ts_sum, 2)
     outward_movement = round(out_ts_sum, 2)
-    if abs(outward_movement - 10.01) < 0.1:
-        outward_movement = 10.05
     nav_total = round(inward_movement + outward_movement, 2)
 
     # 8. Shifting Time
     shifting_time = 0.0
 
     # 9. Turn Round Time (Hrs)
-    trt_total = round(pbw_total + working_time + nw_working_total + nw_non_working_total + nav_total + shifting_time, 2)
+    # Total = (3 + 4 + 5 + 6)
+    # Port  = (3(a) + 4 + 5(a) + 6(a) + 7 + 8)
+    # N.P   = (3(b) + 5(b) + 6(b))
+    trt_total = round(pbw_total + working_time + nw_working_total + nw_non_working_total, 2)
     trt_port = round(pbw_port + working_time + nw_working_port + nw_non_working_port + nav_total + shifting_time, 2)
     trt_non_port = round(pbw_non_port + nw_working_non_port + nw_non_working_non_port, 2)
 
@@ -496,7 +501,7 @@ def report7_export():
             ("    a) Inward Movement (Hrs)", "inward_movement", "#,##0.00", False, True),
             ("    b) Outward Movement (Hrs)", "outward_movement", "#,##0.00", False, True),
             ("8. Shifting Time", "shifting_time", "0", False, False),
-            ("9. Turn Round Time (Hrs)-Total=(3+4+5+6+7+8)", "trt_total", "#,##0.00", True, False),
+            ("9. Turn Round Time (Hrs)-Total=(3+4+5+6)", "trt_total", "#,##0.00", True, False),
             ("    a) Turn Round Time (Hrs)-Port a/c=(3(a)+4+5(a)+6(a)+7+8)", "trt_port", "#,##0.00", False, False),
             ("    b) Turn Round Time (Hrs)-N.P a/c=(3(b)+5(b)+6(b))", "trt_non_port", "#,##0.00", False, False),
         ]
@@ -528,8 +533,6 @@ def report7_export():
 
             curr_r += 1
 
-        ws.cell(row=curr_r + 1, column=1, value="Note: N.W- Non-working.  N.P a/c- Non-port a/c").font = norm_font
-        ws.cell(row=curr_r + 2, column=1, value="Mech. -Mechanically Handled .  Conv.- Conventionally handled.").font = norm_font
 
         ws.column_dimensions["A"].width = 56
         ws.column_dimensions["B"].width = 16
