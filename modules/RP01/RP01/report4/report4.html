@@ -176,43 +176,6 @@
 
     </div>
 
-    <!-- ==================== TABLE 2: EXPORT (Received) — NEW ==================== -->
-    <div class="jjltpl-table-wrap">
-
-        <table class="traffic-report-table">
-            <thead>
-                <tr>
-                    <th rowspan="2" style="width:6%">Sr. No.</th>
-                    <th rowspan="2" style="width:20%">Commodities</th>
-                    <th colspan="2">Received by Rail</th>
-                    <th colspan="2">Received by Road</th>
-                    <th colspan="2">Received by Inland water<br>Transport or by Coastal Movement</th>
-                    <th colspan="2">Received through Pipe Line</th>
-                    <th colspan="2">Total</th>
-                </tr>
-                <tr>
-                    <th>Tonnes</th><th>Percentage</th>
-                    <th>Tonnes</th><th>Percentage</th>
-                    <th>Tonnes</th><th>Percentage</th>
-                    <th>Tonnes</th><th>Percentage</th>
-                    <th>Tonnes</th><th>Percentage</th>
-                </tr>
-            </thead>
-            <tbody id="commodityBodyExport"></tbody>
-            <tfoot>
-                <tr class="total-row">
-                    <td colspan="2">TOTAL</td>
-                    <td id="railTotalExport"></td><td id="railPctTotalExport"></td>
-                    <td id="roadTotalExport"></td><td id="roadPctTotalExport"></td>
-                    <td id="inlandTotalExport"></td><td id="inlandPctTotalExport"></td>
-                    <td id="pipelineTotalExport"></td><td id="pipelinePctTotalExport"></td>
-                    <td id="grandTotalExport"></td><td id="grandPctTotalExport"></td>
-                </tr>
-            </tfoot>
-        </table>
-
-    </div>
-
 </div>
 {% endblock %}
 
@@ -221,12 +184,16 @@
 let META = { years: [], months: {} };
 
 function fmt(val) {
-    if (val === null || val === undefined || val === "") return "";
-    return Number(val).toFixed(6);
+    if (val === null || val === undefined || val === "") return "0.000";
+    const num = Number(val);
+    if (isNaN(num)) return "0.000";
+    return num.toFixed(3);
 }
 function fmtPct(val) {
-    if (val === null || val === undefined || val === "") return "";
-    return Number(val).toFixed(2) + "%";
+    if (val === null || val === undefined || val === "") return "0.00%";
+    const num = Number(val);
+    if (isNaN(num)) return "0.00%";
+    return num.toFixed(2) + "%";
 }
 
 function populateYearSelect() {
@@ -285,15 +252,15 @@ function renderTable(rows, grand, bodyId, ids) {
 
     const g = grand || {};
     document.getElementById(ids.rail).textContent = fmt(g.rail);
-    document.getElementById(ids.railPct).textContent = g.rail ? "100.00%" : "0.00%";
+    document.getElementById(ids.railPct).textContent = fmtPct(g.rail_pct);
     document.getElementById(ids.road).textContent = fmt(g.road);
-    document.getElementById(ids.roadPct).textContent = g.road ? "100.00%" : "0.00%";
+    document.getElementById(ids.roadPct).textContent = fmtPct(g.road_pct);
     document.getElementById(ids.inland).textContent = fmt(g.inland);
-    document.getElementById(ids.inlandPct).textContent = g.inland ? "100.00%" : "0.00%";
+    document.getElementById(ids.inlandPct).textContent = fmtPct(g.inland_pct);
     document.getElementById(ids.pipeline).textContent = fmt(g.pipeline);
-    document.getElementById(ids.pipelinePct).textContent = g.pipeline ? "100.00%" : "0.00%";
+    document.getElementById(ids.pipelinePct).textContent = fmtPct(g.pipeline_pct);
     document.getElementById(ids.grand).textContent = fmt(g.total);
-    document.getElementById(ids.grandPct).textContent = g.total ? "100.00%" : "0.00%";
+    document.getElementById(ids.grandPct).textContent = fmtPct(g.total_pct);
 }
 
 function loadReport4() {
@@ -318,15 +285,6 @@ function loadReport4() {
                 inland: "inlandTotal", inlandPct: "inlandPctTotal",
                 pipeline: "pipelineTotal", pipelinePct: "pipelinePctTotal",
                 grand: "grandTotal", grandPct: "grandPctTotal",
-            });
-
-            // Table 2: Export (NEW)
-            renderTable(j.export_rows, j.export_grand, "commodityBodyExport", {
-                rail: "railTotalExport", railPct: "railPctTotalExport",
-                road: "roadTotalExport", roadPct: "roadPctTotalExport",
-                inland: "inlandTotalExport", inlandPct: "inlandPctTotalExport",
-                pipeline: "pipelineTotalExport", pipelinePct: "pipelinePctTotalExport",
-                grand: "grandTotalExport", grandPct: "grandPctTotalExport",
             });
         })
         .catch(err => { status.textContent = "Failed to load report."; console.error(err); });

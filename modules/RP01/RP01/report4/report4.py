@@ -859,21 +859,11 @@ def compute_report4(df: pd.DataFrame, lueu_df: pd.DataFrame, fin_year: str,
     rail = {c["key"]: 0.0 for c in CATEGORY_ORDER}
     road = {c["key"]: 0.0 for c in CATEGORY_ORDER}
     inland = {c["key"]: 0.0 for c in CATEGORY_ORDER}
-
-    pipeline = {}
-
-    for c in CATEGORY_ORDER:
-        bucket = c["key"]
-        pipeline[bucket] = max(
-            0.0,
-            month_totals[bucket] - op_totals[bucket]
-        )
+    pipeline = {c["key"]: op_totals.get(c["key"], 0.0) * 1000.0 for c in CATEGORY_ORDER}
 
     total_col = {}
-
     for c in CATEGORY_ORDER:
         bucket = c["key"]
-
         total_col[bucket] = (
             rail[bucket]
             + road[bucket]
@@ -889,39 +879,44 @@ def compute_report4(df: pd.DataFrame, lueu_df: pd.DataFrame, fin_year: str,
         "total": sum(total_col.values()),
     }
 
-    def pct(val, g):
-        return round(val / g * 100.0, 2) if g else 0.0
+    def calc_pct(val, tot):
+        return round(val / tot * 100.0, 2) if tot else 0.0
 
     rows = []
-
     for c in CATEGORY_ORDER:
         bucket = c["key"]
+        r_tot = total_col[bucket]
+        rows.append({
+            "sr": c["sr"],
+            "label": bucket,
+            "rail": f"{rail[bucket]:.3f}",
+            "rail_pct": calc_pct(rail[bucket], r_tot),
+            "road": f"{road[bucket]:.3f}",
+            "road_pct": calc_pct(road[bucket], r_tot),
+            "inland": f"{inland[bucket]:.3f}",
+            "inland_pct": calc_pct(inland[bucket], r_tot),
+            "pipeline": f"{pipeline[bucket]:.3f}",
+            "pipeline_pct": calc_pct(pipeline[bucket], r_tot),
+            "total": f"{total_col[bucket]:.3f}",
+            "total_pct": calc_pct(total_col[bucket], r_tot),
+        })
 
-    rows.append({
-        "sr": c["sr"],
-        "label": bucket,
-        "rail": f"{rail[bucket]:.6f}",
-        "rail_pct": pct(rail[bucket], grand["rail"]),
-        "road": f"{road[bucket]:.6f}",
-        "road_pct": pct(road[bucket], grand["road"]),
-        "inland": f"{inland[bucket]:.6f}",
-        "inland_pct": pct(inland[bucket], grand["inland"]),
-        "pipeline": f"{pipeline[bucket]:.6f}",
-        "pipeline_pct": pct(pipeline[bucket], grand["pipeline"]),
-        "total": f"{total_col[bucket]:.6f}",
-        "total_pct": pct(total_col[bucket], grand["total"]),
-    })
-
+    g_tot = grand["total"]
     return {
         "rows": rows,
         "grand": {
-            "rail": f"{grand['rail']:.6f}",
-            "road": f"{grand['road']:.6f}",
-            "inland": f"{grand['inland']:.6f}",
-            "pipeline": f"{grand['pipeline']:.6f}",
-            "total": f"{grand['total']:.6f}",
+            "rail": f"{grand['rail']:.3f}",
+            "rail_pct": calc_pct(grand['rail'], g_tot),
+            "road": f"{grand['road']:.3f}",
+            "road_pct": calc_pct(grand['road'], g_tot),
+            "inland": f"{grand['inland']:.3f}",
+            "inland_pct": calc_pct(grand['inland'], g_tot),
+            "pipeline": f"{grand['pipeline']:.3f}",
+            "pipeline_pct": calc_pct(grand['pipeline'], g_tot),
+            "total": f"{grand['total']:.3f}",
+            "total_pct": calc_pct(grand['total'], g_tot),
         },
-        total_key: f"{sum(op_totals.values()):.6f}",
+        total_key: f"{sum(pipeline.values()):.3f}",
     }
 
 @bp.route("/module/RP01/report4/")
@@ -1018,12 +1013,11 @@ def report4_api_report():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="export",
+            operation_type="import",
             total_key="import_total",
         )
 
-        import_total = import_result["import_total"]   # <-- ADD THIS
-
+        import_total = import_result["import_total"]
 
         # Export Table
         export_result = compute_report4(
@@ -1031,7 +1025,7 @@ def report4_api_report():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="import",
+            operation_type="export",
             total_key="export_total",
         )
 
@@ -1163,7 +1157,7 @@ def _write_report_table(ws, start_row: int, title_line: str, verb: str,
                 cell.number_format = "0.00%"
                 cell.alignment = center
             elif col in ("D", "F", "H", "J", "L"):
-                cell.number_format = "0.000000"
+                cell.number_format = "#,##0.000"
                 cell.alignment = right
             elif col == "B":
                 cell.alignment = center
@@ -1185,11 +1179,11 @@ def _write_report_table(ws, start_row: int, title_line: str, verb: str,
     ws[f"B{total_row}"].alignment = center
 
     totals_values = {
-        "D": result["grand"]["rail"], "E": 1.0 if result["grand"]["rail"] else 0.0,
-        "F": result["grand"]["road"], "G": 1.0 if result["grand"]["road"] else 0.0,
-        "H": result["grand"]["inland"], "I": 1.0 if result["grand"]["inland"] else 0.0,
-        "J": result["grand"]["pipeline"], "K": 1.0 if result["grand"]["pipeline"] else 0.0,
-        "L": result["grand"]["total"], "M": 1.0 if result["grand"]["total"] else 0.0,
+        "D": float(result["grand"]["rail"]), "E": float(result["grand"]["rail_pct"]) / 100.0 if "rail_pct" in result["grand"] else (1.0 if float(result["grand"]["rail"]) else 0.0),
+        "F": float(result["grand"]["road"]), "G": float(result["grand"]["road_pct"]) / 100.0 if "road_pct" in result["grand"] else (1.0 if float(result["grand"]["road"]) else 0.0),
+        "H": float(result["grand"]["inland"]), "I": float(result["grand"]["inland_pct"]) / 100.0 if "inland_pct" in result["grand"] else (1.0 if float(result["grand"]["inland"]) else 0.0),
+        "J": float(result["grand"]["pipeline"]), "K": float(result["grand"]["pipeline_pct"]) / 100.0 if "pipeline_pct" in result["grand"] else (1.0 if float(result["grand"]["pipeline"]) else 0.0),
+        "L": float(result["grand"]["total"]), "M": 1.0 if float(result["grand"]["total"]) else 0.0,
     }
     for col, val in totals_values.items():
         cell = ws[f"{col}{total_row}"]
@@ -1200,7 +1194,7 @@ def _write_report_table(ws, start_row: int, title_line: str, verb: str,
             cell.number_format = "0.00%"
             cell.alignment = center
         else:
-            cell.number_format = "0.000000"
+            cell.number_format = "#,##0.000"
             cell.alignment = right
 
     return total_row + 1
@@ -1235,12 +1229,11 @@ def report4_api_export():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="export",
+            operation_type="import",
             total_key="import_total",
         )
 
-        import_total = import_result["import_total"]   # <-- ADD THIS
-
+        import_total = import_result["import_total"]
 
         # Export Table
         export_result = compute_report4(
@@ -1248,7 +1241,7 @@ def report4_api_export():
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="import",
+            operation_type="export",
             total_key="export_total",
         )
 
@@ -1265,7 +1258,6 @@ def report4_api_export():
         wb = Workbook()
         ws_import = wb.active
         ws_import.title = "Import"
-        ws_export = wb.create_sheet(title="Export")
 
         styles = {
             "bold": Font(bold=True),
@@ -1284,7 +1276,7 @@ def report4_api_export():
             "yellow_fill": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
         }
 
-        # ---- Sheet 1: existing Import table ----
+        # ---- Sheet 1: Import table ----
         _write_report_table(
             ws_import,
             start_row=3,
@@ -1295,22 +1287,10 @@ def report4_api_export():
             styles=styles,
         )
 
-        # ---- Sheet 2: Export table, on its own page ----
-        _write_report_table(
-            ws_export,
-            start_row=3,
-            title_line="COMMODITY-WISE EXPORT CARGO RECEIVED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT",
-            verb="Received",
-            month_label=month_label,
-            result=export_result,
-            styles=styles,
-        )
-
         widths = {"A": 3, "B": 8, "C": 26, "D": 12, "E": 12, "F": 12, "G": 12,
                   "H": 12, "I": 12, "J": 14, "K": 12, "L": 14, "M": 12}
-        for ws in (ws_import, ws_export):
-            for col, w in widths.items():
-                ws.column_dimensions[col].width = w
+        for col, w in widths.items():
+            ws_import.column_dimensions[col].width = w
 
         # Visible version stamp (small, out of the way) so you can confirm
         # at a glance which code version produced this specific download —
