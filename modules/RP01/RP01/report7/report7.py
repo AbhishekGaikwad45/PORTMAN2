@@ -96,9 +96,20 @@ def _load_live_pipeline_rows():
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT ld.id AS ldud_id, ld.cast_off_datetime, ld.alongside_datetime, ld.nor_tendered,
-                   ld.discharge_commenced, ld.discharge_completed, ld.pilot_pickup_time, ld.pilot_disembarked,
-                   h.id AS vcn_id, h.vessel_name, h.berth_name, h.cargo_type, h.operation_type,
+            SELECT ld.id AS ldud_id,
+                   ld.cast_off_datetime,
+                   ld.alongside_datetime,
+                   ld.anchored_datetime,
+                   ld.nor_tendered,
+                   ld.discharge_commenced,
+                   ld.discharge_completed,
+                   ld.pilot_pickup_time,
+                   ld.pilot_disembarked,
+                   h.id AS vcn_id,
+                   h.vessel_name,
+                   h.berth_name,
+                   h.cargo_type,
+                   h.operation_type,
                    SUM(l.quantity) AS quantity,
                    MIN(po.start_dt) AS first_parcel_start,
                    MAX(po.end_dt) AS last_parcel_end
@@ -108,9 +119,20 @@ def _load_live_pipeline_rows():
             JOIN vcn_header h ON h.id = ld.vcn_id
             WHERE l.is_deleted IS NOT TRUE
               AND COALESCE(l.is_shortclose, FALSE) = FALSE
-            GROUP BY ld.id, ld.cast_off_datetime, ld.alongside_datetime, ld.nor_tendered,
-                     ld.discharge_commenced, ld.discharge_completed, ld.pilot_pickup_time, ld.pilot_disembarked,
-                     h.id, h.vessel_name, h.berth_name, h.cargo_type, h.operation_type
+            GROUP BY ld.id,
+                     ld.cast_off_datetime,
+                     ld.alongside_datetime,
+                     ld.anchored_datetime,
+                     ld.nor_tendered,
+                     ld.discharge_commenced,
+                     ld.discharge_completed,
+                     ld.pilot_pickup_time,
+                     ld.pilot_disembarked,
+                     h.id,
+                     h.vessel_name,
+                     h.berth_name,
+                     h.cargo_type,
+                     h.operation_type
         """)
         live_raw = cur.fetchall()
     finally:
@@ -125,19 +147,64 @@ def _load_live_pipeline_rows():
             idx = dt.month - 4 if dt.month >= 4 else dt.month + 8
             mn_label = f"{MONTH_NAMES[idx]}-{str(dt.year)[-2:]}"
 
+            anchored = _parse_dt(r['anchored_datetime'])
             along = _parse_dt(r['alongside_datetime'])
             cast = _parse_dt(r['cast_off_datetime'])
-            nor = _parse_dt(r['nor_tendered'])
             p_pick = _parse_dt(r['pilot_pickup_time'])
             p_dis = _parse_dt(r['pilot_disembarked'])
-            ops_start = _parse_dt(r['first_parcel_start']) or _parse_dt(r['discharge_commenced'])
-            ops_end = _parse_dt(r['last_parcel_end']) or _parse_dt(r['discharge_completed'])
 
-            sab_hrs = (cast - along).total_seconds() / 3600.0 if (cast and along and cast > along) else 12.0
-            pbw_hrs = (along - nor).total_seconds() / 3600.0 if (along and nor and along > nor) else 2.0
-            wt_hrs = (ops_end - ops_start).total_seconds() / 3600.0 if (ops_end and ops_start and ops_end > ops_start) else sab_hrs * 0.8
-            inward_hrs = (along - p_pick).total_seconds() / 3600.0 if (along and p_pick and along > p_pick) else 3.5
-            outward_hrs = (p_dis - cast).total_seconds() / 3600.0 if (p_dis and cast and p_dis > cast) else 1.0
+            # Approved Working Time definition:
+            # Working Time = Cargo Completion Date/Time - Operations Commenced Date/Time
+            ops_start = _parse_dt(r['discharge_commenced'])
+            ops_end = _parse_dt(r['discharge_completed'])
+
+            # 3. Pre-Berthing Waiting Time
+            # Approved formula:
+            # Pre-Berthing Waiting Time = Alongside Date/Time - Anchorage Date/Time
+            pbw_hrs = (
+                (along - anchored).total_seconds() / 3600.0
+                if anchored and along and along > anchored
+                else 0.0
+            )
+
+            # 4. Working Time
+            # Approved formula:
+            # Working Time = Cargo Completion Date/Time - Operations Commenced Date/Time
+            wt_hrs = (
+                (ops_end - ops_start).total_seconds() / 3600.0
+                if ops_start and ops_end and ops_end > ops_start
+                else 0.0
+            )
+
+            # 5. Total Berth Stay
+            # Approved formula:
+            # Total Berth Stay = Cast-off / Sail Date/Time - Alongside Date/Time
+            sab_hrs = (
+                (cast - along).total_seconds() / 3600.0
+                if cast and along and cast > along
+                else 0.0
+            )
+
+            # 7. Navigation Time
+            # Approved formula:
+            # Navigation Time = Alongside Date/Time - Pilot Pick-up Date/Time
+            inward_hrs = (
+                (along - p_pick).total_seconds() / 3600.0
+                if along and p_pick and along > p_pick
+                else 0.0
+            )
+
+            # Outward movement:
+            # Pilot Disembarked Date/Time -> Cast-off Date/Time
+            outward_hrs = (
+                (p_dis - cast).total_seconds() / 3600.0
+                if p_dis and cast and p_dis > cast
+                else (
+                    (cast - p_dis).total_seconds() / 3600.0
+                    if p_dis and cast and cast > p_dis
+                    else 0.0
+                )
+            )
 
             live_rows.append({
                 'fin_year': fy,
@@ -150,8 +217,8 @@ def _load_live_pipeline_rows():
                 'unloading_terminal': r['berth_name'],
                 'quantity': float(r['quantity'] or 0),
                 'pre_berthing_waiting': pbw_hrs / 24.0,
-                'waiting_port': (pbw_hrs * 0.5) / 24.0,
-                'waiting_non_port': (pbw_hrs * 0.5) / 24.0,
+                'waiting_port': pbw_hrs / 24.0,
+                'waiting_non_port': 0.0,
                 'stay_at_berth': sab_hrs / 24.0,
                 'working_time': wt_hrs / 24.0,
                 'inward_movement': inward_hrs / 24.0,
