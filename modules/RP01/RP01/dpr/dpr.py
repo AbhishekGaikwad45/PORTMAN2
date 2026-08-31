@@ -109,21 +109,39 @@ def _fmt_eta(dt_val):
     return str(dt_val)
 
 
-def _categorize_cargo(cargo_name):
-    """Map a cargo string to Section B categories: Edible Oil, Phosphoric, Lube Oil, Chemicals, POL."""
-    c = str(cargo_name or '').upper().strip()
-    if 'EDIBLE' in c or 'CPO' in c or 'CDSBO' in c or 'SOYA' in c or 'PALM' in c or 'SUNFLOWER' in c:
-        return 'Edible Oil'
-    elif 'PHOSPHORIC' in c or 'PH.ACID' in c or 'PH ACID' in c or 'ACID' in c:
+def _categorize_cargo(cargo_name, cargo_cat=None, cargo_sub=None, cargo_sub2=None):
+    """Map cargo to Section B categories: Edible Oil, Phosphoric, Lube Oil, Chemicals, POL."""
+    c_name = str(cargo_name or '').upper().strip()
+    c_cat = str(cargo_cat or '').upper().strip()
+    c_sub = str(cargo_sub or '').upper().strip()
+    c_sub2 = str(cargo_sub2 or '').upper().strip()
+
+    full = f"{c_name} {c_cat} {c_sub} {c_sub2}"
+
+    # 1. PHOSPHORIC (PH ACID, PHOSPHORIC)
+    if 'PH ACID' in full or 'PH.ACID' in full or 'PHOSPHORIC' in full:
         return 'Phosphoric'
-    elif 'LUBE' in c or 'BASE OIL' in c or 'YUBASE' in c:
+
+    # 2. LUBE OIL (LUBE, BASE OIL, YUBASE, ARAMCO ALTRA, ARAMCO PRIMA, LUBO, SHELL, HVI)
+    if 'LUBE' in full or 'BASE OIL' in full or 'BASEOIL' in full or 'YUBASE' in full or 'ARAMCO ALTRA' in full or 'ARAMCO PRIMA' in full or 'LUBO' in full:
         return 'Lube Oil'
-    elif 'POL' in c or 'HSD' in c or 'MS' in c or 'FO' in c or 'NAPHTHA' in c or 'DIESEL' in c or 'GASOIL' in c:
+
+    # 3. POL (FURNACE OIL, DIESEL, MOTOR SPIRIT, CARBAN BLACK, CARBON BLACK, CBFS, FO, POL)
+    if ('FURNACE OIL' in full or 'DIESEL' in full or 'MOTOR SPIRIT' in full or 
+        'CARBAN BLACK' in full or 'CARBON BLACK' in full or 'CBFS' in full or 
+        'POL' in full or c_cat == 'POL' or c_sub == 'POL' or c_sub2 == 'POL' or 
+        'POL-BLACK' in full or 'POL BLACK' in full or c_name == 'FO' or 
+        'FO [' in c_name or 'FO ' in c_name or c_name.startswith('FO')):
         return 'POL'
-    elif 'CHEMICAL' in c or 'SM' in c or 'IPA' in c or 'MDC' in c or 'TOLUENE' in c or 'XYLENE' in c or 'MEK' in c or 'ETHANOL' in c or 'METHANOL' in c:
-        return 'Chemicals'
-    else:
-        return 'Chemicals'
+
+    # 4. EDIBLE OIL (SOYABEAN OIL, PALM OIL, SUNFLOWER, PALM OLEIN, EDIBLE OIL, GLYCERINE, CPO, CDSBO, CSFO, SOYA, PALM)
+    if ('SOYABEAN OIL' in full or 'PALM OIL' in full or 'SUNFLOWER' in full or 'PALM OLEIN' in full or 
+        c_name == 'EDIBLE OIL' or c_cat == 'EDIBLE OIL' or 'GLYCERINE' in full or
+        'CPO' in full or 'CDSBO' in full or 'CSFO' in full or 'SOYA' in full or 'PALM' in full):
+        return 'Edible Oil'
+
+    # 5. CHEMICALS
+    return 'Chemicals'
 
 
 def _get_section_a(cur, window_start, window_end):
@@ -329,107 +347,16 @@ def _get_section_b(cur, selected_date, window_start, window_end):
     1. Balance on Board to be unloaded/Loaded
     2. Cargo discharged during Day
     3. Cargo discharge in this Month
-    4. Cum handled FY 2026-27 (Apr-Jun from mis_vessel_master.new_cat + Jul-report date from live LUEU logs using vessel_cargo.cargo_category)
+    4. Cum handled FY 2026-27
     5. Cum handled FY 2025-26
     6. Cum handled FY 2024-25
     7. Cum Loading/unloading till date
     """
     categories = ['Edible Oil', 'Phosphoric', 'Lube Oil', 'Chemicals', 'POL']
-    fy_label, fy_start_dt = _get_fy_info(selected_date)
+    fy_label, _ = _get_fy_info(selected_date)
     month_start, _ = _get_month_window(selected_date, window_end)
     month_name = selected_date.strftime('%b %Y')
-    month_str = selected_date.strftime('%b-%y')      # e.g. May-26
-    month_str_long = selected_date.strftime('%b-%Y') # e.g. May-2026
 
-    # 1. Build vessel_cargo map (LOWER(TRIM(cargo_name)) -> cargo_category)
-    cur.execute("""
-        SELECT
-            LOWER(TRIM(cargo_name)) AS norm_name,
-            cargo_category,
-            cargo_type,
-            cargo_sub_category_2
-        FROM vessel_cargo
-        WHERE cargo_name IS NOT NULL AND TRIM(cargo_name) != ''
-    """)
-    vc_rows = cur.fetchall()
-
-    vc_map = {}
-    for r in vc_rows:
-        cn = (r.get('norm_name') or '').strip().lower()
-        if not cn:
-            continue
-        cat = (r.get('cargo_category') or '').strip()
-        c_type = (r.get('cargo_type') or '').strip()
-        sub2 = (r.get('cargo_sub_category_2') or '').strip()
-        combined = f"{cat} {c_type} {sub2} {cn}".upper()
-
-        if 'EDIBLE' in combined:
-            mapped = 'Edible Oil'
-        elif 'PHOSPHORIC' in combined or 'PH.ACID' in combined or 'PH ACID' in combined:
-            mapped = 'Phosphoric'
-        elif 'LUBE' in combined or 'BASE OIL' in combined or 'SHELL' in combined or 'YUBASE' in combined:
-            mapped = 'Lube Oil'
-        elif 'POL' in combined or 'BLACK' in combined or 'HSD' in combined or 'FO' in combined:
-            mapped = 'POL'
-        elif 'CHEM' in combined:
-            mapped = 'Chemicals'
-        else:
-            cn_u = cn.upper()
-            if 'EDIBLE' in cn_u or 'CPO' in cn_u or 'CDSBO' in cn_u or 'CSFO' in cn_u or 'SOYA' in cn_u or 'PALM' in cn_u or 'SUNFLOWER' in cn_u:
-                mapped = 'Edible Oil'
-            elif 'PH' in cn_u or 'ACID' in cn_u:
-                mapped = 'Phosphoric'
-            elif 'LUBE' in cn_u or 'BASE' in cn_u or 'SHELL' in cn_u:
-                mapped = 'Lube Oil'
-            elif 'POL' in cn_u or 'CBFS' in cn_u or 'FO' in cn_u:
-                mapped = 'POL'
-            else:
-                mapped = 'Chemicals'
-        vc_map[cn] = mapped
-
-    def get_live_cargo_category(cargo_name):
-        if not cargo_name:
-            return None
-        c = cargo_name.strip().lower()
-        if c in vc_map:
-            return vc_map[c]
-        return None
-
-    def categorize(cat_str, cargo_name=None):
-        c_name = str(cargo_name or '').strip()
-        if c_name:
-            vc_cat = get_live_cargo_category(c_name)
-            if vc_cat:
-                return vc_cat
-
-        u = str(cat_str or '').strip().upper()
-        c = c_name.upper()
-
-        if u in ('EDIBLE OIL', 'EDIBLE'):
-            return 'Edible Oil'
-        elif u in ('POL', 'POL BLACK'):
-            return 'POL'
-        elif u in ('PHOSPHORIC', 'PH.ACID', 'PH ACID', 'FERTILIZERS', 'FERTILIZER'):
-            return 'Phosphoric'
-        elif u in ('LUBE OIL', 'LUBE'):
-            return 'Lube Oil'
-        elif u in ('CHEMICAL', 'CHEMICALS'):
-            return 'Chemicals'
-
-        if 'PHOSPHORIC' in c or 'PH.ACID' in c or 'PH ACID' in c:
-            return 'Phosphoric'
-        elif 'LUBE' in c or 'BASE OIL' in c or 'CST' in c or 'LUBO' in c or 'SHELL' in c or 'ARAMCO' in c or 'YUBASE' in c:
-            return 'Lube Oil'
-        elif 'POL' in c or 'HSD' in c or 'MS' in c or 'FO' in c or 'NAPHTHA' in c or 'DIESEL' in c or 'CBFS' in c:
-            return 'POL'
-        elif 'EDIBLE' in c or 'CPO' in c or 'CDSBO' in c or 'CSFO' in c or 'SOYA' in c or 'PALM' in c or 'SUNFLOWER' in c:
-            return 'Edible Oil'
-        elif 'CHEMICAL' in c or 'SM' in c or 'IPA' in c or 'MDC' in c or 'TOLUENE' in c or 'XYLENE' in c or 'MEK' in c or 'ETHANOL' in c or 'METHANOL' in c or 'ACID' in c or 'ACETONE' in c or 'VAM' in c:
-            return 'Chemicals'
-        else:
-            return 'Chemicals'
-
-    # Initialize data grid
     grid = {
         'balance_on_board': {c: 0.0 for c in categories},
         'day_discharged': {c: 0.0 for c in categories},
@@ -440,26 +367,20 @@ def _get_section_b(cur, selected_date, window_start, window_end):
         'cum_till_date': {c: 0.0 for c in categories},
     }
 
-    # 1. Balance on Board (to be unloaded/loaded for active vessels alongside in Section A)
+    # 1. Balance on Board (calculated per parcel operation first)
     cur.execute("""
         SELECT
             po.id AS parcel_op_id,
-            COALESCE(po.cargo_name, vh.cargo_type, 'Liquid Bulk') AS cargo,
-            po.quantity AS op_qty
-        FROM vcn_header vh
-        JOIN ldud_header lh ON lh.vcn_id = vh.id
-        LEFT JOIN ldud_parcel_ops po ON po.ldud_id = lh.id
-        WHERE (vh.berth_name LIKE '%%LB%%' OR vh.berth_name LIKE '%%03%%' OR vh.berth_name LIKE '%%04%%')
-          AND NULLIF(lh.alongside_datetime,'') IS NOT NULL
-          AND NULLIF(lh.alongside_datetime,'')::timestamp <= %s
-          AND (
-              NULLIF(lh.cast_off_datetime,'') IS NULL
-              OR NULLIF(lh.cast_off_datetime,'')::timestamp > %s
-          )
-    """, (window_end, window_end))
+            po.cargo_name,
+            COALESCE(po.quantity, 0) AS op_qty
+        FROM ldud_parcel_ops po
+        JOIN ldud_header lh ON lh.id = po.ldud_id
+        WHERE COALESCE(lh.is_deleted, FALSE) = FALSE
+    """)
     active_rows = cur.fetchall()
     for r in active_rows:
-        c_name = r.get('cargo')
+        pid = r.get('parcel_op_id')
+        c_name = r.get('cargo_name')
         p_qty = 0.0
         if r.get('op_qty'):
             try:
@@ -467,7 +388,6 @@ def _get_section_b(cur, selected_date, window_start, window_end):
             except Exception:
                 p_qty = 0.0
 
-        pid = r.get('parcel_op_id')
         real_qty = 0.0
         if pid:
             try:
@@ -475,17 +395,10 @@ def _get_section_b(cur, selected_date, window_start, window_end):
                     SELECT SUM(COALESCE(quantity, 0)) AS q
                     FROM lueu_parcel_log
                     WHERE parcel_op_id = %s
-                      AND is_deleted IS NOT TRUE
-                      AND is_shortclose IS NOT TRUE
+                      AND COALESCE(is_deleted, FALSE) = FALSE
+                      AND COALESCE(is_shortclose, FALSE) = FALSE
                       AND LOWER(COALESCE(remarks, '')) NOT LIKE '%%short%%close%%'
-                      AND NULLIF(entry_date, '') IS NOT NULL
-                      AND (
-                          CASE
-                              WHEN LENGTH(TRIM(entry_date)) > 10 THEN TRIM(entry_date)::timestamp
-                              ELSE (TRIM(entry_date) || ' ' || COALESCE(NULLIF(TRIM(to_time), ''), NULLIF(TRIM(from_time), ''), '00:00'))::timestamp
-                          END
-                      ) <= %s
-                """, (pid, window_end))
+                """, (pid,))
                 lr = cur.fetchone()
                 if lr and lr.get('q'):
                     real_qty = float(lr['q'])
@@ -493,158 +406,110 @@ def _get_section_b(cur, selected_date, window_start, window_end):
                 pass
 
         rem = max(p_qty - real_qty, 0.0)
-        vc_cat = get_live_cargo_category(c_name)
-        cat = categorize(vc_cat, c_name)
+        cat = _categorize_cargo(c_name)
         grid['balance_on_board'][cat] += rem
 
     # 2. Cargo discharged during Day (window_start <= log_timestamp < window_end)
     cur.execute("""
         SELECT
             po.cargo_name,
-            vh.cargo_type,
             SUM(COALESCE(log.quantity, 0)) AS qty
         FROM lueu_parcel_log log
         JOIN ldud_parcel_ops po ON po.id = log.parcel_op_id
         JOIN ldud_header lh ON lh.id = po.ldud_id
-        JOIN vcn_header vh ON vh.id = lh.vcn_id
-        WHERE log.is_deleted IS NOT TRUE
-          AND log.is_shortclose IS NOT TRUE
-          AND LOWER(COALESCE(log.remarks, '')) NOT LIKE '%%short%%close%%'
-          AND NULLIF(log.entry_date, '') IS NOT NULL
+        WHERE COALESCE(log.is_deleted, FALSE) = FALSE
+          AND COALESCE(log.is_shortclose, FALSE) = FALSE
+          AND COALESCE(lh.is_deleted, FALSE) = FALSE
+          AND NULLIF(TRIM(log.entry_date), '') IS NOT NULL
           AND (
               CASE
-                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN TRIM(log.entry_date)::timestamp
-                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.to_time), ''), NULLIF(TRIM(log.from_time), ''), '00:00'))::timestamp
+                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN NULLIF(TRIM(log.entry_date), '')::timestamp
+                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.from_time), ''), NULLIF(TRIM(log.to_time), ''), '00:00'))::timestamp
               END
           ) >= %s
           AND (
               CASE
-                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN TRIM(log.entry_date)::timestamp
-                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.to_time), ''), NULLIF(TRIM(log.from_time), ''), '00:00'))::timestamp
+                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN NULLIF(TRIM(log.entry_date), '')::timestamp
+                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.from_time), ''), NULLIF(TRIM(log.to_time), ''), '00:00'))::timestamp
               END
           ) < %s
-        GROUP BY po.cargo_name, vh.cargo_type
+        GROUP BY po.cargo_name
     """, (window_start, window_end))
     for r in cur.fetchall():
-        c_name = r['cargo_name'] or r['cargo_type']
-        vc_cat = get_live_cargo_category(c_name)
-        cat = categorize(vc_cat, c_name)
-        q = float(r['qty'] or 0)
+        c_name = r.get('cargo_name')
+        q = float(r.get('qty') or 0)
+        cat = _categorize_cargo(c_name)
         grid['day_discharged'][cat] += q
 
-    # 3. Month logs (from month_start to window_end)
-    jul_2026_start = datetime(2026, 7, 1, 7, 0, 0)
-
-    if window_end >= jul_2026_start:
-        # Live logging period (July 2026 onwards)
-        cur.execute("""
-            SELECT
-                po.cargo_name,
-                vh.cargo_type,
-                SUM(COALESCE(log.quantity, 0)) AS qty
-            FROM lueu_parcel_log log
-            JOIN ldud_parcel_ops po ON po.id = log.parcel_op_id
-            JOIN ldud_header lh ON lh.id = po.ldud_id
-            JOIN vcn_header vh ON vh.id = lh.vcn_id
-            WHERE log.is_deleted IS NOT TRUE
-              AND log.is_shortclose IS NOT TRUE
-              AND LOWER(COALESCE(log.remarks, '')) NOT LIKE '%%short%%close%%'
-              AND log.entry_date IS NOT NULL
-              AND NULLIF(log.entry_date::text, '')::timestamp >= %s
-              AND NULLIF(log.entry_date::text, '')::timestamp <= %s
-            GROUP BY po.cargo_name, vh.cargo_type
-        """, (month_start, window_end))
-        for r in cur.fetchall():
-            c_name = r['cargo_name'] or r['cargo_type']
-            vc_cat = get_live_cargo_category(c_name)
-            cat = categorize(vc_cat, c_name)
-            q = float(r['qty'] or 0)
-            grid['month_discharged'][cat] += q
-    else:
-        # Historical period (Apr 2026 - Jun 2026 from mis_vessel_master)
-        cur.execute("""
-            SELECT new_cat, category, cargo, SUM(COALESCE(quantity, 0)) AS total_qty
-            FROM mis_vessel_master
-            WHERE month = %s OR month = %s
-            GROUP BY new_cat, category, cargo
-        """, (month_str, month_str_long))
-        for r in cur.fetchall():
-            c_name = r.get('cargo') or r.get('category')
-            cat = categorize(r.get('new_cat'), c_name)
-            q = float(r.get('total_qty') or 0)
-            grid['month_discharged'][cat] += q
-
-    # 4. Cum handled FY 2026-27:
-    # Part A: Apr 2026 - Jun 2026 from mis_vessel_master
+    # 3. Cargo discharge in this Month (month_start <= log_timestamp < window_end)
     cur.execute("""
-        SELECT 
-            new_cat,
-            cargo,
-            category,
-            SUM(COALESCE(quantity, 0)) AS qty
+        SELECT
+            po.cargo_name,
+            SUM(COALESCE(log.quantity, 0)) AS qty
+        FROM lueu_parcel_log log
+        JOIN ldud_parcel_ops po ON po.id = log.parcel_op_id
+        JOIN ldud_header lh ON lh.id = po.ldud_id
+        WHERE COALESCE(log.is_deleted, FALSE) = FALSE
+          AND COALESCE(log.is_shortclose, FALSE) = FALSE
+          AND COALESCE(lh.is_deleted, FALSE) = FALSE
+          AND NULLIF(TRIM(log.entry_date), '') IS NOT NULL
+          AND (
+              CASE
+                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN NULLIF(TRIM(log.entry_date), '')::timestamp
+                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.from_time), ''), NULLIF(TRIM(log.to_time), ''), '00:00'))::timestamp
+              END
+          ) >= %s
+          AND (
+              CASE
+                  WHEN LENGTH(TRIM(log.entry_date)) > 10 THEN NULLIF(TRIM(log.entry_date), '')::timestamp
+                  ELSE (TRIM(log.entry_date) || ' ' || COALESCE(NULLIF(TRIM(log.from_time), ''), NULLIF(TRIM(log.to_time), ''), '00:00'))::timestamp
+              END
+          ) < %s
+        GROUP BY po.cargo_name
+    """, (month_start, window_end))
+    for r in cur.fetchall():
+        c_name = r.get('cargo_name')
+        q = float(r.get('qty') or 0)
+        cat = _categorize_cargo(c_name)
+        grid['month_discharged'][cat] += q
+
+    # 4. Cum handled FY 2026-27 (from mis_vessel_master)
+    cur.execute("""
+        SELECT new_cat, category1, category, cargo, SUM(COALESCE(quantity, 0)) AS qty
         FROM mis_vessel_master
         WHERE fin_year = '2026-27'
-          AND (month IN ('Apr-26', 'May-26', 'Jun-26', 'Apr-2026', 'May-2026', 'Jun-2026')
-               OR month LIKE '%%Apr%%' OR month LIKE '%%May%%' OR month LIKE '%%Jun%%')
-        GROUP BY new_cat, cargo, category
+        GROUP BY new_cat, category1, category, cargo
     """)
     for r in cur.fetchall():
-        c_name = r.get('cargo') or r.get('category')
-        cat = categorize(r.get('new_cat'), c_name)
-        q = float(r['qty'] or 0)
+        cat = _categorize_cargo(r.get('cargo'), r.get('new_cat'), r.get('category1'), r.get('category'))
+        q = float(r.get('qty') or 0)
         grid['cum_fy_curr'][cat] += q
 
-    # Part B: Jul 2026 - selected report date (window_end) from live lueu_parcel_log
-    if window_end >= jul_2026_start:
-        cur.execute("""
-            SELECT
-                po.cargo_name,
-                vh.cargo_type,
-                SUM(COALESCE(log.quantity, 0)) AS qty
-            FROM lueu_parcel_log log
-            JOIN ldud_parcel_ops po ON po.id = log.parcel_op_id
-            JOIN ldud_header lh ON lh.id = po.ldud_id
-            JOIN vcn_header vh ON vh.id = lh.vcn_id
-            WHERE log.is_deleted IS NOT TRUE
-              AND log.is_shortclose IS NOT TRUE
-              AND LOWER(COALESCE(log.remarks, '')) NOT LIKE '%%short%%close%%'
-              AND log.entry_date IS NOT NULL
-              AND NULLIF(log.entry_date::text, '')::timestamp >= %s
-              AND NULLIF(log.entry_date::text, '')::timestamp <= %s
-            GROUP BY po.cargo_name, vh.cargo_type
-        """, (jul_2026_start, window_end))
-        for r in cur.fetchall():
-            c_name = r['cargo_name'] or r['cargo_type']
-            vc_cat = get_live_cargo_category(c_name)
-            cat = categorize(vc_cat, c_name)
-            q = float(r['qty'] or 0)
-            grid['cum_fy_curr'][cat] += q
-
-    # 4b. Cum handled FY 2025-26 dynamically from mis_history
+    # 5. Cum handled FY 2025-26 (from mis_history)
     cur.execute("""
-        SELECT cargo_category, cargo_name, SUM(COALESCE(quantity, 0)) AS qty
+        SELECT cargo_category, cargo_sub_category, cargo_sub_category_2, cargo_name, SUM(COALESCE(quantity, 0)) AS qty
         FROM mis_history
         WHERE fin_year = '2025-26'
-        GROUP BY cargo_category, cargo_name
+        GROUP BY cargo_category, cargo_sub_category, cargo_sub_category_2, cargo_name
     """)
     for r in cur.fetchall():
-        cat = categorize(r.get('cargo_category'), r.get('cargo_name'))
+        cat = _categorize_cargo(r.get('cargo_name'), r.get('cargo_category'), r.get('cargo_sub_category'), r.get('cargo_sub_category_2'))
         q = float(r.get('qty') or 0)
         grid['cum_fy_2025_26'][cat] += q
 
-    # 4c. Cum handled FY 2024-25 dynamically from mis_history
+    # 6. Cum handled FY 2024-25 (from mis_history)
     cur.execute("""
-        SELECT cargo_category, cargo_name, SUM(COALESCE(quantity, 0)) AS qty
+        SELECT cargo_category, cargo_sub_category, cargo_sub_category_2, cargo_name, SUM(COALESCE(quantity, 0)) AS qty
         FROM mis_history
         WHERE fin_year = '2024-25'
-        GROUP BY cargo_category, cargo_name
+        GROUP BY cargo_category, cargo_sub_category, cargo_sub_category_2, cargo_name
     """)
     for r in cur.fetchall():
-        cat = categorize(r.get('cargo_category'), r.get('cargo_name'))
+        cat = _categorize_cargo(r.get('cargo_name'), r.get('cargo_category'), r.get('cargo_sub_category'), r.get('cargo_sub_category_2'))
         q = float(r.get('qty') or 0)
         grid['cum_fy_2024_25'][cat] += q
 
-    # 5. Cum Loading/unloading till date = FY 2026-27 + FY 2025-26 + FY 2024-25
+    # 7. Cum Loading/unloading till date = FY 2026-27 + FY 2025-26 + FY 2024-25
     for c in categories:
         grid['cum_till_date'][c] = (
             grid['cum_fy_curr'][c] +

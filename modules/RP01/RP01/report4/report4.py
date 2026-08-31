@@ -331,34 +331,29 @@ CARGO_MAP_CACHE_SECONDS = 300  # re-fetch vessel_cargo at most every 5 minutes
 _cargo_map_cache = {"map": None, "loaded_at": 0.0, "unclassified": []}
 
 
-def _classify_bucket(cargo_type, cargo_sub_category_2):
-    """Best-guess classifier from vessel_cargo.cargo_type /
-    cargo_sub_category_2 into a report4 bucket. Returns None if neither
-    field matches any known keyword (caller logs these as unclassified,
-    they are NOT silently guessed into a bucket).
-
-    KEYWORD RULES — best guesses based on the same category words used in
-    the old static CATEGORY_MAP (POL, Chemical, Edible Oil, Ph.Acid,
-    Phenol, Acetone, Furnace Oil, Cement, Break Bulk, Containers, General
-    Cargo). I don't know the real distinct values of cargo_type /
-    cargo_sub_category_2 yet — please confirm/correct these against
-    `SELECT DISTINCT cargo_type, cargo_sub_category_2 FROM vessel_cargo`."""
+def _classify_bucket(cargo_type, cargo_category, cargo_sub_category_2, cargo_name=None, cargo_code=None):
+    """Classify cargo from vessel_cargo fields (cargo_type, cargo_category,
+    cargo_sub_category_2, cargo_name, cargo_code) into a report4 bucket."""
 
     t = (str(cargo_type) if cargo_type is not None else "").strip().lower()
+    c = (str(cargo_category) if cargo_category is not None else "").strip().lower()
     s = (str(cargo_sub_category_2) if cargo_sub_category_2 is not None else "").strip().lower()
-    combined = f"{t} {s}".strip()
+    n = (str(cargo_name) if cargo_name is not None else "").strip().lower()
+    cd = (str(cargo_code) if cargo_code is not None else "").strip().lower()
 
-    if not combined or combined == "none none":
+    combined = f"{t} {c} {s} {n} {cd}".strip()
+
+    if not combined or combined == "none none none none none":
         return None
 
     # DRY BULK (CEMENT)
     if "cement" in combined:
         return "DRY BULK (CEMENT)"
 
-    # Liquid — covers POL / chemical / edible oil / acid style cargo
+    # Liquid — covers POL / chemical / edible oil / acid / fertilizers / liquid / FO
     liquid_keywords = [
         "liquid", "pol", "chemical", "oil", "acid", "phenol",
-        "acetone", "furnace", "solvent", "edible",
+        "acetone", "furnace", "solvent", "edible", "fo", "fertilizer", "farm",
     ]
     if any(kw in combined for kw in liquid_keywords):
         return "Liquid"
@@ -372,14 +367,9 @@ def _classify_bucket(cargo_type, cargo_sub_category_2):
 
 
 def load_cargo_category_map(force_refresh: bool = False) -> dict:
-    """Builds { normalized_cargo_name: bucket } from vessel_cargo, using
-    cargo_type / cargo_sub_category_2 to classify each cargo_name into a
-    report4 bucket. Cached in-process for CARGO_MAP_CACHE_SECONDS.
-
-    Any cargo_name whose cargo_type/cargo_sub_category_2 doesn't match a
-    known keyword is logged (not silently added to the map — it's just
-    absent, so callers fall back to the static CATEGORY_MAP or, failing
-    that, drop the row and log it in load_lueu_data)."""
+    """Builds { normalized_cargo_name: bucket } from vessel_cargo cargo master table,
+    using cargo_category, cargo_type, cargo_sub_category_2, cargo_code to classify
+    each cargo_name into a report4 bucket. Cached in-process for CARGO_MAP_CACHE_SECONDS."""
 
     now = time.time()
     if (
@@ -393,7 +383,7 @@ def load_cargo_category_map(force_refresh: bool = False) -> dict:
     try:
         cur = get_cursor(conn)
         cur.execute("""
-            SELECT DISTINCT cargo_name, cargo_type, cargo_sub_category_2
+            SELECT DISTINCT cargo_name, cargo_category, cargo_type, cargo_sub_category_2, cargo_code
             FROM vessel_cargo
             WHERE cargo_name IS NOT NULL
         """)
@@ -406,15 +396,18 @@ def load_cargo_category_map(force_refresh: bool = False) -> dict:
 
     for r in rows:
         cargo_name = str(r["cargo_name"]).strip()
+        cargo_category = r.get("cargo_category")
         cargo_type = r.get("cargo_type")
         cargo_sub2 = r.get("cargo_sub_category_2")
+        cargo_code = r.get("cargo_code")
 
-        bucket = _classify_bucket(cargo_type, cargo_sub2)
+        bucket = _classify_bucket(cargo_type, cargo_category, cargo_sub2, cargo_name, cargo_code)
         norm_name = _normalize_cargo_key(cargo_name)
 
         if bucket is None:
             unclassified.append({
                 "cargo_name": cargo_name,
+                "cargo_category": cargo_category,
                 "cargo_type": cargo_type,
                 "cargo_sub_category_2": cargo_sub2,
             })
@@ -997,40 +990,17 @@ def report4_api_report():
         else:
             lueu_df = pd.DataFrame(columns=["bucket", "quantity_000t", "import_export"])
 
-        # ---- Table 1: Despatched (Import) table ----
-        # SWAPPED BACK per explicit user confirmation: the Despatched
-        # (Import) table's correct data is rows labeled "import", and the
-        # Received (Export) table's correct data is rows labeled "export"
-        # — i.e. the DIRECT, unswapped mapping. Applied uniformly
-        # regardless of source (mis_vessel_master or lueu_parcel_log).
-        # NOTE: this mapping has flipped multiple times as new information
-        # came in — see the module docstring's "HISTORY OF FIXES" section.
-        # Do not change this again without a concrete, confirmed example
-        # (screenshot + known-correct expected values) showing it's wrong.
-        # Import Table
-        import_result = compute_report4(
-            df,
-            lueu_df,
-            fin_year,
-            month_idx,
-            operation_type="export",
-            total_key="import_total",
-        )
-
-        import_total = import_result["import_total"]
-
-        # Export Table
+        # Export Table (Received)
         export_result = compute_report4(
             df,
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="import",
+            operation_type="export",
             total_key="export_total",
         )
 
         export_total = export_result["export_total"]
-        import_total = import_result["import_total"]
         print(f"[report4] EXPORT (Received) total ({fin_year} idx={month_idx}): {export_total}")
 
         month_label = idx_to_month_label(fin_year, month_idx)
@@ -1039,16 +1009,11 @@ def report4_api_report():
             "fin_year": fin_year,
             "month_label": month_label,
             "source": "lueu_parcel_log" if use_lueu_source(fin_year, month_idx) else "mis_vessel_master",
-            # ---- Summary: totals, import first then export ----
             "summary": {
-                "import_total": import_total,
                 "export_total": export_total,
             },
-            # ---- Table 1: existing Import (Despatched) table ----
-            "rows": import_result["rows"],
-            "grand": import_result["grand"],
-            "import_total": import_total,
-            # ---- Table 2: Export (Received) table ----
+            "rows": export_result["rows"],
+            "grand": export_result["grand"],
             "export_rows": export_result["rows"],
             "export_grand": export_result["grand"],
             "export_total": export_total,
@@ -1217,48 +1182,24 @@ def report4_api_export():
 
         print("[report4] report4_api_export CODE VERSION = 2026-07-22-dynamic-vessel_cargo-mapping")
 
-        # ---- Table 1: Despatched (Import) table ----
-        # SWAPPED BACK per explicit user confirmation (see
-        # report4_api_report for full explanation): direct, unswapped
-        # mapping — "import" feeds the Despatched(Import) table, "export"
-        # feeds the Received(Export) table. Applied uniformly regardless
-        # of source (mis_vessel_master or lueu_parcel_log).
-        # Import Table
-        import_result = compute_report4(
-            df,
-            lueu_df,
-            fin_year,
-            month_idx,
-            operation_type="export",
-            total_key="import_total",
-        )
-        
-
-        import_total = import_result["import_total"]
-
-        # Export Table
+        # Export Table (Received)
         export_result = compute_report4(
             df,
             lueu_df,
             fin_year,
             month_idx,
-            operation_type="import",
+            operation_type="export",
             total_key="export_total",
         )
 
         export_total = export_result["export_total"]
-        import_total = import_result["import_total"]
         print(f"[report4] EXPORT (Received) total ({fin_year} idx={month_idx}): {export_total}")
 
         month_label = idx_to_month_label(fin_year, month_idx)
 
-        # NOTE: Summary sheet removed per request — workbook now contains
-        # only the Import and Export table sheets. The Import sheet is the
-        # workbook's default/active first sheet (renamed from the default
-        # "Sheet" that Workbook() creates automatically).
         wb = Workbook()
-        ws_import = wb.active
-        ws_import.title = "Import"
+        ws_export = wb.active
+        ws_export.title = "Export"
 
         styles = {
             "bold": Font(bold=True),
@@ -1277,27 +1218,21 @@ def report4_api_export():
             "yellow_fill": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
         }
 
-        # ---- Sheet 1: Import table ----
+        # ---- Sheet 1: Export table (Received) ----
         _write_report_table(
-            ws_import,
+            ws_export,
             start_row=3,
-            title_line="COMMODITY-WISE IMPORT CARGO DESPATCHED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT",
-            verb="Despatched",
+            title_line="COMMODITY-WISE EXPORT CARGO RECEIVED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT",
+            verb="Received",
             month_label=month_label,
-            result=import_result,
+            result=export_result,
             styles=styles,
         )
 
         widths = {"A": 3, "B": 8, "C": 26, "D": 12, "E": 12, "F": 12, "G": 12,
                   "H": 12, "I": 12, "J": 14, "K": 12, "L": 14, "M": 12}
         for col, w in widths.items():
-            ws_import.column_dimensions[col].width = w
-
-        # Visible version stamp (small, out of the way) so you can confirm
-        # at a glance which code version produced this specific download —
-        # remove this once the summary/swap issue is confirmed resolved.
-        ws_import["A1"] = "v2026-07-22-dynamic-vessel_cargo-mapping"
-        ws_import["A1"].font = Font(size=8, italic=True, color="999999")
+            ws_export.column_dimensions[col].width = w
 
         buf = io.BytesIO()
         wb.save(buf)
