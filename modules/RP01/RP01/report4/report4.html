@@ -125,12 +125,12 @@
 
     <div id="reportStatus"></div>
 
-    <!-- ==================== TABLE 1: IMPORT (Despatched) ==================== -->
+    <!-- ==================== TABLE: EXPORT (Cargo Received) ==================== -->
     <div class="jjltpl-table-wrap">
 
         <div class="report-header">
             <div class="report-title">{{ port_name }}</div>
-            <div class="report-subtitle">COMMODITY-WISE IMPORT CARGO DESPATCHED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT</div>
+            <div class="report-subtitle">COMMODITY-WISE EXPORT CARGO RECEIVED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT</div>
             <table class="report-info">
                 <tr>
                     <td class="label">Terminal :</td>
@@ -147,10 +147,10 @@
                 <tr>
                     <th rowspan="2" style="width:6%">Sr. No.</th>
                     <th rowspan="2" style="width:20%">Commodities</th>
-                    <th colspan="2">Despatched by Rail</th>
-                    <th colspan="2">Despatched by Road</th>
-                    <th colspan="2">Despatched by Inland water<br>Transport or by Coastal Movement</th>
-                    <th colspan="2">Despatched through Pipe Line</th>
+                    <th colspan="2">Received by Rail</th>
+                    <th colspan="2">Received by Road</th>
+                    <th colspan="2">Received by Inland water<br>Transport or by Coastal Movement</th>
+                    <th colspan="2">Received through Pipe Line</th>
                     <th colspan="2">Total</th>
                 </tr>
                 <tr>
@@ -278,8 +278,10 @@ function loadReport4() {
 
             document.getElementById("reportMonth").textContent = j.month_label || "";
 
-            // Table 1: Import
-            renderTable(j.rows, j.grand, "commodityBody", {
+            // Export Table (Received)
+            const exportRows = j.export_rows || j.rows;
+            const exportGrand = j.export_grand || j.grand;
+            renderTable(exportRows, exportGrand, "commodityBody", {
                 rail: "railTotal", railPct: "railPctTotal",
                 road: "roadTotal", roadPct: "roadPctTotal",
                 inland: "inlandTotal", inlandPct: "inlandPctTotal",
