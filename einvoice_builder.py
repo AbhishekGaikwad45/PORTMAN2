@@ -148,7 +148,6 @@ def build_einvoice_from_invoice(invoice_header, invoice_lines):
     total_cgst = 0.0
     total_sgst = 0.0
     total_igst = 0.0
-    total_invoice = 0.0
 
     for idx, line in enumerate(invoice_lines, start=1):
         line_amt = _safe_float(line.get('line_amount'))
@@ -192,9 +191,13 @@ def build_einvoice_from_invoice(invoice_header, invoice_lines):
         total_cgst += cgst_amt
         total_sgst += sgst_amt
         total_igst += igst_amt
-        total_invoice += line_total
 
     # --- ValDtls ---
+    # The IRP validates TotInvVal ~= AssVal + taxes + OthChrg + RndOffAmt and
+    # rejects the payload otherwise, so TCS (OthChrg) and round-off must be
+    # declared and included — TotInvVal is summed from those components.
+    oth_chrg = _safe_float(invoice_header.get('tcs_amount'))
+    rnd_off = _safe_float(invoice_header.get('round_off'))
     val_dtls = {
         'AssVal': round(total_assessable, 2),
         'CgstVal': round(total_cgst, 2),
@@ -203,9 +206,10 @@ def build_einvoice_from_invoice(invoice_header, invoice_lines):
         'CesVal': 0,
         'StCesVal': 0,
         'Discount': 0,
-        'OthChrg': 0,
-        'RndOffAmt': 0,
-        'TotInvVal': round(total_invoice, 2),
+        'OthChrg': oth_chrg,
+        'RndOffAmt': rnd_off,
+        'TotInvVal': round(total_assessable + total_cgst + total_sgst
+                           + total_igst + oth_chrg + rnd_off, 2),
     }
 
     return {
@@ -263,6 +267,8 @@ def build_einvoice_from_fdcn(fdcn_header, fdcn_lines):
         'customer_gstin': fdcn_header.get('customer_gstin'),
         'customer_gst_state_code': fdcn_header.get('customer_gst_state_code'),
         'customer_name': fdcn_header.get('customer_name'),
+        'tcs_amount': fdcn_header.get('tcs_amount'),
+        'round_off': fdcn_header.get('round_off'),
     }
 
     # Map lines — use line_amount, line_total, and GST fields as-is

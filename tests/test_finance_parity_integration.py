@@ -1,0 +1,294 @@
+"""Integration checks for the finance-parity work, against the dev DB with
+throwaway rows that are always cleaned up:
+
+  * LDUD01 billed lock (409 on every write, admin override on reopen only)
+  * billing customer picker counts (?with_billables=1)
+  * Admin Cutover flagging, unmarking and the lock
+  * seeded bill numbering
+  * FSAP01 console endpoints
+
+No SAP or IRP network calls.
+"""
+from flask import Flask, session
+
+from database import get_db, get_cursor
+from modules.ADMIN import cutover
+from modules.FIN01 import model as fin
+from modules.FSAP01 import views as fsap
+from modules.LDUD01 import views as ldud
+
+_app = Flask(__name__)
+_app.secret_key = 'pytest-secret'
+
+
+# ── fixtures-by-hand ─────────────────────────────────────────────────────────
+
+def _mk_vessel(customer_name, ldud_status=None, vcn_status='Approved', qty='100'):
+    """VCN + one import parcel payable by `customer_name`, optionally with an
+    LDUD in `ldud_status`. Returns (vcn_id, parcel_id, ldud_id)."""
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("""INSERT INTO vcn_header (operation_type, vessel_name, doc_status, vcn_doc_num)
+                   VALUES ('Import','PARITY TEST',%s,'VCN-PARITY') RETURNING id""", [vcn_status])
+    vcn_id = cur.fetchone()['id']
+    cur.execute("""INSERT INTO vcn_consigners
+                   (vcn_id, cargo_name, quantity, consigner_name, importer_name,
+                    pipeline_name, unload_terminal, parcel_seq, parcel_no)
+                   VALUES (%s,'OIL',%s,'CNS',%s,'PL1','T1',1,'P1') RETURNING id""",
+                [vcn_id, qty, customer_name])
+    parcel_id = cur.fetchone()['id']
+    ldud_id = None
+    if ldud_status:
+        cur.execute("""INSERT INTO ldud_header (vcn_id, vessel_name, doc_status, operation_type)
+                       VALUES (%s,'PARITY TEST',%s,'Import') RETURNING id""", [vcn_id, ldud_status])
+        ldud_id = cur.fetchone()['id']
+    conn.commit(); conn.close()
+    return vcn_id, parcel_id, ldud_id
+
+
+def _drop_vessel(vcn_id, parcel_id):
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("DELETE FROM parcel_charge_billed WHERE cargo_source_type='VCN_IMPORT' AND cargo_source_id=%s",
+                [parcel_id])
+    cur.execute("DELETE FROM approval_log WHERE module_code='LDUD01' AND record_id IN "
+                "(SELECT id FROM ldud_header WHERE vcn_id=%s)", [vcn_id])
+    cur.execute("DELETE FROM ldud_parcel_ops WHERE ldud_id IN (SELECT id FROM ldud_header WHERE vcn_id=%s)",
+                [vcn_id])
+    cur.execute("DELETE FROM ldud_header WHERE vcn_id=%s", [vcn_id])
+    cur.execute("DELETE FROM vcn_header WHERE id=%s", [vcn_id])  # cascades consigners
+    conn.commit(); conn.close()
+
+
+def _service_id(code='CHGU01'):
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute('SELECT id FROM finance_service_types WHERE service_code=%s LIMIT 1', [code])
+    row = cur.fetchone(); conn.close()
+    return row['id'] if row else None
+
+
+def _bill_parcel(parcel_id, qty=100, bill_id=None, service_code='CHGU01'):
+    conn = get_db(); cur = get_cursor(conn)
+    fin.record_parcel_charge(cur, 'VCN_IMPORT', parcel_id, _service_id(service_code),
+                             service_code, bill_id, qty, 'pytest')
+    conn.commit(); conn.close()
+
+
+def _mk_customer(name):
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute('INSERT INTO vessel_customers (name) VALUES (%s) RETURNING id', [name])
+    cid = cur.fetchone()['id']
+    conn.commit(); conn.close()
+    return cid
+
+
+def _drop_customer(cid):
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute('DELETE FROM vessel_customers WHERE id=%s', [cid])
+    conn.commit(); conn.close()
+
+
+# ── D. LDUD01 billed lock ────────────────────────────────────────────────────
+
+def _post(view, payload, admin=False, user_id=1):
+    with _app.test_request_context('/', json=payload):
+        session['user_id'] = user_id
+        session['username'] = 'pytest'
+        if admin:
+            session['is_admin'] = True
+        return view()
+
+
+def test_billed_vessel_locks_every_ldud_write(monkeypatch):
+    vcn_id, parcel_id, ldud_id = _mk_vessel('PARITY LOCK CO', ldud_status='Closed')
+    try:
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute("""INSERT INTO bill_header (bill_number, bill_date, source_type, customer_type, customer_id, bill_status)
+                       VALUES ('BILL-PARITY-1','2026-09-01','MULTI','Customer',0,'Approved') RETURNING id""")
+        bill_id = cur.fetchone()['id']
+        cur.execute("""INSERT INTO ldud_parcel_ops (ldud_id, parcel_ids, quantity)
+                       VALUES (%s, %s, 50) RETURNING id""", [ldud_id, str(parcel_id)])
+        op_id = cur.fetchone()['id']
+        conn.commit(); conn.close()
+        _bill_parcel(parcel_id, bill_id=bill_id)
+
+        # Approver, not admin: reopen is refused and names the blocking bill.
+        monkeypatch.setattr(ldud, 'get_module_config', lambda code: {'approver_id': 1})
+        body, status = _post(ldud.reopen, {'id': ldud_id, 'comment': 'need to fix'})
+        assert status == 409
+        assert 'BILL-PARITY-1' in body.get_json()['error']
+
+        # Admin does not get a bypass on the other four write paths.
+        for view, payload in (
+            (ldud.save, {'id': ldud_id, 'vcn_id': vcn_id}),
+            (ldud.save_parcel_op, {'ldud_id': ldud_id, 'parcel_ids': str(parcel_id), 'quantity': 10}),
+            (ldud.delete_parcel_op, {'id': op_id}),
+            (ldud.delete, {'id': ldud_id}),
+        ):
+            body, status = _post(view, payload, admin=True)
+            assert status == 409, (view.__name__, status)
+
+        # Admin override on reopen: succeeds, with the reason in the closure log.
+        body = _post(ldud.reopen, {'id': ldud_id, 'comment': 'legacy correction'}, admin=True)
+        assert body.get_json()['doc_status'] == 'Draft'
+        actions = [r['action'] for r in ldud.model.get_closure_log(ldud_id)]
+        assert 'Force Reopen (Billed)' in actions
+
+        # The override changes doc_status only — the ledger still holds the lock.
+        assert fin.is_vcn_billed(vcn_id) is True
+    finally:
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute("DELETE FROM bill_header WHERE bill_number='BILL-PARITY-1'")
+        conn.commit(); conn.close()
+        _drop_vessel(vcn_id, parcel_id)
+
+
+def test_unbilled_vessel_is_not_locked():
+    vcn_id, parcel_id, ldud_id = _mk_vessel('PARITY OPEN CO', ldud_status='Closed')
+    try:
+        assert ldud._billed_locked(ldud_id) is None
+    finally:
+        _drop_vessel(vcn_id, parcel_id)
+
+
+# ── E. Billing customer picker ───────────────────────────────────────────────
+
+def test_picker_counts_by_stage_and_drops_fully_billed():
+    name = 'PARITY PICKER CO'
+    cid = _mk_customer(name)
+    vcn_id, parcel_id, _ = _mk_vessel(name, ldud_status=None)
+    try:
+        counts = fin.customers_with_billables()
+        assert counts[name]['proforma_count'] == 1
+        assert counts[name]['actual_count'] == 0
+
+        # Close the LDUD: same parcel, now an actual-stage billable.
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute("""INSERT INTO ldud_header (vcn_id, vessel_name, doc_status, operation_type)
+                       VALUES (%s,'PARITY TEST','Closed','Import')""", [vcn_id])
+        conn.commit(); conn.close()
+
+        counts = fin.customers_with_billables()
+        assert counts[name]['actual_count'] == 1
+        assert counts[name]['proforma_count'] == 0
+
+        # Bill every applicable charge in full — the party drops out.
+        for code in fin.parcel_charge_codes('VCN_IMPORT', None, None):
+            _bill_parcel(parcel_id, qty=100, bill_id=None, service_code=code)
+        assert name not in fin.customers_with_billables()
+    finally:
+        _drop_vessel(vcn_id, parcel_id)
+        _drop_customer(cid)
+
+
+def test_picker_ignores_parties_with_no_parcels():
+    name = 'PARITY EMPTY CO'
+    cid = _mk_customer(name)
+    try:
+        assert name not in fin.customers_with_billables()
+    finally:
+        _drop_customer(cid)
+
+
+# ── F. Admin Cutover ─────────────────────────────────────────────────────────
+
+def test_cutover_flag_locks_the_vessel_and_unmark_spares_real_bills():
+    vcn_id, parcel_id, _ = _mk_vessel('PARITY CUTOVER CO')
+    try:
+        cutover.mark_items_billed(
+            [{'cargo_source_type': 'VCN_IMPORT', 'cargo_source_id': parcel_id}], 'pytest')
+
+        # A cutover flag is a ledger row with no bill behind it — and it locks.
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute("""SELECT COUNT(*) AS n FROM parcel_charge_billed
+                       WHERE cargo_source_id=%s AND bill_id IS NULL""", [parcel_id])
+        assert cur.fetchone()['n'] > 0
+        conn.close()
+        assert fin.is_vcn_billed(vcn_id) is True
+
+        # Add a genuine bill's row, then unmark: only the NULL rows go.
+        _bill_parcel(parcel_id, qty=10, bill_id=424242, service_code='INFM01')
+        cutover.unmark_items_billed(
+            [{'cargo_source_type': 'VCN_IMPORT', 'cargo_source_id': parcel_id}], 'pytest')
+
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute("""SELECT bill_id FROM parcel_charge_billed WHERE cargo_source_id=%s""", [parcel_id])
+        remaining = [r['bill_id'] for r in cur.fetchall()]
+        conn.close()
+        assert remaining == [424242]
+    finally:
+        _drop_vessel(vcn_id, parcel_id)
+
+
+def test_cutover_lock_refuses_every_write():
+    vcn_id, parcel_id, _ = _mk_vessel('PARITY LOCKED CO')
+    cutover.set_lock(True, 'pytest')
+    try:
+        for fn, args in (
+            (cutover.mark_items_billed,
+             ([{'cargo_source_type': 'VCN_IMPORT', 'cargo_source_id': parcel_id}], 'pytest')),
+            (cutover.unmark_items_billed,
+             ([{'cargo_source_type': 'VCN_IMPORT', 'cargo_source_id': parcel_id}], 'pytest')),
+            (cutover.set_bill_seed, (999999, 'pytest')),
+        ):
+            try:
+                fn(*args)
+                assert False, f'{fn.__name__} should refuse while locked'
+            except cutover.CutoverLocked:
+                pass
+    finally:
+        cutover.set_lock(False, 'pytest')
+        _drop_vessel(vcn_id, parcel_id)
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute("DELETE FROM cutover_audit WHERE performed_by='pytest'")
+        conn.commit(); conn.close()
+
+
+def test_bill_seed_is_a_floor_then_normal_incrementing_resumes():
+    start = cutover.current_max('bill') + 500
+    try:
+        cutover.set_bill_seed(start, 'pytest')
+        assert fin.get_next_bill_number() == f'BILL{start:04d}'
+
+        # Once a real document passes the seed, incrementing takes over.
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute("""INSERT INTO bill_header (bill_number, bill_date, source_type, customer_type, customer_id, bill_status)
+                       VALUES (%s,'2026-09-01','MULTI','Customer',0,'Draft')""", [f'BILL{start + 3:04d}'])
+        conn.commit(); conn.close()
+        assert fin.get_next_bill_number() == f'BILL{start + 4:04d}'
+    finally:
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute('DELETE FROM bill_header WHERE bill_number=%s', [f'BILL{start + 3:04d}'])
+        cur.execute("DELETE FROM cutover_seed WHERE seed_type='bill'")
+        cur.execute("DELETE FROM cutover_audit WHERE performed_by='pytest'")
+        conn.commit(); conn.close()
+
+
+def test_seed_must_be_above_the_current_maximum():
+    try:
+        cutover.set_bill_seed(cutover.current_max('bill'), 'pytest')
+        assert False, 'a seed at the current maximum must be rejected'
+    except ValueError as e:
+        assert 'current maximum' in str(e)
+
+
+# ── B. FSAP01 console endpoints ──────────────────────────────────────────────
+
+def _get(view, query='', user_id=1, admin=True, **kwargs):
+    with _app.test_request_context('/?' + query):
+        session['user_id'] = user_id
+        if admin:
+            session['is_admin'] = True
+        return view(**kwargs)
+
+
+def test_fsap01_console_endpoints_return_a_paginated_envelope():
+    for view in (fsap.callback_logs, fsap.outbound_logs, fsap.sap_queue_list):
+        body = _get(view, 'page=1&size=5').get_json()
+        assert set(body) == {'data', 'last_page', 'total'}, view.__name__
+        assert isinstance(body['data'], list)
+        assert len(body['data']) <= 5
+
+
+def test_fsap01_manual_send_refuses_without_can_edit():
+    body, status = _post(fsap.sap_queue_manual_send, {'queue_id': 1}, admin=False, user_id=-1)
+    assert status == 403
+    assert body.get_json()['ok'] is False

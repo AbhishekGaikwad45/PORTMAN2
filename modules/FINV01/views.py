@@ -167,6 +167,13 @@ def invoices():
             posted_dt and (now - posted_dt) <= timedelta(hours=24)
         )
 
+    # Inline SAP queue state, so a stuck posting is visible on the row itself
+    # instead of only in FSAP01.
+    import sap_queue
+    jobs = sap_queue.get_active_jobs_map([r['id'] for r in data])
+    for row in data:
+        row['sap_job'] = jobs.get(row['id'])
+
     return render_template('finv01_invoices.html',
                          data=data,
                          page=page,
@@ -286,12 +293,7 @@ def create_invoice_record(customer_type, customer_id, bill_ids, created_by, over
         invoice_date = datetime.now().strftime('%Y-%m-%d')
 
     fy_suffix = model.get_financial_year(invoice_date)
-    cur.execute(
-        'SELECT MAX(doc_series_seq) FROM invoice_header WHERE doc_series=%s AND financial_year=%s',
-        [doc_series_prefix, fy_suffix]
-    )
-    row_seq = cur.fetchone()
-    next_seq = (row_seq['max'] or 0) + 1 if row_seq else 1
+    next_seq = model.next_invoice_seq(cur, doc_series_prefix, fy_suffix)
 
     # Default header totals from the bill(s) themselves — the request path
     # (create_invoice view) normally overrides these with frontend-computed
@@ -830,50 +832,6 @@ def retry_sap():
         'success': result.get('ok', False),
         'queued': result.get('queued', False),
         'message': result.get('message', ''),
-    })
-
-
-@bp.route('/api/module/FINV01/invoice/fetch-irn', methods=['POST'])
-def fetch_irn():
-    """Fetch IRN details from SAP (populated by Cygnet after e-invoice generation)"""
-    if 'user_id' not in session:
-        return jsonify({'success': False, 'error': 'Not logged in'}), 401
-
-    invoice_id = request.json.get('invoice_id')
-    invoice = model.get_invoice_by_id(invoice_id)
-    if not invoice:
-        return jsonify({'success': False, 'error': 'Invoice not found'}), 404
-
-    if not invoice.get('sap_document_number'):
-        return jsonify({'success': False, 'error': 'Invoice not yet posted to SAP'})
-
-    if invoice.get('gst_irn'):
-        return jsonify({'success': False, 'error': 'IRN already present',
-                        'irn': invoice['gst_irn']})
-
-    result = sap_client.fetch_irn_from_sap(
-        invoice['invoice_number'], 'Invoice', invoice_id,
-        session.get('username')
-    )
-
-    if result['ok']:
-        conn = get_db()
-        cur = get_cursor(conn)
-        cur.execute('''UPDATE invoice_header
-            SET gst_irn=%s, gst_ack_number=%s, gst_ack_date=%s
-            WHERE id=%s''',
-            [result['irn'], result['ack_no'],
-             result.get('ack_date') or result.get('irn_date') or None,
-             invoice_id])
-        conn.commit()
-        conn.close()
-
-    return jsonify({
-        'success': result['ok'],
-        'irn': result.get('irn', ''),
-        'ack_no': result.get('ack_no', ''),
-        'irn_date': result.get('irn_date', ''),
-        'message': result['message'],
     })
 
 

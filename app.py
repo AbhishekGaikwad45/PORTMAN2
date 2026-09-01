@@ -6,6 +6,28 @@ from config import SECRET_KEY, FLASK_ENV, SERVER_HOST, SERVER_PORT
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
+
+@app.template_filter('indian_number')
+def indian_number(value, decimals=2):
+    """Indian digit grouping for money on printed documents: 12,34,567.89.
+    Non-numeric input is returned untouched so a template can't blow up."""
+    try:
+        val = float(value or 0)
+    except (TypeError, ValueError):
+        return value
+    whole, _, frac = f'{abs(val):.{decimals}f}'.partition('.')
+    if len(whole) > 3:
+        head, tail = whole[:-3], whole[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            groups.insert(0, head)
+        whole = ','.join(groups + [tail])
+    sign = '-' if val < 0 else ''
+    return f'{sign}{whole}.{frac}' if frac else f'{sign}{whole}'
+
 # ── App-level logging ─────────────────────────────────────────────────────────
 import logging
 import os
@@ -385,6 +407,15 @@ def _mail_tick():
     except Exception:
         pass
 
+def _sap_queue_tick():
+    """Drains sap_outbound_queue. Without this the queue only moves when a user
+    clicks Manual Send — a failed posting would retry never."""
+    try:
+        from sap_queue import process_sap_queue as _process_sap_queue
+        _process_sap_queue()
+    except Exception:
+        pass
+
 def _reschedule_mail_job():
     """Re-read schedule_minutes from DB and reschedule if needed."""
     try:
@@ -444,6 +475,14 @@ _mail_scheduler.add_job(
     trigger='interval',
     minutes=5,
     id='mail_queue',
+    replace_existing=True,
+    max_instances=1,
+)
+_mail_scheduler.add_job(
+    _sap_queue_tick,
+    trigger='interval',
+    minutes=5,
+    id='sap_queue',
     replace_existing=True,
     max_instances=1,
 )

@@ -101,6 +101,7 @@ def view_bill(bill_id):
     return render_template('bill_view.html',
                          bill=bill,
                          bill_lines=bill_lines,
+                         qty_totals=model.quantity_totals(bill_lines),
                          perms=perms,
                          is_approver=is_approver,
                          username=session.get('username'))
@@ -816,6 +817,15 @@ def get_customers_for_billing(customer_type):
     else:
         conn.close()
         return jsonify({'error': 'Invalid customer type'}), 400
-    rows = cur.fetchall()
+    rows = [dict(r) for r in cur.fetchall()]
     conn.close()
-    return jsonify({'data': [dict(r) for r in rows]})
+
+    # ?with_billables=1 narrows the list to parties that actually have something
+    # to bill, with a per-stage count. The unfiltered list stays the default —
+    # Admin Cutover needs the full master, it works on already-billed cargo.
+    if request.args.get('with_billables') == '1':
+        counts = model.customers_with_billables()
+        rows = [dict(r, **counts[r['name']]) for r in rows if counts.get(r['name'])]
+        rows.sort(key=lambda r: (-r['actual_count'], r['name'] or ''))
+
+    return jsonify({'data': rows})

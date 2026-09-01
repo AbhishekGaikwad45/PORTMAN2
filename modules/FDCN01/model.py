@@ -85,8 +85,11 @@ def get_next_doc_number(doc_type, doc_date):
     cur.execute('''SELECT COALESCE(MAX(doc_series_seq), 0) AS max_seq
         FROM fdcn_header WHERE doc_series=%s AND financial_year=%s''', [prefix, fy])
     max_seq = cur.fetchone()['max_seq'] or 0
-    next_seq = max_seq + 1
     conn.close()
+
+    # Go-live cutover seed acts as a floor only (see FIN01.next_from_seed).
+    from modules.FIN01.model import next_from_seed, lookup_seed
+    next_seq = next_from_seed(max_seq, lookup_seed('fdcn', prefix, fy))
 
     doc_number = f'{prefix}/{fy}/{next_seq:04d}'
     return doc_number, prefix, next_seq, fy

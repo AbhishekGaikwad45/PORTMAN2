@@ -58,6 +58,48 @@ def gst_logs():
     return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
 
 
+# ── SAP Integration console ───────────────────────────────────────────────────
+
+@bp.route('/api/module/FSAP01/callback-logs')
+@login_required
+def callback_logs():
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 50))
+    data, total = model.get_callback_logs(page, size)
+    return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
+
+
+@bp.route('/api/module/FSAP01/outbound-logs')
+@login_required
+def outbound_logs():
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 50))
+    data, total = model.get_outbound_logs(page, size, request.args.get('type') or None)
+    return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
+
+
+@bp.route('/api/module/FSAP01/sap-queue')
+@login_required
+def sap_queue_list():
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 50))
+    data, total = model.get_sap_queue(page, size, request.args.get('status') or None)
+    return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
+
+
+@bp.route('/api/module/FSAP01/sap-queue/manual-send', methods=['POST'])
+@login_required
+def sap_queue_manual_send():
+    """One-shot re-attempt of a queued/failed SAP posting."""
+    if not get_perms().get('can_edit'):
+        return jsonify({'ok': False, 'error': 'No permission'}), 403
+    queue_id = (request.json or {}).get('queue_id')
+    if not queue_id:
+        return jsonify({'ok': False, 'error': 'queue_id required'}), 400
+    import sap_queue
+    return jsonify(sap_queue.manual_send(queue_id))
+
+
 # ── Staging table endpoints ───────────────────────────────────────────────────
 
 @bp.route('/api/module/FSAP01/staging/push', methods=['POST'])

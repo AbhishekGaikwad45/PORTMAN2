@@ -58,6 +58,52 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
+
+# ── Billed lock ──────────────────────────────────────────────────────────────
+# Once a vessel's cargo is billed, its LDUD is frozen: the parcel quantities are
+# what the bill was computed from, so editing them silently desyncs the bill.
+# Two ways out, both outside LDUD01: cancel the invoice behind the bill (which
+# voids the ledger rows), or unmark a cutover flag in Admin > Cutover.
+
+def _ldud_vcn_id(ldud_id):
+    if not ldud_id:
+        return None
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT vcn_id FROM ldud_header WHERE id=%s', [ldud_id])
+    row = cur.fetchone()
+    conn.close()
+    return row['vcn_id'] if row else None
+
+
+def _ldud_id_for_op(op_id):
+    if not op_id:
+        return None
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT ldud_id FROM ldud_parcel_ops WHERE id=%s', [op_id])
+    row = cur.fetchone()
+    conn.close()
+    return row['ldud_id'] if row else None
+
+
+def _billed_locked(ldud_id):
+    """Return a 409 response when this LDUD's vessel is billed, else None."""
+    from modules.FIN01 import model as fin_model
+    vcn_id = _ldud_vcn_id(ldud_id)
+    if not vcn_id or not fin_model.is_vcn_billed(vcn_id):
+        return None
+    blockers = fin_model.vcn_billing_blockers(vcn_id)
+    parts = []
+    if blockers['bill_numbers']:
+        parts.append('billed on ' + ', '.join(blockers['bill_numbers']))
+    if blockers['cutover']:
+        parts.append('cutover-flagged at go-live')
+    return jsonify({'error':
+        'This vessel is ' + ' and '.join(parts or ['billed']) + '. '
+        'Cancel the invoice behind the bill, or unmark it in Admin › Cutover, '
+        'before editing this LDUD.'}), 409
+
 def get_perms():
     if session.get('is_admin'):
         return {'can_read': 1, 'can_add': 1, 'can_edit': 1, 'can_delete': 1}
@@ -116,6 +162,9 @@ def save():
     is_approver = str(config.get('approver_id', '')) == str(session.get('user_id')) or session.get('is_admin')
 
     if not is_new:
+        locked = _billed_locked(data['id'])
+        if locked:
+            return locked
         current_status = model.get_doc_status(data['id'])
         if current_status == 'Closed':
             if not is_approver:
@@ -253,6 +302,17 @@ def reopen():
         return jsonify({'error': 'Missing id'}), 400
     if not comment:
         return jsonify({'error': 'A reason is required when sending back to Draft'}), 400
+
+    locked = _billed_locked(record_id)
+    if locked:
+        # Admins may force it with a reason. The ledger is NOT cleared — the
+        # vessel stays locked against every other write path until the bill is
+        # actually cancelled or the cutover flag unmarked.
+        if not session.get('is_admin'):
+            return locked
+        model.log_closure_action(record_id, 'Force Reopen (Billed)', comment,
+                                 session.get('username'))
+
     model.reopen_record(record_id, comment, session.get('username'))
     # Queue notification to the operator who last closed this record
     try:
@@ -288,6 +348,9 @@ def delete():
     perms = get_perms()
     if not perms.get('can_delete'):
         return jsonify({'error': 'No permission to delete'}), 403
+    locked = _billed_locked(request.json['id'])
+    if locked:
+        return locked
     model.delete_header(request.json['id'])
     return jsonify({'success': True})
 
@@ -303,6 +366,9 @@ def save_parcel_op():
     perms = get_perms()
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
+    locked = _billed_locked(request.json.get('ldud_id'))
+    if locked:
+        return locked
     try:
         row_id = model.save_parcel_op(request.json)
     except ValueError as e:
@@ -316,6 +382,9 @@ def delete_parcel_op():
     # sub-table rows are deletable by anyone who can edit/add (not gated on can_delete)
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
+    locked = _billed_locked(_ldud_id_for_op(request.json['id']))
+    if locked:
+        return locked
     model.delete_parcel_op(request.json['id'])
     return jsonify({'success': True})
 

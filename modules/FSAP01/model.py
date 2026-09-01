@@ -113,6 +113,79 @@ def get_gst_logs(page=1, size=50):
     return [dict(r) for r in rows], total
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SAP Integration console (callbacks / outbound / queue)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_callback_logs(page=1, size=50):
+    """Inbound SAP callbacks — one integration_logs row per authenticated call
+    (written by sap_inbound._log_inbound)."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("SELECT COUNT(*) AS cnt FROM integration_logs WHERE integration_type = 'SAP_INBOUND'")
+    total = cur.fetchone()['cnt']
+    cur.execute('''
+        SELECT id, source_reference AS token_label, request_url, request_body,
+               response_status_code, response_body, status, error_message,
+               created_by, created_date
+        FROM integration_logs
+        WHERE integration_type = 'SAP_INBOUND'
+        ORDER BY id DESC LIMIT %s OFFSET %s
+    ''', [size, (page - 1) * size])
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows], total
+
+
+def get_outbound_logs(page=1, size=50, type_filter=None):
+    """Outbound integration calls (SAP posts, GST/IRP calls) — everything that
+    is not an inbound callback. `type_filter` matches integration_type."""
+    where = "integration_type <> 'SAP_INBOUND'"
+    params = []
+    if type_filter:
+        where += ' AND integration_type = %s'
+        params.append(type_filter)
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute(f'SELECT COUNT(*) AS cnt FROM integration_logs WHERE {where}', params)
+    total = cur.fetchone()['cnt']
+    cur.execute(f'''
+        SELECT id, integration_type, source_type, source_id, source_reference,
+               request_url, request_body, response_status_code, response_body,
+               status, error_message, duration_ms, created_by, created_date
+        FROM integration_logs
+        WHERE {where}
+        ORDER BY id DESC LIMIT %s OFFSET %s
+    ''', params + [size, (page - 1) * size])
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows], total
+
+
+def get_sap_queue(page=1, size=50, status=None):
+    """sap_outbound_queue rows — what the async poster still owes SAP."""
+    where, params = '', []
+    if status:
+        where = 'WHERE status = %s'
+        params.append(status)
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute(f'SELECT COUNT(*) AS cnt FROM sap_outbound_queue {where}', params)
+    total = cur.fetchone()['cnt']
+    cur.execute(f'''
+        SELECT id, job_type, invoice_id, reference_type, reference_id, reference_number,
+               payload, status, retry_count, max_retries, next_attempt_at, last_error,
+               sap_document_number, created_by, created_date, updated_date
+        FROM sap_outbound_queue
+        {where}
+        ORDER BY id DESC LIMIT %s OFFSET %s
+    ''', params + [size, (page - 1) * size])
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows], total
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Staging table helpers
 # ─────────────────────────────────────────────────────────────────────────────

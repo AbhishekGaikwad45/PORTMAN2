@@ -19,6 +19,7 @@
     <button class="tab-btn" onclick="showTab('sap')">SAP Config</button>
     <button class="tab-btn" onclick="showTab('banks')">Bank Accounts</button>
     <button class="tab-btn" onclick="showTab('mail')">Mail</button>
+    <button class="tab-btn" onclick="showTab('cutover')">Cutover</button>
     <button class="tab-btn" onclick="showTab('logs')">Logs</button>
 </div>
 
@@ -277,8 +278,9 @@
                     <label>Credit Control Area:<br><input type="text" id="sapCreditControlArea" placeholder="e.g., 5123" style="width:100%;padding:6px;"></label>
                     <label>Profit Center:<br><input type="text" id="sapProfitCenter" placeholder="e.g., 5130000" style="width:100%;padding:6px;"></label>
                 </div>
-                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
-                    <label>Tax Code:<br><input type="text" id="sapTaxCode" placeholder="e.g., V1" maxlength="2" style="width:100%;padding:6px;"></label>
+                <div class="config-row" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:10px;">
+                    <label>IGST Tax Code:<br><input type="text" id="sapIgstTaxCode" placeholder="e.g., V1" maxlength="2" style="width:100%;padding:6px;"></label>
+                    <label>CGST/SGST Tax Code:<br><input type="text" id="sapCgstTaxCode" placeholder="e.g., V2" maxlength="2" style="width:100%;padding:6px;"></label>
                     <label>Currency:<br><input type="text" id="sapCurrency" placeholder="INR" value="INR" style="width:100%;padding:6px;"></label>
                     <label>Active:<br>
                         <select id="sapIsActive" style="width:100%;padding:6px;">
@@ -384,6 +386,92 @@
             </thead>
             <tbody id="mailQueueBody"></tbody>
         </table>
+    </div>
+</div>
+
+<!-- Cutover Tab -->
+<div id="cutover-tab" class="tab-content">
+    <div id="cutoverLockedBanner"
+         style="display:none;border:1px solid #b7791f;background:#fffbea;color:#7b5300;padding:10px 12px;border-radius:4px;font-size:12px;margin-bottom:14px;">
+        <strong>Cutover is locked.</strong> Go-live data is final — seeds and billed-cargo flags cannot be changed until it is unlocked.
+    </div>
+
+    <div class="admin-section" style="margin-bottom:14px;">
+        <h3>Document Numbering Seeds</h3>
+        <p style="font-size:11px;color:#718096;margin:0 0 12px;">
+            Continue numbering from where the legacy system stopped. A seed is a <em>floor</em>:
+            once real documents pass it, normal incrementing takes over.
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;">
+            <div style="border:1px solid #e2e8f0;border-radius:4px;padding:10px;">
+                <h4 style="margin:0 0 8px;font-size:12px;">Invoice</h4>
+                <label style="font-size:11px;">Series prefix<br><input type="text" id="cutInvSeries" placeholder="INV" style="width:100%;padding:6px;"></label>
+                <label style="font-size:11px;">Financial year<br><input type="text" id="cutInvFy" placeholder="2026-27" style="width:100%;padding:6px;"></label>
+                <label style="font-size:11px;">Start number<br><input type="number" id="cutInvSeq" min="1" style="width:100%;padding:6px;"></label>
+                <button class="btn btn-save" style="margin-top:8px;" onclick="saveCutoverSeed('invoice')">Save Invoice Seed</button>
+            </div>
+            <div style="border:1px solid #e2e8f0;border-radius:4px;padding:10px;">
+                <h4 style="margin:0 0 8px;font-size:12px;">Bill</h4>
+                <p style="font-size:11px;color:#718096;margin:0 0 8px;">Bill numbers are BILL#### — one series, no financial year.</p>
+                <label style="font-size:11px;">Start number<br><input type="number" id="cutBillSeq" min="1" style="width:100%;padding:6px;"></label>
+                <button class="btn btn-save" style="margin-top:8px;" onclick="saveCutoverSeed('bill')">Save Bill Seed</button>
+            </div>
+            <div style="border:1px solid #e2e8f0;border-radius:4px;padding:10px;">
+                <h4 style="margin:0 0 8px;font-size:12px;">Debit / Credit Note</h4>
+                <label style="font-size:11px;">Series prefix<br><input type="text" id="cutFdcnSeries" placeholder="CN" style="width:100%;padding:6px;"></label>
+                <label style="font-size:11px;">Financial year<br><input type="text" id="cutFdcnFy" placeholder="26-27" style="width:100%;padding:6px;"></label>
+                <label style="font-size:11px;">Start number<br><input type="number" id="cutFdcnSeq" min="1" style="width:100%;padding:6px;"></label>
+                <button class="btn btn-save" style="margin-top:8px;" onclick="saveCutoverSeed('fdcn')">Save FDCN Seed</button>
+            </div>
+        </div>
+        <table class="data-table" style="margin-top:14px;width:100%;font-size:11px;">
+            <thead><tr><th>Type</th><th>Series</th><th>FY</th><th>Start</th><th>Current max</th><th>Updated by</th><th>Updated at</th></tr></thead>
+            <tbody id="cutoverSeedRows"><tr><td colspan="7" style="color:#718096;">No seeds configured.</td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="admin-section">
+        <h3>Legacy-Billed Cargo</h3>
+        <p style="font-size:11px;color:#718096;margin:0 0 12px;">
+            Flag cargo the legacy system already invoiced so PORTMAN2 never bills it again.
+            A flag also locks the parcel's VCN and LDUD — that is intended at go-live.
+        </p>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+            <label style="font-size:11px;">Party type<br>
+                <select id="cutCustType" onchange="loadCutoverCustomers()" style="padding:6px;">
+                    <option value="Customer">Customer</option>
+                    <option value="Agent">Agent</option>
+                </select>
+            </label>
+            <label style="font-size:11px;flex:1;min-width:240px;">Party<br>
+                <select id="cutCustomer" onchange="loadCutoverCargo()" style="width:100%;padding:6px;">
+                    <option value="">-- Select --</option>
+                </select>
+            </label>
+        </div>
+
+        <h4 style="font-size:12px;margin:12px 0 6px;">Unbilled / partly billed</h4>
+        <table class="data-table" style="width:100%;font-size:11px;">
+            <thead><tr><th style="width:28px;"></th><th>Vessel</th><th>Parcel</th><th>Cargo</th><th>Declared</th><th>Billed</th><th style="width:110px;">Flag quantity</th></tr></thead>
+            <tbody id="cutoverCargoRows"><tr><td colspan="7" style="color:#718096;">Select a party.</td></tr></tbody>
+        </table>
+        <button class="btn btn-save" style="margin-top:8px;" onclick="cutoverMark('mark')">Mark selected as billed</button>
+
+        <h4 style="font-size:12px;margin:18px 0 6px;">Cutover-flagged (no bill) — reopen to make billable again</h4>
+        <table class="data-table" style="width:100%;font-size:11px;">
+            <thead><tr><th style="width:28px;"></th><th>Vessel</th><th>Parcel</th><th>Cargo</th><th>Declared</th><th>Flagged</th></tr></thead>
+            <tbody id="cutoverFlaggedRows"><tr><td colspan="6" style="color:#718096;">Select a party.</td></tr></tbody>
+        </table>
+        <button class="btn btn-danger" style="margin-top:8px;" onclick="cutoverMark('unmark')">Reopen selected</button>
+    </div>
+
+    <div class="admin-section" style="margin-top:14px;">
+        <h3>Lock</h3>
+        <p style="font-size:11px;color:#718096;margin:0 0 10px;">
+            Freeze every cutover write once go-live data is final.
+        </p>
+        <button class="btn btn-save" id="cutoverLockBtn" onclick="toggleCutoverLock()">Lock cutover</button>
+        <span id="cutoverStatus" style="font-size:11px;margin-left:10px;"></span>
     </div>
 </div>
 
@@ -695,6 +783,142 @@ function showTab(tab) {
     if (tab === 'config') loadAllConfigs();
     if (tab === 'mail') { loadSmtpConfig(); loadMailQueue(); }
     if (tab === 'logs') { loadLogs(); loadNginxConfig(); }
+    if (tab === 'cutover') loadCutover();
+}
+
+// ── Go-live Cutover ──────────────────────────────────────────────────────────
+let _cutoverLocked = false;
+let _cutoverCargo = [];
+
+function cutoverStatus(msg, ok) {
+    const el = document.getElementById('cutoverStatus');
+    el.textContent = msg;
+    el.style.color = ok ? '#2f855a' : '#c53030';
+}
+
+async function loadCutover() {
+    const res = await fetch('/admin/api/cutover/state');
+    const d = await res.json();
+    _cutoverLocked = !!d.locked;
+    document.getElementById('cutoverLockedBanner').style.display = _cutoverLocked ? 'block' : 'none';
+    document.getElementById('cutoverLockBtn').textContent = _cutoverLocked ? 'Unlock cutover' : 'Lock cutover';
+
+    const body = document.getElementById('cutoverSeedRows');
+    body.innerHTML = (d.seeds || []).length
+        ? d.seeds.map(s => `<tr>
+            <td>${s.seed_type}</td><td>${s.doc_series || '—'}</td><td>${s.financial_year || '—'}</td>
+            <td>${s.start_seq}</td><td>${s.current_max}</td>
+            <td>${s.updated_by || '—'}</td><td>${s.updated_at || '—'}</td></tr>`).join('')
+        : '<tr><td colspan="7" style="color:#718096;">No seeds configured.</td></tr>';
+
+    if (document.getElementById('cutCustomer').options.length <= 1) loadCutoverCustomers();
+}
+
+async function saveCutoverSeed(kind) {
+    const map = {
+        invoice: ['/admin/api/cutover/invoice-seed', () => ({
+            doc_series: document.getElementById('cutInvSeries').value.trim(),
+            financial_year: document.getElementById('cutInvFy').value.trim(),
+            start_seq: document.getElementById('cutInvSeq').value})],
+        bill: ['/admin/api/cutover/bill-seed', () => ({
+            start_seq: document.getElementById('cutBillSeq').value})],
+        fdcn: ['/admin/api/cutover/fdcn-seed', () => ({
+            doc_series: document.getElementById('cutFdcnSeries').value.trim(),
+            financial_year: document.getElementById('cutFdcnFy').value.trim(),
+            start_seq: document.getElementById('cutFdcnSeq').value})],
+    };
+    const [url, payload] = map[kind];
+    const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                  body: JSON.stringify(payload())});
+    const d = await res.json();
+    cutoverStatus(d.success ? `${kind} seed saved — next number is ${d.result}` : d.error, d.success);
+    if (d.success) loadCutover();
+}
+
+async function loadCutoverCustomers() {
+    // Full master on purpose: cutover works on cargo that is already flagged billed.
+    const ct = document.getElementById('cutCustType').value;
+    const sel = document.getElementById('cutCustomer');
+    const res = await fetch(`/api/module/FIN01/customers/${ct}`);
+    const d = await res.json();
+    sel.innerHTML = '<option value="">-- Select --</option>' +
+        (d.data || []).map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+    loadCutoverCargo();
+}
+
+async function loadCutoverCargo() {
+    const name = document.getElementById('cutCustomer').value;
+    const open = document.getElementById('cutoverCargoRows');
+    const flagged = document.getElementById('cutoverFlaggedRows');
+    if (!name) {
+        open.innerHTML = '<tr><td colspan="7" style="color:#718096;">Select a party.</td></tr>';
+        flagged.innerHTML = '<tr><td colspan="6" style="color:#718096;">Select a party.</td></tr>';
+        return;
+    }
+    const res = await fetch('/admin/api/cutover/state?customer_name=' + encodeURIComponent(name));
+    const d = await res.json();
+    _cutoverCargo = d.cargo || [];
+
+    const key = c => `${c.cargo_source_type}:${c.id}`;
+    const openRows = _cutoverCargo.filter(c => !c.cutover_flagged);
+    const flagRows = _cutoverCargo.filter(c => c.cutover_flagged);
+
+    open.innerHTML = openRows.length ? openRows.map(c => `<tr>
+        <td><input type="checkbox" class="cut-open" value="${key(c)}"></td>
+        <td>${c.vcn_doc_num || ''} ${c.vessel_name || ''}</td>
+        <td>${c.parcel_no || ''}</td><td>${c.cargo_name || ''}</td>
+        <td>${Number(c.quantity || 0).toFixed(3)}</td>
+        <td>${Number(c.billed || 0).toFixed(3)}</td>
+        <td><input type="number" step="0.001" min="0" class="cut-qty" data-key="${key(c)}"
+                   placeholder="all" style="width:95px;padding:3px;"></td></tr>`).join('')
+        : '<tr><td colspan="7" style="color:#718096;">Nothing left to flag for this party.</td></tr>';
+
+    flagged.innerHTML = flagRows.length ? flagRows.map(c => `<tr>
+        <td><input type="checkbox" class="cut-flagged" value="${key(c)}"></td>
+        <td>${c.vcn_doc_num || ''} ${c.vessel_name || ''}</td>
+        <td>${c.parcel_no || ''}</td><td>${c.cargo_name || ''}</td>
+        <td>${Number(c.quantity || 0).toFixed(3)}</td>
+        <td>${Number(c.billed || 0).toFixed(3)}</td></tr>`).join('')
+        : '<tr><td colspan="6" style="color:#718096;">No cutover-flagged cargo for this party.</td></tr>';
+}
+
+async function cutoverMark(action) {
+    const cls = action === 'unmark' ? '.cut-flagged' : '.cut-open';
+    const boxes = Array.from(document.querySelectorAll(cls + ':checked'));
+    if (!boxes.length) { cutoverStatus('Select at least one parcel.', false); return; }
+    const items = boxes.map(b => {
+        const [src, id] = b.value.split(':');
+        const item = {cargo_source_type: src, cargo_source_id: parseInt(id)};
+        if (action === 'mark') {
+            const qty = document.querySelector(`.cut-qty[data-key="${b.value}"]`);
+            if (qty && qty.value !== '') item.quantity = qty.value;
+        }
+        return item;
+    });
+    const question = action === 'unmark'
+        ? 'Reopen these parcels? Their cutover flags are deleted and they become billable again.'
+        : 'Flag these parcels as already billed in the legacy system? This also locks their VCN and LDUD.';
+    if (!confirm(question)) return;
+    const res = await fetch('/admin/api/cutover/mark-billed', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action, items})});
+    const d = await res.json();
+    cutoverStatus(d.success
+        ? `${action === 'unmark' ? 'Reopened' : 'Flagged'} ${items.length} parcel(s).`
+        : d.error, d.success);
+    if (d.success) loadCutoverCargo();
+}
+
+async function toggleCutoverLock() {
+    const next = !_cutoverLocked;
+    if (!confirm(next ? 'Lock the cutover? No seed or billed-cargo change is possible until it is unlocked.'
+                      : 'Unlock the cutover?')) return;
+    const res = await fetch('/admin/api/cutover/lock', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({locked: next})});
+    const d = await res.json();
+    cutoverStatus(d.locked ? 'Cutover locked.' : 'Cutover unlocked.', true);
+    loadCutover();
 }
 
 let _newPwStrength = null;
@@ -1162,7 +1386,8 @@ function _sapFormData() {
         section_code: document.getElementById('sapSectionCode').value.trim(),
         credit_control_area: document.getElementById('sapCreditControlArea').value.trim(),
         profit_center: document.getElementById('sapProfitCenter').value.trim(),
-        tax_code: document.getElementById('sapTaxCode').value.trim(),
+        igst_tax_code: document.getElementById('sapIgstTaxCode').value.trim(),
+        cgst_tax_code: document.getElementById('sapCgstTaxCode').value.trim(),
         currency: document.getElementById('sapCurrency').value.trim() || 'INR',
         is_active: document.getElementById('sapIsActive').value,
         tds_gl: document.getElementById('sapTdsGl').value.trim(),
@@ -1186,7 +1411,8 @@ async function loadSapConfig() {
     document.getElementById('sapSectionCode').value = cfg.section_code || '';
     document.getElementById('sapCreditControlArea').value = cfg.credit_control_area || '';
     document.getElementById('sapProfitCenter').value = cfg.profit_center || '';
-    document.getElementById('sapTaxCode').value = cfg.tax_code || '';
+    document.getElementById('sapIgstTaxCode').value = cfg.igst_tax_code || '';
+    document.getElementById('sapCgstTaxCode').value = cfg.cgst_tax_code || '';
     document.getElementById('sapCurrency').value = cfg.currency || 'INR';
     document.getElementById('sapIsActive').value = cfg.is_active ? '1' : '0';
     document.getElementById('sapTdsGl').value = cfg.tds_gl || '';

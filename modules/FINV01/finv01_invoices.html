@@ -22,6 +22,10 @@
     .status-posted-to-sap { background: #9b59b6; }
     .status-posted-to-gst { background: #27ae60; }
     .status-cancelled { background: #7f8c8d; }
+    .queue-tag { padding: 2px 6px; border-radius: 3px; font-size: 10px; white-space: nowrap; cursor: help; }
+    .queue-pending    { background: #fef9e7; color: #7d6608; }
+    .queue-processing { background: #d6eaf8; color: #1a5276; }
+    .queue-failed     { background: #fdecea; color: #922b21; }
     .filters { margin-bottom: 15px; display: flex; gap: 10px; }
     .filters select { padding: 6px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; }
     .pagination { margin-top: 15px; display: flex; gap: 5px; justify-content: center; font-size: 11px; }
@@ -88,6 +92,7 @@
             <th>Total</th>
             <th>Currency</th>
             <th>Status</th>
+            <th>SAP Queue</th>
             <th>SAP Doc</th>
             <th>IRN</th>
             <th>Actions</th>
@@ -109,6 +114,15 @@
             <td>
                 <span class="status status-{{ row.invoice_status|lower|replace(' ', '-') }}">{{ row.invoice_status }}</span>
             </td>
+            <td style="font-size:10px;">
+                {% if row.sap_job %}
+                <span class="queue-tag queue-{{ row.sap_job.status }}"
+                      title="{{ row.sap_job.last_error or 'No error recorded' }}">
+                    {{ row.sap_job.job_type }} · {{ row.sap_job.status }}
+                    ({{ row.sap_job.retry_count or 0 }}/{{ row.sap_job.max_retries or 0 }})
+                </span>
+                {% else %}-{% endif %}
+            </td>
             <td>{{ row.sap_document_number or '-' }}</td>
             <td style="font-size:10px;">
                 {% if row.gst_irn %}
@@ -118,12 +132,21 @@
                 {% else %}-{% endif %}
             </td>
             <td>
-                <button class="btn btn-primary" onclick="printInvoice({{ row.id }})" style="font-size:10px;padding:3px 8px;">Print</button>
-                {% if row.invoice_status in ('Generated', 'SAP Failed') and not row.sap_document_number %}
+                {# Print label states what the copy will actually carry. #}
+                <button class="btn btn-primary" onclick="printInvoice({{ row.id }})" style="font-size:10px;padding:3px 8px;"
+                        title="{% if row.gst_irn %}IRN and QR present{% elif row.sap_document_number %}Posted to SAP, IRN not received yet{% else %}Not posted to SAP yet{% endif %}">
+                    {% if row.gst_irn %}Print{% elif row.sap_document_number %}Print (no GST){% else %}Print (draft){% endif %}
+                </button>
+                {% if row.sap_job and row.sap_job.status in ('pending', 'processing') %}
+                <button class="btn btn-retry" onclick="manualSend({{ row.sap_job.id }})" style="font-size:10px;padding:3px 8px;"
+                        title="Queued for automatic retry — send it now instead">Send Now</button>
+                {% elif row.sap_job and row.sap_job.status == 'failed' %}
+                <button class="btn btn-retry" onclick="manualSend({{ row.sap_job.id }})" style="font-size:10px;padding:3px 8px;"
+                        title="{{ row.sap_job.last_error or 'Retries exhausted' }}">
+                    Manual Send{% if row.sap_job.job_type != 'post' %} ({{ row.sap_job.job_type }}){% endif %}
+                </button>
+                {% elif row.invoice_status in ('Generated', 'SAP Failed') and not row.sap_document_number %}
                 <button class="btn btn-success" onclick="pushToSAP({{ row.id }}, this)" style="font-size:10px;padding:3px 8px;">Push To SAP</button>
-                {% endif %}
-                {% if row.sap_document_number and not row.gst_irn %}
-                <button class="btn btn-success" onclick="fetchIRN({{ row.id }})" style="font-size:10px;padding:3px 8px;">Fetch IRN</button>
                 {% endif %}
                 {% if row.sap_document_number and row.invoice_status == 'Posted to SAP' %}
                     {% if row.within_cancel_window %}
@@ -298,23 +321,6 @@ function printInvoice(id) {
     window.open(`/module/FINV01/invoice/print/${id}`, '_blank');
 }
 
-async function fetchIRN(id) {
-    try {
-        const res = await fetch('/api/module/FINV01/invoice/fetch-irn', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({invoice_id: id})
-        });
-        const result = await res.json();
-        if (result.success) {
-            alert('IRN fetched: ' + (result.irn || 'Success'));
-            location.reload();
-        } else {
-            alert(result.message || result.error || 'IRN not yet available');
-        }
-    } catch(e) { alert('Error: ' + e.message); }
-}
-
 async function pushToSAP(id, btn) {
     if (!confirm('Push this invoice to SAP?')) return;
     const originalText = btn.textContent;
@@ -342,8 +348,28 @@ async function pushToSAP(id, btn) {
     }
 }
 
+async function manualSend(queueId) {
+    if (!confirm('Send this SAP posting now?')) return;
+    try {
+        const res = await fetch('/api/module/FSAP01/sap-queue/manual-send', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({queue_id: queueId})
+        });
+        const result = await res.json();
+        if (result.ok) {
+            alert('Posted to SAP. Document: ' + (result.sap_document_number || 'Success'));
+            location.reload();
+        } else {
+            alert('SAP Error: ' + (result.error || 'Failed'));
+        }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
 async function cancelInSAP(id) {
-    if (!confirm('Cancel this SAP invoice via FB08 reversal? Allowed only within 24 hours.')) return;
+    if (!confirm('Cancel this invoice in SAP via FB08 reversal (allowed only within 24 hours of posting)?\n\n' +
+                 'Every bill linked to this invoice is cancelled and its cargo returns to unbilled, ' +
+                 'so those parcels become billable again.')) return;
     try {
         const res = await fetch('/api/module/FINV01/invoice/cancel-sap', {
             method: 'POST',
@@ -365,7 +391,10 @@ async function cancelInSAP(id) {
 }
 
 async function createCancellationCN(id) {
-    if (!confirm('The 24-hour FB08 reversal window has expired.\n\nCreate a full Cancellation Credit Note to reverse this invoice?')) return;
+    if (!confirm('The 24-hour FB08 reversal window has expired.\n\n' +
+                 'Create a full Cancellation Credit Note to reverse this invoice?\n\n' +
+                 'Every bill linked to this invoice is cancelled and its cargo returns to unbilled, ' +
+                 'so those parcels become billable again.')) return;
     try {
         const res = await fetch('/api/module/FINV01/invoice/create-cancellation-cn', {
             method: 'POST',

@@ -381,7 +381,7 @@ def save_sap_config():
             company_code=%s, default_payment_term=%s, payment_term=%s,
             plant_code=%s, business_place=%s, section_code=%s,
             credit_control_area=%s,
-            profit_center=%s, tax_code=%s, currency=%s,
+            profit_center=%s, igst_tax_code=%s, cgst_tax_code=%s, currency=%s,
             tds_gl=%s, tcs_gl=%s, round_off_gl=%s,
             is_active=%s, updated_by=%s, updated_date=%s
             WHERE id=%s''', [
@@ -398,7 +398,8 @@ def save_sap_config():
             data.get('section_code', ''),
             data.get('credit_control_area', ''),
             data.get('profit_center', ''),
-            data.get('tax_code', ''),
+            data.get('igst_tax_code', ''),
+            data.get('cgst_tax_code', ''),
             data.get('currency', 'INR'),
             data.get('tds_gl', ''),
             data.get('tcs_gl', ''),
@@ -413,10 +414,10 @@ def save_sap_config():
              company_code, default_payment_term, payment_term,
              plant_code, business_place, section_code,
              credit_control_area,
-             profit_center, tax_code, currency,
+             profit_center, igst_tax_code, cgst_tax_code, currency,
              tds_gl, tcs_gl, round_off_gl,
              is_active, created_by, created_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''', [
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''', [
             data.get('environment', 'production'),
             data.get('base_url', ''),
             data.get('token_url', ''),
@@ -430,7 +431,8 @@ def save_sap_config():
             data.get('section_code', ''),
             data.get('credit_control_area', ''),
             data.get('profit_center', ''),
-            data.get('tax_code', ''),
+            data.get('igst_tax_code', ''),
+            data.get('cgst_tax_code', ''),
             data.get('currency', 'INR'),
             data.get('tds_gl', ''),
             data.get('tcs_gl', ''),
@@ -800,3 +802,76 @@ def _calc_log_stats(entries):
     }
 
 
+
+
+# ── Go-live Cutover ───────────────────────────────────────────────────────────
+
+def _cutover_error(fn, *args, **kwargs):
+    """Run a cutover write, mapping its two refusals onto HTTP codes."""
+    from .cutover import CutoverLocked
+    try:
+        return jsonify({'success': True, 'result': fn(*args, **kwargs)})
+    except CutoverLocked as e:
+        return jsonify({'success': False, 'error': str(e)}), 409
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@bp.route('/api/cutover/state')
+@admin_required
+def cutover_state():
+    from . import cutover
+    customer_name = (request.args.get('customer_name') or '').strip()
+    return jsonify({
+        'locked': cutover.is_locked(),
+        'seeds': cutover.get_seeds(),
+        'cargo': cutover.get_cargo(customer_name) if customer_name else [],
+    })
+
+
+@bp.route('/api/cutover/invoice-seed', methods=['POST'])
+@admin_required
+def cutover_invoice_seed():
+    from . import cutover
+    d = request.json or {}
+    return _cutover_error(cutover.set_invoice_seed, d.get('doc_series'),
+                          d.get('financial_year'), d.get('start_seq'),
+                          session.get('username'))
+
+
+@bp.route('/api/cutover/bill-seed', methods=['POST'])
+@admin_required
+def cutover_bill_seed():
+    from . import cutover
+    return _cutover_error(cutover.set_bill_seed, (request.json or {}).get('start_seq'),
+                          session.get('username'))
+
+
+@bp.route('/api/cutover/fdcn-seed', methods=['POST'])
+@admin_required
+def cutover_fdcn_seed():
+    from . import cutover
+    d = request.json or {}
+    return _cutover_error(cutover.set_fdcn_seed, d.get('doc_series'),
+                          d.get('financial_year'), d.get('start_seq'),
+                          session.get('username'))
+
+
+@bp.route('/api/cutover/mark-billed', methods=['POST'])
+@admin_required
+def cutover_mark_billed():
+    from . import cutover
+    d = request.json or {}
+    items = d.get('items') or []
+    if not items:
+        return jsonify({'success': False, 'error': 'No cargo selected'}), 400
+    fn = cutover.unmark_items_billed if d.get('action') == 'unmark' else cutover.mark_items_billed
+    return _cutover_error(fn, items, session.get('username'))
+
+
+@bp.route('/api/cutover/lock', methods=['POST'])
+@admin_required
+def cutover_lock():
+    from . import cutover
+    locked = bool((request.json or {}).get('locked'))
+    return jsonify({'success': True, 'locked': cutover.set_lock(locked, session.get('username'))})

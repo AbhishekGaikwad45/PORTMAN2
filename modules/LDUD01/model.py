@@ -455,6 +455,16 @@ def close_record(record_id, close_type, username):
     conn.close()
 
 
+def log_closure_action(record_id, action, comment, username):
+    """Write one approval_log row so the action shows in the closure log."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                   VALUES ('LDUD01', %s, %s, %s, %s)""", (record_id, action, comment, username))
+    conn.commit()
+    conn.close()
+
+
 def reopen_record(record_id, comment, username):
     """Send record back to Draft with a logged reason."""
     conn = get_db()

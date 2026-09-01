@@ -187,11 +187,19 @@ async function loadCustomers() {
         return;
     }
     sel.innerHTML = '<option value="">-- Loading... --</option>';
-    const resp = await fetch(`/api/module/FIN01/customers/${ct}`);
+    // Only parties with something left to bill, labelled with the parcel counts.
+    const resp = await fetch(`/api/module/FIN01/customers/${ct}?with_billables=1`);
     const json = await resp.json();
-    sel.innerHTML = '<option value="">-- Select --</option>';
-    (json.data || []).forEach(c => {
-        sel.innerHTML += `<option value="${c.id}" data-name="${c.name}" data-gstin="${c.gstin || ''}" data-state-code="${c.gst_state_code || ''}">${c.name}</option>`;
+    const list = json.data || [];
+    sel.innerHTML = list.length
+        ? '<option value="">-- Select --</option>'
+        : '<option value="">-- Nothing to bill --</option>';
+    list.forEach(c => {
+        const bits = [];
+        if (c.actual_count)   bits.push(`${c.actual_count} actual`);
+        if (c.proforma_count) bits.push(`${c.proforma_count} pro forma`);
+        const label = bits.length ? `${c.name} (${bits.join(' · ')})` : c.name;
+        sel.innerHTML += `<option value="${c.id}" data-name="${c.name}" data-gstin="${c.gstin || ''}" data-state-code="${c.gst_state_code || ''}">${label}</option>`;
     });
 }
 

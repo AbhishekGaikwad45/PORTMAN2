@@ -134,8 +134,21 @@
         </tr>
         {% endfor %}
     </tbody>
+    <tfoot>
+        {# One footer row per UOM — quantities across different UOMs don't add up. #}
+        {% for t in qty_totals %}
+        <tr style="font-weight:600;background:#f7fafc;">
+            <td colspan="2" class="text-right">Total Quantity ({{ t.uom }})</td>
+            <td class="text-right">{{ "%.2f"|format(t.quantity) }}</td>
+            <td>{{ t.uom }}</td>
+            <td colspan="5"></td>
+        </tr>
+        {% endfor %}
+    </tfoot>
 </table>
 
+{% set tds_total = bill_lines|sum(attribute='tds_amount')|float %}
+{% set tcs_total = bill_lines|sum(attribute='tcs_amount')|float %}
 <div class="totals-section">
     <div class="total-row">
         <span>Subtotal:</span>
@@ -153,6 +166,18 @@
         <span>IGST:</span>
         <span>{{ "%.2f"|format(bill.igst_amount) }}</span>
     </div>
+    {% if tds_total %}
+    <div class="total-row">
+        <span>TDS Deducted:</span>
+        <span>(-) {{ "%.2f"|format(tds_total) }}</span>
+    </div>
+    {% endif %}
+    {% if tcs_total %}
+    <div class="total-row">
+        <span>TCS Collected:</span>
+        <span>(+) {{ "%.2f"|format(tcs_total) }}</span>
+    </div>
+    {% endif %}
     <div class="total-row grand">
         <span>Total Amount:</span>
         <span>₹ {{ "%.2f"|format(bill.total_amount) }}</span>

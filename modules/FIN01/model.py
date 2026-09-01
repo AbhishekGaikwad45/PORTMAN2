@@ -19,17 +19,65 @@ def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qt
 
 # ===== BILL FUNCTIONS =====
 
-def get_next_bill_number():
-    """Generate next bill number"""
+# ===== GO-LIVE CUTOVER: NUMBERING SEEDS =====
+# A seed is a FLOOR, never an assignment: the next number is whichever is
+# higher, the natural increment or the seed. Once real documents pass the seed
+# it stops mattering, so a stale seed can never collide with a live document.
+
+def lookup_seed(seed_type, doc_series='', financial_year=''):
+    """Configured start sequence for one numbering series, or None.
+
+    Tolerates the table not existing yet (pre-migration): a failed statement
+    poisons the transaction, so roll back before returning."""
     conn = get_db()
     cur = get_cursor(conn)
+    try:
+        cur.execute('''SELECT start_seq FROM cutover_seed
+                       WHERE seed_type=%s AND doc_series=%s AND financial_year=%s''',
+                    [seed_type, doc_series or '', financial_year or ''])
+        row = cur.fetchone()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        return None
+    conn.close()
+    return int(row['start_seq']) if row else None
+
+
+def next_from_seed(current_max, seed):
+    """Next sequence number: the natural increment, floored at the seed."""
+    nxt = int(current_max or 0) + 1
+    return max(nxt, int(seed)) if seed else nxt
+
+
+def next_invoice_seq(cur, doc_series, financial_year):
+    """Next invoice doc_series_seq for one series + FY, seed floor applied."""
+    cur.execute('SELECT MAX(doc_series_seq) AS max FROM invoice_header WHERE doc_series=%s AND financial_year=%s',
+                [doc_series, financial_year])
+    row = cur.fetchone()
+    return next_from_seed(row['max'] if row else 0,
+                          lookup_seed('invoice', doc_series, financial_year))
+
+
+def would_overbill(already_billed, quantity, cap, tol=1e-6):
+    """True when billing `quantity` on top of `already_billed` would push a
+    parcel+service past its billable `cap`. Legitimate partial billing stays
+    allowed; a stale page or double-submit replaying the same lines does not."""
+    return (float(already_billed) + float(quantity)) - float(cap) > tol
+
+
+def get_next_bill_number(cur=None):
+    """Generate next bill number. Pass a cursor to run inside a transaction."""
+    conn = None if cur is not None else get_db()
+    if conn is not None:
+        cur = get_cursor(conn)
     cur.execute(
         "SELECT MAX(CAST(SUBSTR(bill_number, 5) AS INTEGER)) FROM bill_header WHERE bill_number LIKE 'BILL%%'"
     )
     result = cur.fetchone()['max']
-    conn.close()
-    next_num = (result or 0) + 1
-    return f"BILL{next_num:04d}"
+    if conn is not None:
+        conn.close()
+    return f"BILL{next_from_seed(result, lookup_seed('bill', 'BILL')):04d}"
 
 
 def get_bill_data(page=1, size=20, status_filter=None):
@@ -50,6 +98,8 @@ def get_bill_data(page=1, size=20, status_filter=None):
             b.*,
             ca.agreement_code,
             ca.agreement_name,
+            -- TCS lives on the lines, not the header; roll it up for the list.
+            COALESCE((SELECT SUM(bl.tcs_amount) FROM bill_lines bl WHERE bl.bill_id = b.id), 0) AS tcs_amount,
             NULLIF(
                 TRIM(
                     COALESCE(ca.agreement_code, '') ||
@@ -124,6 +174,17 @@ def get_bill_by_id(bill_id):
     row = cur.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def quantity_totals(lines):
+    """Per-UOM quantity totals for a bill's lines — a single 'Total' is
+    meaningless when MT and HRS sit in the same bill.
+    Returns [{'uom': 'MT', 'quantity': 1234.5}, ...] ordered by UOM."""
+    totals = {}
+    for l in lines:
+        uom = (l.get('uom') or '').strip() or '—'
+        totals[uom] = totals.get(uom, 0.0) + float(l.get('quantity') or 0)
+    return [{'uom': u, 'quantity': round(q, 3)} for u, q in sorted(totals.items())]
 
 
 def get_bill_lines(bill_id):
@@ -607,6 +668,28 @@ def is_vcn_billed(vcn_id):
     return billed
 
 
+def vcn_billing_blockers(vcn_id):
+    """What holds this VCN's billed-lock: the distinct bill numbers behind its
+    ledger rows, and whether any row is a cutover flag (bill_id NULL — billed
+    in the legacy system, no PORTMAN bill behind it)."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT DISTINCT bh.bill_number, (pcb.bill_id IS NULL) AS cutover
+        FROM parcel_charge_billed pcb
+        LEFT JOIN bill_header bh ON bh.id = pcb.bill_id
+        WHERE (pcb.cargo_source_type = 'VCN_IMPORT'
+               AND pcb.cargo_source_id IN (SELECT id FROM vcn_consigners WHERE vcn_id=%s))
+           OR (pcb.cargo_source_type = 'VCN_EXPORT'
+               AND pcb.cargo_source_id IN (SELECT id FROM vcn_export_cargo_declaration WHERE vcn_id=%s))''',
+        [vcn_id, vcn_id])
+    rows = cur.fetchall()
+    conn.close()
+    return {
+        'bill_numbers': sorted({r['bill_number'] for r in rows if r['bill_number']}),
+        'cutover': any(r['cutover'] for r in rows),
+    }
+
+
 def generate_bill(data, created_by, bill_status, approved_by=None):
     """Create ONE bill across the selected vessels. Reuses save_bill_header
     (numbering) and save_bill_line (GST/TDS calc, mutates the line dict with the
@@ -627,7 +710,36 @@ def generate_bill(data, created_by, bill_status, approved_by=None):
     if vcn_ids:
         cur.execute("SELECT vcn_doc_num FROM vcn_header WHERE id = ANY(%s) ORDER BY vcn_doc_num", [vcn_ids])
         docs = [r['vcn_doc_num'] for r in cur.fetchall() if r['vcn_doc_num']]
+
+    # Overbill guard: a stale page or a double-submit must not bill the same
+    # parcel twice. Declared quantity is the cap — partial billing stays legal.
+    caps = {}
+    for src, table in (('VCN_IMPORT', 'vcn_consigners'),
+                       ('VCN_EXPORT', 'vcn_export_cargo_declaration')):
+        ids = sorted({l['cargo_source_id'] for l in lines if l.get('cargo_source_type') == src})
+        if not ids:
+            continue
+        cur.execute(f'SELECT id, quantity, parcel_no FROM {table} WHERE id = ANY(%s)', [ids])
+        for r in cur.fetchall():
+            caps[(src, r['id'])] = (_to_float(r['quantity']), r['parcel_no'])
+    cur.execute('''SELECT cargo_source_type, cargo_source_id, service_type_id,
+                          COALESCE(SUM(billed_quantity), 0) AS q
+                   FROM parcel_charge_billed GROUP BY 1, 2, 3''')
+    already = {(r['cargo_source_type'], r['cargo_source_id'], r['service_type_id']): float(r['q'] or 0)
+               for r in cur.fetchall()}
     conn.close()
+
+    for l in lines:
+        key = (l['cargo_source_type'], l['cargo_source_id'])
+        cap, parcel_no = caps.get(key, (None, None))
+        if cap is None:
+            continue
+        prior = already.get(key + (l.get('service_type_id'),), 0.0)
+        if would_overbill(prior, l.get('quantity') or 0, cap):
+            raise ValueError(
+                f"Parcel {parcel_no or l['cargo_source_id']} / {l.get('service_code') or 'service'} "
+                f"is already billed for {prior:g} of {cap:g} — reload the page and bill "
+                f"only the remaining quantity.")
 
     header = {
         'source_type': 'MULTI', 'source_id': None,
@@ -689,6 +801,18 @@ def generate_bill(data, created_by, bill_status, approved_by=None):
 # ===== BILLABLES ENGINE (parcels -> 4 charges, grouped by vessel) =====
 
 _CARGO_GATE = ('Closed', 'Partial Close')
+
+
+def parcel_charge_codes(src, equipment_names, toll_applicable):
+    """Service codes one parcel yields: cargo handling (by direction) plus
+    infrastructure, then equipment and toll when applicable. Single source of
+    truth for the billables engine, the picker counts and Admin Cutover."""
+    codes = ['CHGU01' if src == 'VCN_IMPORT' else 'CHGL01', 'INFM01']
+    if (equipment_names or '').strip():
+        codes.append('MLAC01')
+    if toll_applicable:
+        codes.append('TOLL01')
+    return codes
 
 
 def _to_float(v):
@@ -835,13 +959,9 @@ def get_customer_billables(customer_type, customer_id):
             actual = round(aq, 3) if aq is not None else None
         qty = actual if actual is not None else declared
 
-        cargo_code = 'CHGU01' if src == 'VCN_IMPORT' else 'CHGL01'
         # (service_code, cargo_name_for_rate) — cargo_name only for cargo-priced services
-        charges = [(cargo_code, p['cargo_name']), ('INFM01', p['cargo_name'])]
-        if (p['equipment_names'] or '').strip():
-            charges.append(('MLAC01', None))
-        if p['toll_applicable']:
-            charges.append(('TOLL01', None))
+        charges = [(code, p['cargo_name'] if code in ('CHGU01', 'CHGL01', 'INFM01') else None)
+                   for code in parcel_charge_codes(src, p['equipment_names'], p['toll_applicable'])]
 
         v = vessels.setdefault(p['vcn_id'], {
             'vcn_id': p['vcn_id'], 'vcn_doc_num': p['vcn_doc_num'],
@@ -874,6 +994,75 @@ def get_customer_billables(customer_type, customer_id):
             v['total_amount'] = round(v['total_amount'] + amount, 2)
 
     return {'vessels': list(vessels.values())}
+
+
+def customers_with_billables():
+    """{payer_name: {'actual_count': n, 'proforma_count': n}} — parcels that
+    still have quantity to bill, counted per payer (importer_name).
+
+    Same rules as get_customer_billables, reusing _actual_qty_map so the two
+    can't drift: declared quantity while the LDUD is open ('proforma'), LUEU01
+    actual once it is Closed/Partial Close ('actual'), minus what the
+    parcel_charge_billed ledger already records. Counts parcels, not charges —
+    the number matches what the vessel list shows.
+    """
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        WITH ldud_latest AS (
+            SELECT DISTINCT ON (vcn_id) vcn_id, id AS ldud_id, doc_status
+            FROM ldud_header ORDER BY vcn_id, id DESC
+        ),
+        billed AS (
+            SELECT cargo_source_type, cargo_source_id,
+                   COALESCE(SUM(billed_quantity), 0) AS q
+            FROM parcel_charge_billed
+            GROUP BY cargo_source_type, cargo_source_id
+        )
+        SELECT 'VCN_IMPORT' AS src, c.id, c.importer_name AS payer, c.quantity,
+               c.equipment_names, c.toll_applicable,
+               ll.ldud_id, ll.doc_status AS ldud_status, COALESCE(b.q, 0) AS billed
+        FROM vcn_consigners c
+        JOIN vcn_header h ON h.id = c.vcn_id
+        LEFT JOIN ldud_latest ll ON ll.vcn_id = h.id
+        LEFT JOIN billed b ON b.cargo_source_type = 'VCN_IMPORT' AND b.cargo_source_id = c.id
+        WHERE COALESCE(c.importer_name, '') <> ''
+          AND (h.doc_status = 'Approved' OR ll.doc_status = ANY(%s))
+        UNION ALL
+        SELECT 'VCN_EXPORT' AS src, e.id, e.importer_name AS payer, e.quantity,
+               e.equipment_names, e.toll_applicable,
+               ll.ldud_id, ll.doc_status AS ldud_status, COALESCE(b.q, 0) AS billed
+        FROM vcn_export_cargo_declaration e
+        JOIN vcn_header h ON h.id = e.vcn_id
+        LEFT JOIN ldud_latest ll ON ll.vcn_id = h.id
+        LEFT JOIN billed b ON b.cargo_source_type = 'VCN_EXPORT' AND b.cargo_source_id = e.id
+        WHERE COALESCE(e.importer_name, '') <> ''
+          AND (h.doc_status = 'Approved' OR ll.doc_status = ANY(%s))
+    """, [list(_CARGO_GATE), list(_CARGO_GATE)])
+    parcels = [dict(r) for r in cur.fetchall()]
+
+    declared_by_ldud = {}
+    for p in parcels:
+        if p['ldud_status'] in _CARGO_GATE and p['ldud_id']:
+            declared_by_ldud.setdefault(p['ldud_id'], {})[p['id']] = p['quantity']
+    actual_by_ldud = {lid: _actual_qty_map(cur, lid, decl)
+                      for lid, decl in declared_by_ldud.items()}
+    conn.close()
+
+    counts = {}
+    for p in parcels:
+        actual = p['ldud_status'] in _CARGO_GATE
+        qty = _to_float(p['quantity'])
+        if actual:
+            aq = actual_by_ldud.get(p['ldud_id'], {}).get(p['id'])
+            if aq is not None:
+                qty = round(aq, 3)
+        charges = len(parcel_charge_codes(p['src'], p['equipment_names'], p['toll_applicable']))
+        if qty * charges - float(p['billed'] or 0) <= 1e-6:
+            continue  # every applicable charge is fully billed
+        c = counts.setdefault(p['payer'], {'actual_count': 0, 'proforma_count': 0})
+        c['actual_count' if actual else 'proforma_count'] += 1
+    return counts
 
 
 def unbill_invoice_sources(cur, invoice_id):

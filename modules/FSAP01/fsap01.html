@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}SAP / GST Integration Logs - PORTMAN{% endblock %}
+{% block title %}SAP Integration - PORTMAN{% endblock %}
 
 {% block content %}
 <style>
@@ -31,7 +31,10 @@
     /* Dark theme */
     .dark-theme #sapInvTable .tabulator,
     .dark-theme #sapCnTable .tabulator,
-    .dark-theme #gstTable .tabulator { background: #1e1e1e; color: #e0e0e0; border-color: #444; }
+    .dark-theme #gstTable .tabulator,
+    .dark-theme #callbackTable .tabulator,
+    .dark-theme #outboundTable .tabulator,
+    .dark-theme #queueTable .tabulator { background: #1e1e1e; color: #e0e0e0; border-color: #444; }
     .dark-theme .tabulator .tabulator-header { background: #2d2d2d; color: #e0e0e0; border-bottom-color: #444; }
     .dark-theme .tabulator .tabulator-row { background: #1e1e1e; color: #e0e0e0; border-bottom-color: #333; }
     .dark-theme .tabulator .tabulator-row:nth-child(even) { background: #252525; }
@@ -43,7 +46,7 @@
 </style>
 
 <div class="module-header">
-    <h2>SAP / GST Integration Logs</h2>
+    <h2>SAP Integration</h2>
     <span class="module-code">FSAP01</span>
 </div>
 
@@ -51,6 +54,9 @@
     <button class="tab active" onclick="showTab('sapInv')">SAP – Invoices</button>
     <button class="tab" onclick="showTab('sapCn')">SAP – Credit Notes</button>
     <button class="tab" onclick="showTab('gst')">GST e-Invoice</button>
+    <button class="tab" onclick="showTab('callback')">SAP Callbacks</button>
+    <button class="tab" onclick="showTab('outbound')">SAP Outbound Log</button>
+    <button class="tab" onclick="showTab('queue')">SAP Queue</button>
 </div>
 
 <!-- SAP Invoice Logs -->
@@ -78,6 +84,43 @@
         <span class="row-info">Rows: <span id="gstCount">0</span> / <span id="gstTotal">0</span></span>
     </div>
     <div id="gstTable"></div>
+</div>
+
+<!-- SAP Callbacks (inbound) -->
+<div id="callbackPanel" class="tab-panel">
+    <div class="toolbar">
+        <span style="font-size:11px;color:#7f8c8d">Inbound calls SAP made to <strong>/api/sap/callback</strong> — the only source of IRN / posting details.</span>
+        <span class="row-info">Rows: <span id="callbackCount">0</span> / <span id="callbackTotal">0</span></span>
+    </div>
+    <div id="callbackTable"></div>
+</div>
+
+<!-- SAP Outbound Log -->
+<div id="outboundPanel" class="tab-panel">
+    <div class="toolbar">
+        <select id="outboundType" onchange="reloadOutbound()" style="padding:5px;font-size:11px;">
+            <option value="">All types</option>
+            <option value="SAP">SAP</option>
+            <option value="GST">GST</option>
+        </select>
+        <span class="row-info">Rows: <span id="outboundCount">0</span> / <span id="outboundTotal">0</span></span>
+    </div>
+    <div id="outboundTable"></div>
+</div>
+
+<!-- SAP Queue -->
+<div id="queuePanel" class="tab-panel">
+    <div class="toolbar">
+        <select id="queueStatus" onchange="reloadQueue()" style="padding:5px;font-size:11px;">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="processing">Processing</option>
+            <option value="failed">Failed</option>
+            <option value="sent">Sent</option>
+        </select>
+        <span class="row-info">Rows: <span id="queueCount">0</span> / <span id="queueTotal">0</span></span>
+    </div>
+    <div id="queueTable"></div>
 </div>
 
 <div id="sapLogModal" class="json-modal" style="display:none;">
@@ -261,16 +304,153 @@ const gstTable = new Tabulator('#gstTable', {
 });
 if (isDark) document.getElementById('gstTable').classList.add('tabulator-dark');
 
+// ── Raw log tables (integration_logs / sap_outbound_queue) ───────────────────
+function openRawModal(title, meta, sent, received) {
+    document.getElementById('sapLogDoc').textContent = title || '-';
+    document.getElementById('sapLogId').textContent = meta.id || '-';
+    document.getElementById('sapLogStatus').textContent = meta.status || '-';
+    document.getElementById('sapLogHttp').textContent = meta.http || '-';
+    document.getElementById('sapLogDuration').textContent = meta.duration ? `${meta.duration} ms` : '-';
+    document.getElementById('sapLogDate').textContent = meta.date || '-';
+    document.getElementById('sapLogRequest').textContent = parseBody(sent);
+    document.getElementById('sapLogResponse').textContent = received ? parseBody(received) : (meta.error || '-');
+    document.getElementById('sapLogModal').style.display = 'flex';
+}
+
+function logTable(sel, url, countId, totalId, columns) {
+    return new Tabulator(sel, {
+        height: 'calc(100vh - 210px)',
+        layout: 'fitData',
+        pagination: true,
+        paginationMode: 'remote',
+        paginationSize: 50,
+        ajaxURL: url,
+        ajaxResponse: function(u, params, resp) {
+            document.getElementById(countId).textContent = resp.data.length;
+            document.getElementById(totalId).textContent = resp.total;
+            return resp;
+        },
+        columns: columns,
+    });
+}
+
+const callbackTable = logTable('#callbackTable', '/api/module/FSAP01/callback-logs',
+    'callbackCount', 'callbackTotal', [
+    {title: 'ID',       field: 'id',                   width: 70},
+    {title: 'Token',    field: 'token_label',          width: 150},
+    {title: 'Endpoint', field: 'request_url',          minWidth: 180},
+    {title: 'HTTP',     field: 'response_status_code', width: 70},
+    {title: 'Result',   field: 'status',               width: 110,
+        formatter: function(cell) { return statusBadge(cell.getValue()); }},
+    {title: 'From',     field: 'created_by',           width: 200},
+    {title: 'Received', field: 'created_date',         width: 150},
+    {title: 'JSON',     field: 'request_body',         width: 95,
+        formatter: sapLogButton,
+        cellClick: function(e, cell) {
+            const r = cell.getRow().getData();
+            openRawModal('Callback #' + r.id,
+                {id: r.id, status: r.status, http: r.response_status_code,
+                 date: r.created_date, error: r.error_message},
+                r.request_body, r.response_body);
+        }},
+]);
+
+const outboundTable = logTable('#outboundTable', '/api/module/FSAP01/outbound-logs',
+    'outboundCount', 'outboundTotal', [
+    {title: 'ID',        field: 'id',                   width: 70},
+    {title: 'Type',      field: 'integration_type',     width: 130},
+    {title: 'Source',    field: 'source_type',          width: 110},
+    {title: 'Reference', field: 'source_reference',     width: 150},
+    {title: 'HTTP',      field: 'response_status_code', width: 70},
+    {title: 'Result',    field: 'status',               width: 110,
+        formatter: function(cell) { return statusBadge(cell.getValue()); }},
+    {title: 'Duration',  field: 'duration_ms',          width: 90},
+    {title: 'By',        field: 'created_by',           width: 120},
+    {title: 'Sent',      field: 'created_date',         width: 150},
+    {title: 'JSON',      field: 'request_body',         width: 95,
+        formatter: sapLogButton,
+        cellClick: function(e, cell) {
+            const r = cell.getRow().getData();
+            openRawModal(r.source_reference || ('Log #' + r.id),
+                {id: r.id, status: r.status, http: r.response_status_code,
+                 duration: r.duration_ms, date: r.created_date, error: r.error_message},
+                r.request_body, r.response_body);
+        }},
+]);
+
+const queueColumns = [
+    {title: 'ID',         field: 'id',                  width: 70},
+    {title: 'Job',        field: 'job_type',            width: 110},
+    {title: 'Reference',  field: 'reference_number',    width: 150},
+    {title: 'Status',     field: 'status',              width: 110,
+        formatter: function(cell) { return statusBadge(cell.getValue()); }},
+    {title: 'Retries',    field: 'retry_count',         width: 90,
+        formatter: function(cell) {
+            const r = cell.getRow().getData();
+            return `${r.retry_count || 0} / ${r.max_retries || 0}`;
+        }},
+    {title: 'Next Try',   field: 'next_attempt_at',     width: 150},
+    {title: 'SAP Doc',    field: 'sap_document_number', width: 130},
+    {title: 'Last Error', field: 'last_error',          minWidth: 180},
+    {title: 'Updated',    field: 'updated_date',        width: 150},
+    {title: 'Payload',    field: 'payload',             width: 95,
+        formatter: sapLogButton,
+        cellClick: function(e, cell) {
+            const r = cell.getRow().getData();
+            openRawModal(r.reference_number || ('Queue #' + r.id),
+                {id: r.id, status: r.status, date: r.updated_date, error: r.last_error},
+                r.payload, null);
+        }},
+];
+{% if permissions.can_edit %}
+queueColumns.push({title: 'Action', field: 'status', width: 110, headerSort: false,
+    formatter: function(cell) {
+        const s = cell.getValue();
+        return (s === 'failed' || s === 'pending') ? '<button class="json-btn">Manual Send</button>' : '';
+    },
+    cellClick: function(e, cell) {
+        const s = cell.getValue();
+        if (s === 'failed' || s === 'pending') manualSend(cell.getRow().getData().id);
+    }});
+{% endif %}
+
+const queueTable = logTable('#queueTable', '/api/module/FSAP01/sap-queue',
+    'queueCount', 'queueTotal', queueColumns);
+
+async function manualSend(queueId) {
+    if (!confirm('Re-attempt the SAP posting for queue item #' + queueId + '?')) return;
+    const res = await fetch('/api/module/FSAP01/sap-queue/manual-send', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({queue_id: queueId})
+    });
+    const json = await res.json();
+    alert(json.ok ? ('Posted. SAP doc: ' + (json.sap_document_number || '-'))
+                  : ('Failed: ' + (json.error || 'unknown')));
+    reloadQueue();
+}
+
+function reloadOutbound() {
+    const t = document.getElementById('outboundType').value;
+    outboundTable.setData('/api/module/FSAP01/outbound-logs' + (t ? '?type=' + t : ''));
+}
+function reloadQueue() {
+    const s = document.getElementById('queueStatus').value;
+    queueTable.setData('/api/module/FSAP01/sap-queue' + (s ? '?status=' + s : ''));
+}
+
 function showTab(name) {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById(name + 'Panel').classList.add('active');
-    const idx = {sapInv: 0, sapCn: 1, gst: 2}[name];
+    const idx = {sapInv: 0, sapCn: 1, gst: 2, callback: 3, outbound: 4, queue: 5}[name];
     document.querySelectorAll('.tab')[idx].classList.add('active');
 
     // Trigger data load on first switch
-    if (name === 'sapCn') sapCnTable.setData('/api/module/FSAP01/sap-cn-logs');
-    if (name === 'gst')   gstTable.setData('/api/module/FSAP01/gst-logs');
+    if (name === 'sapCn')    sapCnTable.setData('/api/module/FSAP01/sap-cn-logs');
+    if (name === 'gst')      gstTable.setData('/api/module/FSAP01/gst-logs');
+    if (name === 'callback') callbackTable.setData('/api/module/FSAP01/callback-logs');
+    if (name === 'outbound') reloadOutbound();
+    if (name === 'queue')    reloadQueue();
 }
 </script>
 {% endblock %}
