@@ -69,9 +69,11 @@ def _jjltpl_window(selected_date):
     return window_start, window_end
 
 
-def _jjltpl_month_window(selected_date, window_end):
-    month_start = datetime.combine(selected_date.replace(day=1), time(7, 0, 0))
-    return month_start, window_end
+def _jjltpl_month_window(selected_date, window_end=None):
+    d = selected_date.date() if isinstance(selected_date, datetime) else selected_date
+    month_start = datetime.combine(d.replace(day=1), time(7, 0, 0))
+    month_end = datetime.combine(d, time(7, 0, 0))
+    return month_start, month_end
 
 
 def _jjltpl_year_window(selected_date, window_end):
