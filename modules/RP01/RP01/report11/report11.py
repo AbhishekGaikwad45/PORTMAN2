@@ -155,7 +155,7 @@ def _fetch_live_idle_by_parcel_op(cur, parcel_op_ids):
     return idle
 
 
-def _fetch_live_rows(cur):
+def _fetch_live_rows(cur, vc_map=None):
     """Vessel-call rows built from LDUD/VCN for months not yet migrated
     into mis_vessel_master.
 
@@ -191,9 +191,15 @@ def _fetch_live_rows(cur):
             GROUP BY parcel_op_id
         ) actual
             ON actual.parcel_op_id = po.id
-        LEFT JOIN vessel_cargo vc
-            ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(po.cargo_name))
+        LEFT JOIN vessel_cargo vc ON (
+            UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(po.cargo_name))
+            OR UPPER(TRIM(vc.cargo_code)) = UPPER(TRIM(po.cargo_name))
+            OR UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(REGEXP_REPLACE(po.cargo_name, '\\s*\\[.*\\]', '')))
+            OR UPPER(TRIM(vc.cargo_code)) = UPPER(TRIM(REGEXP_REPLACE(po.cargo_name, '\\s*\\[.*\\]', '')))
+        )
         WHERE COALESCE(lh.is_deleted, FALSE) = FALSE
+          AND lh.cast_off_datetime IS NOT NULL
+          AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL
     """)
     raw = cur.fetchall()
     if not raw:
@@ -212,7 +218,7 @@ def _fetch_live_rows(cur):
         pilot_pickup = _parse_ts(r["pilot_pickup_time"])
         pilot_departure = _parse_ts(r["pilot_board_departure"])
 
-        dt = cast_off or alongside or nor_tendered or _parse_ts(r["created_date"])
+        dt = cast_off
         if not dt:
             continue
 
@@ -291,48 +297,78 @@ def days_in_month(fin_year: str, month_idx: int) -> int:
 # ---------------------------------------------------------------------
 # Cargo (free text) -> broad section classification
 # ---------------------------------------------------------------------
-def classify_broad_category(cargo):
-    """Classifies a free-text cargo string into LIQUID / DRY BULK / BREAK BULK."""
+def _normalize_cargo_key(val) -> str:
+    s = str(val or "").strip().casefold()
+    s = re.sub(r"\s*\[.*\]", "", s)
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return s.strip()
+
+
+def load_cargo_category_map_from_vc(cur) -> dict:
+    """Loads broad category mapping (LIQUID / DRY BULK / BREAK BULK)
+    dynamically from vessel_cargo master table."""
+    cur.execute("""
+        SELECT DISTINCT cargo_name, cargo_code, cargo_type, cargo_category,
+                        cargo_category_2, cargo_sub_category, cargo_sub_category_2
+        FROM vessel_cargo
+    """)
+    rows = cur.fetchall() or []
+
+    vc_map = {}
+    for r in rows:
+        t = (str(r.get("cargo_type") or "")).strip().lower()
+        c = (str(r.get("cargo_category") or "")).strip().lower()
+        c2 = (str(r.get("cargo_category_2") or "")).strip().lower()
+        sub = (str(r.get("cargo_sub_category") or "")).strip().lower()
+        s2 = (str(r.get("cargo_sub_category_2") or "")).strip().lower()
+        n = (str(r.get("cargo_name") or "")).strip().lower()
+        cd = (str(r.get("cargo_code") or "")).strip().lower()
+
+        comb = f"{t} {c} {c2} {sub} {s2} {n} {cd}"
+        cat = None
+        if any(k in comb for k in ["liquid", "pol", "chemical", "oil", "acid", "edible", "furnace", "phenol", "acetone", "solvent", "lube", "cpo", "cpko", "sfo", "rbdpo", "cbfs", "vam", "sm", "nba", "mdc", "ipa", "fo", "buta", "tolu", "sbo", "shell"]):
+            cat = "LIQUID"
+        elif any(k in comb for k in ["dry", "cement", "coal", "ore", "fertilizer", "grain", "scrap", "clinker", "limestone"]):
+            cat = "DRY BULK"
+        elif any(k in comb for k in ["break", "container", "steel", "timber", "log"]):
+            cat = "BREAK BULK"
+
+        if cat:
+            if n:
+                vc_map[_normalize_cargo_key(n)] = cat
+            if cd:
+                vc_map[_normalize_cargo_key(cd)] = cat
+
+    return vc_map
+
+
+def classify_broad_category(cargo, vc_map: dict = None):
+    """Classifies a free-text cargo string into LIQUID / DRY BULK / BREAK BULK using vessel_cargo master table."""
+    if not cargo:
+        return None
+
+    if vc_map:
+        norm_key = _normalize_cargo_key(cargo)
+        if norm_key in vc_map:
+            return vc_map[norm_key]
+
+        tokens = [_normalize_cargo_key(t) for t in re.split(r"[\/\+\-\s]+", str(cargo)) if t.strip()]
+        for t in tokens:
+            if t in vc_map:
+                return vc_map[t]
+            for k in vc_map:
+                if len(t) >= 3 and (t in k or k in t):
+                    return vc_map[k]
+
     cargo_raw = str(cargo or "").strip().upper()
     if not cargo_raw:
         return None
 
-    # ---------------- LIQUID ----------------
-    liquid_phrases = (
-        "FURNACE OIL", "POL CRUDE", "RBD PALM OLEIN", "EDIBLE OIL",
-        "SUNFLOWER OIL", "ACETIC ACID", "A. ACID", "PHOSPHORIC ACID",
-        "PH.ACID", "PH ACID", "BASE OIL", "N BUTONAL", "STRENE MONOMER",
-        "STYRENE MONOMER", "NITRIC ACID", "ISOPROPYL ALCOHOL",
-        "LPG", "LNG", "LUBE", "SHELL",
-    )
-    if any(p in cargo_raw for p in liquid_phrases):
+    if any(k in cargo_raw for k in ["LIQUID", "POL", "CHEMICAL", "OIL", "ACID", "EDIBLE", "FURNACE", "PHENOL", "ACETONE", "LUBE", "CPO", "CPKO", "SFO", "RBDPO", "CBFS", "VAM", "SM", "NBA", "MDC", "IPA", "FO", "SBO", "SHELL", "TOLU", "BUTAN"]):
         return "LIQUID"
-
-    liquid_tokens = {
-        "FO", "CBFS", "CPO", "CPKO", "CDSBO", "CSBO", "CSFO",
-        "CHEMICAL", "CHEMICALS", "AACID", "A.ACID", "VAM",
-        "PHENOL", "ACETONE", "MDC", "MEK", "IPA", "SM", "MEOH",
-        "TOLUNE", "TOLUENE", "METHELENE", "METHYLENE",
-        "CHOLORIDE", "CHLORIDE",
-    }
-    tokens = set(re.split(r'[\/\+\-\s]+', cargo_raw))
-    tokens.discard('')
-    if tokens & liquid_tokens:
-        return "LIQUID"
-
-    # ---------------- DRY BULK ----------------
-    dry_bulk_keywords = (
-        "IRON ORE", "COAL", "FERTILIZER", "CEMENT", "SALT", "SUGAR",
-        "PULSES", "FOOD GRAIN", "TEA", "COFFEE", "SCRAP",
-        "CLINKER", "LIMESTONE", "DOLOMITE", "HBI", "FINES",
-        "GYPSUM", "BAUXITE", "CLO", "BRBF", "MABU", "VIZAG", "DHAMRA",
-    )
-    if any(k in cargo_raw for k in dry_bulk_keywords):
+    if any(k in cargo_raw for k in ["DRY", "CEMENT", "COAL", "ORE", "FERTILIZER"]):
         return "DRY BULK"
-
-    # ---------------- BREAK BULK ----------------
-    break_bulk_keywords = ("IRON AND STEEL", "TIMBER", "LOG", "PROJECT CARGO")
-    if any(k in cargo_raw for k in break_bulk_keywords):
+    if any(k in cargo_raw for k in ["BREAK", "CONTAINER", "STEEL"]):
         return "BREAK BULK"
 
     return None
@@ -351,6 +387,7 @@ def load_data() -> pd.DataFrame:
     conn = get_db()
     try:
         cur = get_cursor(conn)
+        vc_map = load_cargo_category_map_from_vc(cur)
         cur.execute("""
             SELECT
                 id AS vessel_call_id,
@@ -374,18 +411,8 @@ def load_data() -> pd.DataFrame:
         """)
         mis_rows = cur.fetchall()
 
-        mis_periods = {
-            (str(r["fin_year"]).strip(), str(r["month"]).strip())
-            for r in mis_rows
-        }
-
-        live_rows = _fetch_live_rows(cur)
-        filtered_live = [
-            r for r in live_rows
-            if (str(r["fin_year"]).strip(), str(r["month"]).strip()) not in mis_periods
-        ]
-
-        rows = list(mis_rows) + filtered_live
+        live_rows = _fetch_live_rows(cur, vc_map)
+        rows = list(mis_rows) + list(live_rows)
     finally:
         conn.close()
 
@@ -416,9 +443,9 @@ def load_data() -> pd.DataFrame:
 
     if "broad_category" not in df.columns:
         df["broad_category"] = None
-    df["broad_category"] = df["broad_category"].where(
-        df["broad_category"].notna(),
-        df["cargo"].apply(classify_broad_category)
+    df["broad_category"] = df.apply(
+        lambda r: classify_broad_category(r.get("broad_category") or r.get("cargo"), vc_map),
+        axis=1
     )
 
     unmapped = sorted(df.loc[df["broad_category"].isna(), "cargo"].dropna().unique().tolist())
