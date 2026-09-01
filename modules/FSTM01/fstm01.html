@@ -550,19 +550,57 @@ async function saveAllFields() {
 async function deleteSelectedFields() {
     const selected = document.querySelectorAll('.field-select:checked');
     if (selected.length === 0) { alert('Select fields to delete'); return; }
-    if (!confirm(`Delete ${selected.length} field(s)?`)) return;
 
-    for (let checkbox of selected) {
-        const row = checkbox.closest('tr');
+    // Unsaved rows have no id — drop them without troubling the server.
+    const rows = Array.from(selected).map(cb => cb.closest('tr'));
+    const saved = rows.filter(r => r.getAttribute('data-field-id'));
+    rows.filter(r => !r.getAttribute('data-field-id')).forEach(r => r.remove());
+    if (saved.length === 0) return;
+
+    // Ask the server what each delete would destroy, so the warning is real.
+    let values = 0, records = 0, billed = 0, billableQtyFields = [];
+    for (const row of saved) {
         const id = row.getAttribute('data-field-id');
-        if (id) {
-            await fetch('/api/module/FSTM01/fields/delete', {
+        try {
+            const r = await fetch(`/api/module/FSTM01/fields/usage/${id}`);
+            const u = await r.json();
+            if (!u.success) continue;
+            values += u.values; records += u.records; billed += u.billed_records;
+            if (u.is_billable_qty) billableQtyFields.push(u.field_label);
+        } catch (e) { /* fall through to the generic warning */ }
+    }
+
+    let msg = `Delete ${saved.length} field(s)?`;
+    if (values > 0) {
+        msg += `\n\nThis permanently deletes ${values} recorded value(s) across ${records} service record(s).`;
+        if (billed > 0) msg += `\n${billed} of those records are ALREADY BILLED — their supporting detail will be lost.`;
+        if (billableQtyFields.length) msg += `\nBillable-quantity field(s): ${billableQtyFields.join(', ')}.`;
+        msg += `\n\nThis cannot be undone.`;
+    }
+    if (!confirm(msg)) return;
+
+    const reason = prompt('Reason for deleting (required — recorded in the audit log):');
+    if (reason === null) return;
+    if (!reason.trim()) { alert('A reason is required.'); return; }
+
+    for (const row of saved) {
+        const id = row.getAttribute('data-field-id');
+        try {
+            const resp = await fetch('/api/module/FSTM01/fields/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: id})
+                body: JSON.stringify({id: id, reason: reason})
             });
+            const result = await resp.json();
+            // Only drop the row when the server actually deleted it.
+            if (resp.ok && result.success) {
+                row.remove();
+            } else {
+                alert(`Could not delete "${row.querySelector('.f-label')?.value || id}": ${result.error || 'Unknown error'}`);
+            }
+        } catch (e) {
+            alert(`Could not delete field ${id}: ${e.message}`);
         }
-        row.remove();
     }
 }
 

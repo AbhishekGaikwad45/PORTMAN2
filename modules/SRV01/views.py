@@ -140,8 +140,37 @@ def save():
 
     field_values = data.get('field_values', [])
 
+    # Required fields bite only when the record becomes Approved — which this
+    # route can do directly (approver/admin, or approval_add off), not just the
+    # approve endpoint. Draft and Pending stay saveable half-filled on purpose.
+    if header_data['doc_status'] == 'Approved':
+        error = _approval_blocker(header_data, field_values)
+        if error:
+            return jsonify({'success': False, 'error': error}), 400
+
     record_id, record_number = model.save_service_record(header_data, field_values)
     return jsonify({'success': True, 'id': record_id, 'record_number': record_number})
+
+
+def _approval_blocker(header_data, field_values):
+    """Why this record may not be Approved, or None if it may.
+
+    Shared by save (born-Approved path) and approve, so the two can never
+    disagree about what a complete record is."""
+    service_type_id = header_data.get('service_type_id')
+    missing = model.missing_required(service_type_id, field_values)
+    if missing:
+        return 'Required: ' + ', '.join(missing)
+    if model.has_billable_qty_field(service_type_id):
+        qty = header_data.get('billable_quantity')
+        if qty is None or str(qty).strip() == '':
+            return 'Billable quantity is required for this service type.'
+        try:
+            if float(qty) <= 0:
+                return 'Billable quantity must be greater than zero.'
+        except (TypeError, ValueError):
+            return 'Billable quantity must be a number.'
+    return None
 
 
 @bp.route('/api/module/SRV01/delete', methods=['POST'])
@@ -174,6 +203,16 @@ def approve():
         return jsonify({'success': False, 'error': 'Only approver or admin can approve'})
 
     record_id = request.json.get('id')
+
+    # An incomplete record may sit in Draft/Pending, but must not pass into
+    # Approved — that is the status billing picks up.
+    header, values = model.get_service_record_by_id(record_id)
+    if not header:
+        return jsonify({'success': False, 'error': 'Record not found'}), 404
+    error = _approval_blocker(header, values)
+    if error:
+        return jsonify({'success': False, 'error': error}), 400
+
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute('''UPDATE service_records

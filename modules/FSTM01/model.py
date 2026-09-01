@@ -251,26 +251,79 @@ def save_field_definition(data):
     return row_id
 
 
-def delete_field_definition(field_id):
-    """Delete a field definition"""
+def field_usage(field_id):
+    """What deleting this field would destroy: recorded values, the records
+    holding them, and how many of those are already billed. Drives the warning
+    shown before the delete is confirmed."""
     conn = get_db()
     cur = get_cursor(conn)
-
-    # Get service_type_id before deleting
-    cur.execute('SELECT service_type_id FROM service_field_definitions WHERE id = %s', [field_id])
+    cur.execute('''SELECT field_label, is_billable_qty
+                   FROM service_field_definitions WHERE id = %s''', [field_id])
     row = cur.fetchone()
-    service_type_id = row['service_type_id'] if row else None
-
-    cur.execute('DELETE FROM service_field_definitions WHERE id=%s', (field_id,))
-
-    # Check if any fields remain, update has_custom_fields flag
-    if service_type_id:
-        cur.execute('SELECT COUNT(*) FROM service_field_definitions WHERE service_type_id = %s',
-                     [service_type_id])
-        count = cur.fetchone()['count']
-        if count == 0:
-            cur.execute('UPDATE finance_service_types SET has_custom_fields = 0 WHERE id = %s',
-                         [service_type_id])
-
-    conn.commit()
+    if not row:
+        conn.close()
+        return None
+    cur.execute('''SELECT COUNT(*) AS values_count,
+                          COUNT(DISTINCT v.service_record_id) AS records_count,
+                          COUNT(DISTINCT CASE WHEN COALESCE(r.is_billed, 0) = 1
+                                              THEN v.service_record_id END) AS billed_count
+                   FROM service_record_values v
+                   JOIN service_records r ON r.id = v.service_record_id
+                   WHERE v.field_definition_id = %s''', [field_id])
+    counts = cur.fetchone()
     conn.close()
+    return {
+        'field_label': row['field_label'],
+        'is_billable_qty': bool(row['is_billable_qty']),
+        'values': int(counts['values_count'] or 0),
+        'records': int(counts['records_count'] or 0),
+        'billed_records': int(counts['billed_count'] or 0),
+    }
+
+
+def delete_field_definition(field_id, reason, username):
+    """Delete a field definition and every value recorded against it.
+
+    service_record_values.field_definition_id has no ON DELETE CASCADE, so the
+    values must go first or Postgres raises a FK violation. Both deletes plus
+    the audit row are one transaction: a field never survives with its values
+    gone, and never disappears without the reason being recorded.
+
+    Returns the field_usage snapshot taken before the delete."""
+    usage = field_usage(field_id)
+    if usage is None:
+        raise ValueError('Field not found')
+    if not (reason or '').strip():
+        raise ValueError('A reason is required to delete a custom field')
+
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT service_type_id FROM service_field_definitions WHERE id = %s', [field_id])
+        row = cur.fetchone()
+        service_type_id = row['service_type_id'] if row else None
+
+        cur.execute('DELETE FROM service_record_values WHERE field_definition_id = %s', [field_id])
+        cur.execute('DELETE FROM service_field_definitions WHERE id = %s', [field_id])
+
+        # Last field gone -> the service type no longer has custom fields.
+        if service_type_id:
+            cur.execute('SELECT COUNT(*) FROM service_field_definitions WHERE service_type_id = %s',
+                        [service_type_id])
+            if cur.fetchone()['count'] == 0:
+                cur.execute('UPDATE finance_service_types SET has_custom_fields = 0 WHERE id = %s',
+                            [service_type_id])
+
+        detail = (f"Deleted custom field '{usage['field_label']}' "
+                  f"({usage['values']} recorded values across {usage['records']} service records, "
+                  f"{usage['billed_records']} already billed). Reason: {reason.strip()}")
+        cur.execute('''INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('FSTM01', %s, 'Delete Custom Field', %s, %s)''',
+                    [field_id, detail, username])
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return usage

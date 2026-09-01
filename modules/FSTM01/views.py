@@ -97,9 +97,23 @@ def save_field():
     return jsonify({'success': True, 'id': row_id})
 
 
+@bp.route('/api/module/FSTM01/fields/usage/<int:field_id>')
+def field_usage(field_id):
+    """What deleting this field would destroy — drives the confirm dialog."""
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'error': 'Not logged in'})
+    usage = model.field_usage(field_id)
+    if usage is None:
+        return jsonify({'success': False, 'error': 'Field not found'}), 404
+    return jsonify({'success': True, **usage})
+
+
 @bp.route('/api/module/FSTM01/fields/delete', methods=['POST'])
 def delete_field():
-    """Delete a field definition"""
+    """Delete a field definition and every value recorded against it.
+
+    Destructive and irreversible, so a reason is mandatory and is written to
+    approval_log along with what was destroyed."""
     if 'user_id' not in session:
         return jsonify({'success': False, 'error': 'Not logged in'})
 
@@ -107,6 +121,16 @@ def delete_field():
     if not perms['can_delete']:
         return jsonify({'success': False, 'error': 'No delete permission'})
 
-    field_id = request.json.get('id')
-    model.delete_field_definition(field_id)
-    return jsonify({'success': True})
+    data = request.json or {}
+    field_id = data.get('id')
+    reason = (data.get('reason') or '').strip()
+    if not reason:
+        return jsonify({'success': False, 'error': 'A reason is required to delete a custom field'}), 400
+
+    try:
+        usage = model.delete_field_definition(field_id, reason, session.get('username'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Delete failed: {e}'}), 500
+    return jsonify({'success': True, 'deleted_values': usage['values']})

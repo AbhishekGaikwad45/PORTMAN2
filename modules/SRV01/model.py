@@ -210,6 +210,54 @@ def get_field_definitions(service_type_id):
     return [dict(r) for r in rows]
 
 
+def missing_required(service_type_id, field_values):
+    """Labels of is_required fields left blank, for a record about to become
+    Approved. Draft/Pending saves skip this — operators fill records in passes.
+
+    field_values is the save payload: [{field_definition_id, field_value}, ...].
+    A checkbox sends '0' when unticked, which is a real answer, not a blank."""
+    if not service_type_id:
+        return []
+    supplied = {}
+    for v in (field_values or []):
+        try:
+            supplied[int(v.get('field_definition_id'))] = v.get('field_value')
+        except (TypeError, ValueError):
+            continue
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT id, field_label, field_type FROM service_field_definitions
+                   WHERE service_type_id = %s AND is_active = 1 AND is_required = 1
+                   ORDER BY display_order, id''', [service_type_id])
+    required = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    missing = []
+    for f in required:
+        val = supplied.get(f['id'])
+        if f['field_type'] == 'checkbox':
+            if val is None:
+                missing.append(f['field_label'])
+        elif val is None or str(val).strip() == '':
+            missing.append(f['field_label'])
+    return missing
+
+
+def has_billable_qty_field(service_type_id):
+    """True when this service type derives its billing quantity from a field —
+    such a record must not reach Approved with a blank quantity."""
+    if not service_type_id:
+        return False
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT 1 FROM service_field_definitions
+                   WHERE service_type_id = %s AND is_active = 1 AND is_billable_qty = 1
+                   LIMIT 1''', [service_type_id])
+    found = cur.fetchone() is not None
+    conn.close()
+    return found
+
+
 def get_unbilled_records_for_customer(customer_type, customer_id):
     """Get approved, unbilled service records for a customer/agent (used by billing)"""
     conn = get_db()

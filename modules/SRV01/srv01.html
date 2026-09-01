@@ -446,6 +446,7 @@ function renderFields(existingValues) {
 
         input.dataset.fieldId = fd.id;
         input.dataset.fieldName = fd.field_name;
+        input.dataset.fieldLabel = fd.field_label;
         input.dataset.fieldType = fd.field_type;
         input.dataset.isBillableQty = fd.is_billable_qty || 0;
         if (fd.calculation_formula) input.dataset.formula = fd.calculation_formula;
@@ -545,6 +546,26 @@ function evaluateFormula(formula, fieldValues, resultType) {
     return null;
 }
 
+function _requiredInputs() {
+    // input.required is set when the field is rendered, but these inputs are
+    // never submitted as a <form>, so the browser never enforces it — we do.
+    return Array.from(
+        document.getElementById('fieldsContainer').querySelectorAll('[data-field-id]')
+    ).filter(inp => inp.required);
+}
+
+function missingRequiredFields() {
+    return _requiredInputs()
+        .filter(inp => inp.dataset.fieldType !== 'checkbox' && !String(inp.value || '').trim())
+        .map(inp => (inp.dataset.fieldLabel || inp.dataset.fieldId));
+}
+
+function focusFirstMissing() {
+    const first = _requiredInputs().find(
+        inp => inp.dataset.fieldType !== 'checkbox' && !String(inp.value || '').trim());
+    if (first) first.focus();
+}
+
 function collectFieldValues() {
     const container = document.getElementById('fieldsContainer');
     const allInputs = container.querySelectorAll('[data-field-id]');
@@ -569,6 +590,18 @@ async function saveRecord() {
 
     recalculate();
 
+    // Whether this save lands as Approved is the server's call (approver config),
+    // so warn here and let the server be the gate. A record missing required
+    // fields can still be parked as a draft.
+    const missing = missingRequiredFields();
+    if (missing.length) {
+        const ok = confirm(
+            'These required fields are empty:\n\n  ' + missing.join('\n  ') +
+            '\n\nThe record can be saved as a draft, but cannot be approved ' +
+            '(or billed) until they are filled.\n\nSave anyway?');
+        if (!ok) { focusFirstMissing(); return; }
+    }
+
     const customerOpt = document.getElementById('customerId').selectedOptions[0];
     const refSourceType = document.getElementById('refSourceType').value || null;
     const refSourceId = document.getElementById('refSourceId').value || null;
@@ -585,7 +618,10 @@ async function saveRecord() {
         ref_source_display: refSourceDisplay,
         service_type_id: parseInt(serviceTypeId),
         record_date: recordDate,
-        billable_quantity: parseFloat(document.getElementById('billableQty').value) || 0,
+        // null, not 0 — a blank quantity must reach the server as "unset" so it
+        // can block approval, rather than becoming a zero-amount bill line.
+        billable_quantity: document.getElementById('billableQty').value.trim() === ''
+            ? null : parseFloat(document.getElementById('billableQty').value),
         billable_uom: document.getElementById('billableUom').value,
         remarks: document.getElementById('remarks').value,
         doc_status: document.getElementById('docStatus').value,
