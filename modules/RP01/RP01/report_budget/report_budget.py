@@ -298,8 +298,9 @@ def load_all_actuals_and_budgets(fin_year: str, detailed: bool = False, column: 
 
                     jnpt_data[m_idx][cat] = jnpt_data[m_idx].get(cat, 0.0) + qty
 
-            # C. JSW Live Actual (Filtered by ldud_header.cast_off_datetime with calendar month window)
+            # C. JSW Live Actual (Filtered by lueu_parcel_log actual discharge timestamp with 07:00 AM operational window)
             if not has_mis_jsw:
+                jsw_start_ts, jsw_end_ts = get_jsw_0700_date_range(fin_year, m_idx)
                 cur.execute("""
                     SELECT 
                         po.cargo_name,
@@ -313,17 +314,14 @@ def load_all_actuals_and_budgets(fin_year: str, detailed: bool = False, column: 
                     JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
                     JOIN ldud_header ld ON ld.id = po.ldud_id
                     LEFT JOIN vessel_cargo vc ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(po.cargo_name))
-                    WHERE ld.cast_off_datetime IS NOT NULL
-                      AND NULLIF(TRIM(ld.cast_off_datetime), '') IS NOT NULL
-                      AND (
-                          (ld.cast_off_datetime ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' AND SPLIT_PART(ld.cast_off_datetime, 'T', 1) >= %s AND SPLIT_PART(ld.cast_off_datetime, 'T', 1) < %s)
-                          OR
-                          (NOT (ld.cast_off_datetime ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}') AND NULLIF(TRIM(ld.cast_off_datetime), '')::timestamp::date >= %s::date AND NULLIF(TRIM(ld.cast_off_datetime), '')::timestamp::date < %s::date)
-                      )
+                    WHERE l.entry_date IS NOT NULL
+                      AND NULLIF(TRIM(l.entry_date::text), '') IS NOT NULL
+                      AND CONCAT(SPLIT_PART(TRIM(l.entry_date::text), 'T', 1), ' ', COALESCE(NULLIF(TRIM(l.from_time), ''), '00:00'))::timestamp >= %s::timestamp
+                      AND CONCAT(SPLIT_PART(TRIM(l.entry_date::text), 'T', 1), ' ', COALESCE(NULLIF(TRIM(l.from_time), ''), '00:00'))::timestamp < %s::timestamp
                       AND COALESCE(l.is_deleted, false) = false
                       AND COALESCE(l.is_shortclose, false) = false
                     GROUP BY po.cargo_name, vc.cargo_type, vc.cargo_category, vc.cargo_category_2, vc.cargo_sub_category, vc.cargo_sub_category_2;
-                """, (start_dt, end_dt, start_dt, end_dt))
+                """, (jsw_start_ts, jsw_end_ts))
                 for r in cur.fetchall():
                     cn = (r["cargo_name"] or "").strip()
                     sub = (r["sub"] or "").strip()
