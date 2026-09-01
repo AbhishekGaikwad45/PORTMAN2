@@ -155,15 +155,14 @@ def _fetch_live_idle_by_parcel_op(cur, parcel_op_ids):
     return idle
 
 
-def _fetch_live_rows(cur, vc_map=None):
+def _fetch_live_rows(cur):
     """Vessel-call rows built from LDUD/VCN for months not yet migrated
     into mis_vessel_master.
 
     quantity is the ACTUAL discharged quantity from lueu_parcel_log
     (excluding is_shortclose = true entries), falling back to the
     originally declared po.quantity only if no log entries exist yet.
-    Financial year and month are derived from the vessel's actual
-    timestamps (cast_off_datetime, alongside_datetime, nor_tendered, created_date)."""
+    Financial year and month are derived from cast_off_datetime."""
     cur.execute("""
         SELECT
             lh.id AS ldud_id,
@@ -171,7 +170,13 @@ def _fetch_live_rows(cur, vc_map=None):
             vh.berth_name AS berth_no,
             vh.operation_type AS import_export,
             po.cargo_name AS cargo,
-            vc.cargo_type AS vc_broad_category,
+            vc.cargo_name AS vc_cargo_name,
+            vc.cargo_code AS vc_cargo_code,
+            vc.cargo_type AS vc_cargo_type,
+            vc.cargo_category AS vc_cargo_category,
+            vc.cargo_category_2 AS vc_cargo_category_2,
+            vc.cargo_sub_category AS vc_cargo_sub_category,
+            vc.cargo_sub_category_2 AS vc_cargo_sub_category_2,
             COALESCE(actual.real_qty, po.quantity::numeric) AS quantity,
             lh.nor_tendered AS nor_tendered,
             lh.nor_accepted AS nor_accepted,
@@ -248,7 +253,13 @@ def _fetch_live_rows(cur, vc_map=None):
             "berth_no": r["berth_no"],
             "import_export": r["import_export"],
             "cargo": r["cargo"],
-            "broad_category": r["vc_broad_category"],
+            "vc_cargo_name": r["vc_cargo_name"],
+            "vc_cargo_code": r["vc_cargo_code"],
+            "vc_cargo_type": r["vc_cargo_type"],
+            "vc_cargo_category": r["vc_cargo_category"],
+            "vc_cargo_category_2": r["vc_cargo_category_2"],
+            "vc_cargo_sub_category": r["vc_cargo_sub_category"],
+            "vc_cargo_sub_category_2": r["vc_cargo_sub_category_2"],
             "quantity": r["quantity"],
             "pre_berthing_waiting": waiting_port + waiting_non_port,
             "waiting_port": waiting_port,
@@ -294,82 +305,40 @@ def days_in_month(fin_year: str, month_idx: int) -> int:
     return calendar.monthrange(year, real_month_num)[1]
 
 
-# ---------------------------------------------------------------------
-# Cargo (free text) -> broad section classification
-# ---------------------------------------------------------------------
-def _normalize_cargo_key(val) -> str:
-    s = str(val or "").strip().casefold()
-    s = re.sub(r"\s*\[.*\]", "", s)
-    s = re.sub(r"[^a-z0-9]+", " ", s)
-    return s.strip()
+def classify_broad_category_mis(r: dict):
+    """Categorizes mis_vessel_master row strictly using its master category fields (priority: new_cat -> category1 -> category)."""
+    for field in ("new_cat", "category1", "category"):
+        val = str(r.get(field) or "").strip().upper()
+        if not val:
+            continue
+        if val in ("LIQUID", "OTHER LIQUID", "EDIBLE OIL", "POL", "POL BLACK", "POL-BLACK", "PH.ACID", "PH ACID", "CHEMICAL", "CHEMICALS", "FARM LIQUIDS"):
+            return "LIQUID"
+        if val in ("DRY BULK", "DRY", "CEMENT"):
+            return "DRY BULK"
+        if val in ("BREAK BULK", "BREAK", "CONTAINER", "CONTAINERS", "GENERAL CARGO"):
+            return "BREAK BULK"
+
+    print("REPORT11 WARNING: Unmapped MIS cargo row:", {
+        "cargo": r.get("cargo"),
+        "new_cat": r.get("new_cat"),
+        "category1": r.get("category1"),
+        "category": r.get("category"),
+    })
+    return None
 
 
-def load_cargo_category_map_from_vc(cur) -> dict:
-    """Loads broad category mapping (LIQUID / DRY BULK / BREAK BULK)
-    dynamically from vessel_cargo master table."""
-    cur.execute("""
-        SELECT DISTINCT cargo_name, cargo_code, cargo_type, cargo_category,
-                        cargo_category_2, cargo_sub_category, cargo_sub_category_2
-        FROM vessel_cargo
-    """)
-    rows = cur.fetchall() or []
-
-    vc_map = {}
-    for r in rows:
-        t = (str(r.get("cargo_type") or "")).strip().lower()
-        c = (str(r.get("cargo_category") or "")).strip().lower()
-        c2 = (str(r.get("cargo_category_2") or "")).strip().lower()
-        sub = (str(r.get("cargo_sub_category") or "")).strip().lower()
-        s2 = (str(r.get("cargo_sub_category_2") or "")).strip().lower()
-        n = (str(r.get("cargo_name") or "")).strip().lower()
-        cd = (str(r.get("cargo_code") or "")).strip().lower()
-
-        comb = f"{t} {c} {c2} {sub} {s2} {n} {cd}"
-        cat = None
-        if any(k in comb for k in ["liquid", "pol", "chemical", "oil", "acid", "edible", "furnace", "phenol", "acetone", "solvent", "lube", "cpo", "cpko", "sfo", "rbdpo", "cbfs", "vam", "sm", "nba", "mdc", "ipa", "fo", "buta", "tolu", "sbo", "shell"]):
-            cat = "LIQUID"
-        elif any(k in comb for k in ["dry", "cement", "coal", "ore", "fertilizer", "grain", "scrap", "clinker", "limestone"]):
-            cat = "DRY BULK"
-        elif any(k in comb for k in ["break", "container", "steel", "timber", "log"]):
-            cat = "BREAK BULK"
-
-        if cat:
-            if n:
-                vc_map[_normalize_cargo_key(n)] = cat
-            if cd:
-                vc_map[_normalize_cargo_key(cd)] = cat
-
-    return vc_map
-
-
-def classify_broad_category(cargo, vc_map: dict = None):
-    """Classifies a free-text cargo string into LIQUID / DRY BULK / BREAK BULK using vessel_cargo master table."""
-    if not cargo:
-        return None
-
-    if vc_map:
-        norm_key = _normalize_cargo_key(cargo)
-        if norm_key in vc_map:
-            return vc_map[norm_key]
-
-        tokens = [_normalize_cargo_key(t) for t in re.split(r"[\/\+\-\s]+", str(cargo)) if t.strip()]
-        for t in tokens:
-            if t in vc_map:
-                return vc_map[t]
-            for k in vc_map:
-                if len(t) >= 3 and (t in k or k in t):
-                    return vc_map[k]
-
-    cargo_raw = str(cargo or "").strip().upper()
-    if not cargo_raw:
-        return None
-
-    if any(k in cargo_raw for k in ["LIQUID", "POL", "CHEMICAL", "OIL", "ACID", "EDIBLE", "FURNACE", "PHENOL", "ACETONE", "LUBE", "CPO", "CPKO", "SFO", "RBDPO", "CBFS", "VAM", "SM", "NBA", "MDC", "IPA", "FO", "SBO", "SHELL", "TOLU", "BUTAN"]):
-        return "LIQUID"
-    if any(k in cargo_raw for k in ["DRY", "CEMENT", "COAL", "ORE", "FERTILIZER"]):
-        return "DRY BULK"
-    if any(k in cargo_raw for k in ["BREAK", "CONTAINER", "STEEL"]):
-        return "BREAK BULK"
+def classify_broad_category_live(r: dict):
+    """Categorizes LIVE row strictly using vessel_cargo master table category fields."""
+    for field in ("vc_cargo_type", "vc_cargo_category", "vc_cargo_category_2", "vc_cargo_sub_category", "vc_cargo_sub_category_2"):
+        val = str(r.get(field) or "").strip().upper()
+        if not val:
+            continue
+        if val in ("LIQUID", "OTHER LIQUID", "EDIBLE OIL", "POL", "POL BLACK", "POL-BLACK", "CHEMICAL", "CHEMICALS", "FERTILIZERS", "FARM LIQUIDS"):
+            return "LIQUID"
+        if val in ("DRY BULK", "DRY", "CEMENT"):
+            return "DRY BULK"
+        if val in ("BREAK BULK", "BREAK", "CONTAINER", "CONTAINERS", "GENERAL CARGO"):
+            return "BREAK BULK"
 
     return None
 
@@ -387,7 +356,6 @@ def load_data() -> pd.DataFrame:
     conn = get_db()
     try:
         cur = get_cursor(conn)
-        vc_map = load_cargo_category_map_from_vc(cur)
         cur.execute("""
             SELECT
                 id AS vessel_call_id,
@@ -396,6 +364,9 @@ def load_data() -> pd.DataFrame:
                 berth_no,
                 import_export,
                 cargo,
+                category,
+                new_cat,
+                category1,
                 quantity,
                 pre_berthing_waiting,
                 waiting_port,
@@ -409,10 +380,19 @@ def load_data() -> pd.DataFrame:
             WHERE fin_year IS NOT NULL
               AND month IS NOT NULL
         """)
-        mis_rows = cur.fetchall()
+        raw_mis = cur.fetchall()
+        mis_rows = [dict(r) for r in raw_mis]
 
-        live_rows = _fetch_live_rows(cur, vc_map)
-        rows = list(mis_rows) + list(live_rows)
+        # 1. MIS rows: classify strictly using mis_vessel_master category fields directly
+        for r in mis_rows:
+            r["broad_category"] = classify_broad_category_mis(r)
+
+        # 2. LIVE rows: classify dynamically using vessel_cargo master table category fields
+        live_rows = _fetch_live_rows(cur)
+        for r in live_rows:
+            r["broad_category"] = classify_broad_category_live(r)
+
+        rows = mis_rows + live_rows
     finally:
         conn.close()
 
@@ -440,13 +420,6 @@ def load_data() -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
     df["direction"] = df["import_export"].apply(_direction)
-
-    if "broad_category" not in df.columns:
-        df["broad_category"] = None
-    df["broad_category"] = df.apply(
-        lambda r: classify_broad_category(r.get("broad_category") or r.get("cargo"), vc_map),
-        axis=1
-    )
 
     unmapped = sorted(df.loc[df["broad_category"].isna(), "cargo"].dropna().unique().tolist())
     if unmapped:
