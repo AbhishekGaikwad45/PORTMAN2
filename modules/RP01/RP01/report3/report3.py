@@ -133,6 +133,8 @@ def _load_live_pipeline_rows():
             JOIN vcn_header h ON h.id = ld.vcn_id
             WHERE l.is_deleted IS NOT TRUE
               AND COALESCE(l.is_shortclose, FALSE) = FALSE
+              AND ld.cast_off_datetime IS NOT NULL
+              AND NULLIF(TRIM(ld.cast_off_datetime), '') IS NOT NULL
             GROUP BY ld.id, ld.cast_off_datetime, ld.alongside_datetime, ld.nor_tendered,
                      ld.discharge_commenced, ld.discharge_completed,
                      h.id, h.vessel_name, h.berth_name, h.cargo_type, h.operation_type
@@ -143,7 +145,7 @@ def _load_live_pipeline_rows():
 
     live_rows = []
     for r in live_raw:
-        dt = _parse_dt(r['cast_off_datetime']) or _parse_dt(r['alongside_datetime'])
+        dt = _parse_dt(r['cast_off_datetime'])
         if dt:
             fy_start = dt.year if dt.month >= 4 else dt.year - 1
             fy = f"{fy_start}-{(fy_start + 1) % 100:02d}"
