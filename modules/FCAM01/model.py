@@ -133,6 +133,50 @@ def delete_agreement_line(row_id):
     conn.close()
 
 
+def get_customer_rates_map(customer_type, customer_id, as_of_date=None, cur=None):
+    """Every in-force agreement rate for one customer, in one query.
+
+    get_customer_rate does two queries per lookup and opens its own connection
+    each time; callers that price many lines use this instead. Returns
+    (by_service_cargo, by_service) — resolve the same way get_customer_rate
+    does: the cargo-specific line first, then any line for that service (its
+    generic fallback drops the cargo_name condition rather than requiring NULL).
+
+    Pass `cur` to run on an open connection.
+    """
+    if as_of_date is None:
+        as_of_date = datetime.now().strftime('%Y-%m-%d')
+
+    conn = None if cur is not None else get_db()
+    if conn is not None:
+        cur = get_cursor(conn)
+    cur.execute('''
+        SELECT al.service_type_id, al.cargo_name,
+               al.rate, al.uom, al.currency_code, al.min_charge, al.max_charge
+        FROM customer_agreement_lines al
+        JOIN customer_agreements ah ON al.agreement_id = ah.id
+        WHERE ah.customer_type = %s
+          AND ah.customer_id = %s
+          AND ah.agreement_status = 'Approved'
+          AND ah.is_active = 1
+          AND ah.valid_from <= %s
+          AND (ah.valid_to IS NULL OR ah.valid_to >= %s)
+        ORDER BY ah.valid_from DESC, ah.id DESC, al.id
+    ''', [customer_type, customer_id, as_of_date, as_of_date])
+    rows = cur.fetchall()
+    if conn is not None:
+        conn.close()
+
+    by_service_cargo, by_service = {}, {}
+    for row in rows:
+        row = dict(row)
+        svc = row['service_type_id']
+        key = (svc, row['cargo_name'])
+        by_service_cargo.setdefault(key, row)   # first wins — rows are pre-ordered
+        by_service.setdefault(svc, row)
+    return by_service_cargo, by_service
+
+
 def get_customer_rate(customer_type, customer_id, service_type_id, as_of_date=None, cargo_name=None):
     """Get rate for a customer-service combination from active agreements.
     For cargo handling services, optionally match by cargo_name first."""

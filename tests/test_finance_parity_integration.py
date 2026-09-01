@@ -292,3 +292,41 @@ def test_fsap01_manual_send_refuses_without_can_edit():
     body, status = _post(fsap.sap_queue_manual_send, {'queue_id': 1}, admin=False, user_id=-1)
     assert status == 403
     assert body.get_json()['ok'] is False
+
+
+# ── Batched rate lookup must match the per-call one ──────────────────────────
+
+def test_rates_map_matches_get_customer_rate():
+    """get_customer_billables prices every line from get_customer_rates_map
+    instead of one get_customer_rate call (= one DB connection) per charge.
+    The two must resolve identically, cargo-specific line and fallback alike."""
+    from modules.FCAM01 import model as fcam
+    name = 'PARITY RATE CO'
+    cid = _mk_customer(name)
+    svc_a, svc_b = _service_id('CHGU01'), _service_id('INFM01')
+    conn = get_db(); cur = get_cursor(conn)
+    cur.execute("""INSERT INTO customer_agreements
+                   (agreement_code, customer_type, customer_id, customer_name,
+                    valid_from, is_active, agreement_status)
+                   VALUES ('AGR-PARITY','Customer',%s,%s,'2000-01-01',1,'Approved')
+                   RETURNING id""", [cid, name])
+    agr = cur.fetchone()['id']
+    cur.execute("""INSERT INTO customer_agreement_lines (agreement_id, service_type_id, rate, cargo_name)
+                   VALUES (%s,%s,42.5,'OIL'), (%s,%s,10.0,NULL), (%s,%s,7.25,'COAL')""",
+                [agr, svc_a, agr, svc_a, agr, svc_b])
+    conn.commit(); conn.close()
+    try:
+        by_cargo, by_service = fcam.get_customer_rates_map('Customer', cid)
+        for service_type_id, cargo in ((svc_a, 'OIL'), (svc_a, 'COAL'), (svc_a, None),
+                                       (svc_b, 'COAL'), (svc_b, 'OIL'), (svc_b, None)):
+            old = fcam.get_customer_rate('Customer', cid, service_type_id, cargo_name=cargo)
+            new = ((by_cargo.get((service_type_id, cargo)) if cargo else None)
+                   or by_service.get(service_type_id))
+            new = {k: new[k] for k in old} if (new and old) else new
+            assert new == old, (service_type_id, cargo, new, old)
+    finally:
+        conn = get_db(); cur = get_cursor(conn)
+        cur.execute('DELETE FROM customer_agreement_lines WHERE agreement_id=%s', [agr])
+        cur.execute('DELETE FROM customer_agreements WHERE id=%s', [agr])
+        conn.commit(); conn.close()
+        _drop_customer(cid)

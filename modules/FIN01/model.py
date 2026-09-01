@@ -946,6 +946,22 @@ def get_customer_billables(customer_type, customer_id):
         if plist[0]['ldud_status'] in _CARGO_GATE and plist[0]['ldud_id']:
             declared = {p['id']: p['quantity'] for p in plist}
             actual_by_vcn[vcn_id] = _actual_qty_map(cur, plist[0]['ldud_id'], declared)
+
+    # Ledger + rates in two batch queries on this connection. Doing them per
+    # charge cost a fresh DB connection each (~180ms) and dominated the whole
+    # call — pricing N parcels was O(N) connections, not O(N) queries.
+    billed = {}
+    if parcels:
+        cur.execute('''SELECT cargo_source_type, cargo_source_id, service_type_id,
+                              COALESCE(SUM(billed_quantity), 0) AS q
+                       FROM parcel_charge_billed
+                       WHERE (cargo_source_type, cargo_source_id) IN %s
+                       GROUP BY 1, 2, 3''',
+                    [tuple((p['src'], p['id']) for p in parcels)])
+        billed = {(r['cargo_source_type'], r['cargo_source_id'], r['service_type_id']): float(r['q'] or 0)
+                  for r in cur.fetchall()}
+    rates_by_cargo, rates_by_service = fcam_model.get_customer_rates_map(
+        customer_type, customer_id, cur=cur)
     conn.close()
 
     vessels = {}
@@ -973,11 +989,14 @@ def get_customer_billables(customer_type, customer_id):
             st = svc.get(code)
             if not st:
                 continue
-            remaining = round(qty - billed_qty(src, p['id'], st['id']), 3)
+            remaining = round(qty - billed.get((src, p['id'], st['id']), 0.0), 3)
             if remaining <= 1e-6:
                 continue
-            rate_info = fcam_model.get_customer_rate(
-                customer_type, customer_id, st['id'], cargo_name=cargo_for_rate)
+            # Cargo-specific rate first, then any rate for the service — the
+            # same precedence get_customer_rate applies (it skips the
+            # cargo-specific lookup entirely when there is no cargo name).
+            rate_info = ((rates_by_cargo.get((st['id'], cargo_for_rate)) if cargo_for_rate else None)
+                         or rates_by_service.get(st['id']))
             rate = float(rate_info['rate']) if rate_info and rate_info.get('rate') is not None else 0.0
             amount = round(remaining * rate, 2)
             v['lines'].append({
