@@ -125,7 +125,7 @@
 
     <div id="reportStatus"></div>
 
-    <!-- ==================== TABLE 1: IMPORT (Despatched) ==================== -->
+    <!-- ==================== TABLE 1: IMPORT (Cargo Despatched) ==================== -->
     <div class="jjltpl-table-wrap">
 
         <div class="report-header">
@@ -136,7 +136,7 @@
                     <td class="label">Terminal :</td>
                     <td>Bulk Terminal</td>
                     <td class="label">Month :</td>
-                    <td id="reportMonth"></td>
+                    <td class="reportMonth"></td>
                 </tr>
             </table>
             <div class="unit-text">( In Tonnes )</div>
@@ -161,23 +161,27 @@
                     <th>Tonnes</th><th>Percentage</th>
                 </tr>
             </thead>
-            <tbody id="commodityBody"></tbody>
+            <tbody id="importCommodityBody"></tbody>
             <tfoot>
                 <tr class="total-row">
                     <td colspan="2">TOTAL</td>
-                    <td id="railTotal"></td><td id="railPctTotal"></td>
-                    <td id="roadTotal"></td><td id="roadPctTotal"></td>
-                    <td id="inlandTotal"></td><td id="inlandPctTotal"></td>
-                    <td id="pipelineTotal"></td><td id="pipelinePctTotal"></td>
-                    <td id="grandTotal"></td><td id="grandPctTotal"></td>
+                    <td id="importRailTotal"></td><td id="importRailPctTotal"></td>
+                    <td id="importRoadTotal"></td><td id="importRoadPctTotal"></td>
+                    <td id="importInlandTotal"></td><td id="importInlandPctTotal"></td>
+                    <td id="importPipelineTotal"></td><td id="importPipelinePctTotal"></td>
+                    <td id="importGrandTotal"></td><td id="importGrandPctTotal"></td>
                 </tr>
             </tfoot>
         </table>
 
     </div>
 
-    <!-- ==================== TABLE 2: EXPORT (Received) — NEW ==================== -->
+    <!-- ==================== TABLE 2: EXPORT (Cargo Received) ==================== -->
     <div class="jjltpl-table-wrap">
+
+        <div class="report-header">
+            <div class="report-subtitle" style="margin-bottom:0;">COMMODITY-WISE EXPORT CARGO RECEIVED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT</div>
+        </div>
 
         <table class="traffic-report-table">
             <thead>
@@ -198,15 +202,15 @@
                     <th>Tonnes</th><th>Percentage</th>
                 </tr>
             </thead>
-            <tbody id="commodityBodyExport"></tbody>
+            <tbody id="exportCommodityBody"></tbody>
             <tfoot>
                 <tr class="total-row">
                     <td colspan="2">TOTAL</td>
-                    <td id="railTotalExport"></td><td id="railPctTotalExport"></td>
-                    <td id="roadTotalExport"></td><td id="roadPctTotalExport"></td>
-                    <td id="inlandTotalExport"></td><td id="inlandPctTotalExport"></td>
-                    <td id="pipelineTotalExport"></td><td id="pipelinePctTotalExport"></td>
-                    <td id="grandTotalExport"></td><td id="grandPctTotalExport"></td>
+                    <td id="exportRailTotal"></td><td id="exportRailPctTotal"></td>
+                    <td id="exportRoadTotal"></td><td id="exportRoadPctTotal"></td>
+                    <td id="exportInlandTotal"></td><td id="exportInlandPctTotal"></td>
+                    <td id="exportPipelineTotal"></td><td id="exportPipelinePctTotal"></td>
+                    <td id="exportGrandTotal"></td><td id="exportGrandPctTotal"></td>
                 </tr>
             </tfoot>
         </table>
@@ -221,12 +225,16 @@
 let META = { years: [], months: {} };
 
 function fmt(val) {
-    if (val === null || val === undefined || val === "") return "";
-    return Number(val).toFixed(6);
+    if (val === null || val === undefined || val === "") return "0.000";
+    const num = Number(val);
+    if (isNaN(num)) return "0.000";
+    return num.toFixed(3);
 }
 function fmtPct(val) {
-    if (val === null || val === undefined || val === "") return "";
-    return Number(val).toFixed(2) + "%";
+    if (val === null || val === undefined || val === "") return "0.00%";
+    const num = Number(val);
+    if (isNaN(num)) return "0.00%";
+    return num.toFixed(2) + "%";
 }
 
 function populateYearSelect() {
@@ -285,15 +293,15 @@ function renderTable(rows, grand, bodyId, ids) {
 
     const g = grand || {};
     document.getElementById(ids.rail).textContent = fmt(g.rail);
-    document.getElementById(ids.railPct).textContent = g.rail ? "100.00%" : "0.00%";
+    document.getElementById(ids.railPct).textContent = fmtPct(g.rail_pct);
     document.getElementById(ids.road).textContent = fmt(g.road);
-    document.getElementById(ids.roadPct).textContent = g.road ? "100.00%" : "0.00%";
+    document.getElementById(ids.roadPct).textContent = fmtPct(g.road_pct);
     document.getElementById(ids.inland).textContent = fmt(g.inland);
-    document.getElementById(ids.inlandPct).textContent = g.inland ? "100.00%" : "0.00%";
+    document.getElementById(ids.inlandPct).textContent = fmtPct(g.inland_pct);
     document.getElementById(ids.pipeline).textContent = fmt(g.pipeline);
-    document.getElementById(ids.pipelinePct).textContent = g.pipeline ? "100.00%" : "0.00%";
+    document.getElementById(ids.pipelinePct).textContent = fmtPct(g.pipeline_pct);
     document.getElementById(ids.grand).textContent = fmt(g.total);
-    document.getElementById(ids.grandPct).textContent = g.total ? "100.00%" : "0.00%";
+    document.getElementById(ids.grandPct).textContent = fmtPct(g.total_pct);
 }
 
 function loadReport4() {
@@ -309,24 +317,28 @@ function loadReport4() {
         .then(({ ok, j }) => {
             if (!ok) { status.textContent = j.error || "Failed to load report."; return; }
 
-            document.getElementById("reportMonth").textContent = j.month_label || "";
+            document.querySelectorAll(".reportMonth").forEach(el => el.textContent = j.month_label || "");
 
-            // Table 1: Import
-            renderTable(j.rows, j.grand, "commodityBody", {
-                rail: "railTotal", railPct: "railPctTotal",
-                road: "roadTotal", roadPct: "roadPctTotal",
-                inland: "inlandTotal", inlandPct: "inlandPctTotal",
-                pipeline: "pipelineTotal", pipelinePct: "pipelinePctTotal",
-                grand: "grandTotal", grandPct: "grandPctTotal",
+            // Import Table (Despatched)
+            const importRows = j.import_rows || j.rows;
+            const importGrand = j.import_grand || j.grand;
+            renderTable(importRows, importGrand, "importCommodityBody", {
+                rail: "importRailTotal", railPct: "importRailPctTotal",
+                road: "importRoadTotal", roadPct: "importRoadPctTotal",
+                inland: "importInlandTotal", inlandPct: "importInlandPctTotal",
+                pipeline: "importPipelineTotal", pipelinePct: "importPipelinePctTotal",
+                grand: "importGrandTotal", grandPct: "importGrandPctTotal",
             });
 
-            // Table 2: Export (NEW)
-            renderTable(j.export_rows, j.export_grand, "commodityBodyExport", {
-                rail: "railTotalExport", railPct: "railPctTotalExport",
-                road: "roadTotalExport", roadPct: "roadPctTotalExport",
-                inland: "inlandTotalExport", inlandPct: "inlandPctTotalExport",
-                pipeline: "pipelineTotalExport", pipelinePct: "pipelinePctTotalExport",
-                grand: "grandTotalExport", grandPct: "grandPctTotalExport",
+            // Export Table (Received)
+            const exportRows = j.export_rows;
+            const exportGrand = j.export_grand;
+            renderTable(exportRows, exportGrand, "exportCommodityBody", {
+                rail: "exportRailTotal", railPct: "exportRailPctTotal",
+                road: "exportRoadTotal", roadPct: "exportRoadPctTotal",
+                inland: "exportInlandTotal", inlandPct: "exportInlandPctTotal",
+                pipeline: "exportPipelineTotal", pipelinePct: "exportPipelinePctTotal",
+                grand: "exportGrandTotal", grandPct: "exportGrandPctTotal",
             });
         })
         .catch(err => { status.textContent = "Failed to load report."; console.error(err); });

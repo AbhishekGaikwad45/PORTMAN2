@@ -21,6 +21,7 @@ from .JJLTPL import jjltpl
 from .report1 import report1
 from .report2 import report2
 from .report3 import report3 as report_03_views
+from .report7 import report7 as report_07_views
 from .report_06 import views as report_06_views
 from .Berth_plan import view as berth_plan_view
 from .report4 import report4
@@ -34,4 +35,6 @@ from .report12 import report12 as report_12_views
 from .report5 import report5 as report_05_views
 from .report10 import report10 as report_10_views
 from .report_budget import report_budget as report_budget_views
+from .dpr import dpr as dpr_views
+
 

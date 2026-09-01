@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+
+{% block title %}Report-7 — RP07{% endblock %}
+
+{% block head %}
+<style>
+    :root {
+        --rp-blue: #2F6FED;
+        --rp-blue-dark: #1D4FB8;
+        --rp-green: #16A34A;
+        --rp-green-dark: #0F7C38;
+        --rp-ink: #1F2937;
+        --rp-muted: #6B7280;
+        --rp-border: #DDE3EA;
+        --rp-bg: #F6F8FA;
+        --rp-card: #FFFFFF;
+        --rp-yellow-bg: #FFFF00;
+        --rp-header-bg: #F8FAFC;
+    }
+
+    .rp07-wrap * { box-sizing: border-box; }
+    .rp07-wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding-bottom: 30px; }
+
+    /* Module Header */
+    .module-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--rp-border);
+    }
+    .module-header h2 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--rp-ink);
+    }
+    .module-header .rp-badge {
+        background: var(--rp-blue);
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+    }
+    .module-header .rp-back {
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--rp-blue);
+        text-decoration: none;
+    }
+    .module-header .rp-back:hover { text-decoration: underline; }
+
+    /* Toolbar */
+    .rp-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+        background: var(--rp-card);
+        border: 1px solid var(--rp-border);
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .rp-toolbar label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--rp-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-right: 4px;
+    }
+    .rp-toolbar select {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--rp-ink);
+        background: var(--rp-bg);
+        border: 1px solid var(--rp-border);
+        border-radius: 6px;
+        padding: 7px 12px;
+        cursor: pointer;
+        outline: none;
+    }
+    .rp-toolbar select:focus { border-color: var(--rp-blue); }
+
+    .btn-load {
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: 8px 18px;
+        border: none;
+        cursor: pointer;
+        color: #fff;
+        background: var(--rp-blue);
+        transition: background 0.2s;
+    }
+    .btn-load:hover { background: var(--rp-blue-dark); }
+
+    .btn-export {
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: 8px 18px;
+        border: none;
+        cursor: pointer;
+        color: #fff;
+        background: var(--rp-green);
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.2s;
+    }
+    .btn-export:hover { background: var(--rp-green-dark); }
+
+    /* Card & Table */
+    .table-card {
+        background: var(--rp-card);
+        border: 1px solid var(--rp-border);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .table-banner {
+        background: #F8FAFC;
+        padding: 16px 20px;
+        border-bottom: 2px solid var(--rp-border);
+        text-align: center;
+    }
+    .table-banner .title {
+        font-size: 17px;
+        font-weight: 700;
+        color: var(--rp-ink);
+        margin-bottom: 4px;
+    }
+    .table-banner .subtitle {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--rp-muted);
+    }
+    .table-container {
+        overflow-x: auto;
+    }
+    table.rp7-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        color: var(--rp-ink);
+    }
+    table.rp7-table th, table.rp7-table td {
+        border: 1px solid var(--rp-border);
+        padding: 8px 14px;
+        vertical-align: middle;
+    }
+    table.rp7-table th {
+        background: #F1F5F9;
+        font-weight: 700;
+        text-align: center;
+    }
+
+    .row-highlight td.col-item, .row-highlight td.col-liquid {
+        background-color: #FFFF00 !important;
+    }
+
+    .row-bold { font-weight: 700; }
+    .indent-1 { padding-left: 28px !important; }
+    .indent-2 { padding-left: 48px !important; }
+
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+
+    .notes-box {
+        padding: 16px 20px;
+        background: #F8FAFC;
+        border-top: 1px solid var(--rp-border);
+        font-size: 12px;
+        color: var(--rp-muted);
+        line-height: 1.6;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp07-wrap">
+    <!-- Header -->
+    <div class="module-header">
+        <h2>Report-7 — Performance in Terms of Vessels Handled</h2>
+        <span class="rp-badge">RP07</span>
+        <a href="/module/RP01/" class="rp-back">&larr; Back to Reports</a>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="rp-toolbar">
+        <div>
+            <label for="selYear">YEAR</label>
+            <select id="selYear">
+                <option value="2026-27" selected>2026-27</option>
+                <option value="2025-26">2025-26</option>
+                <option value="2024-25">2024-25</option>
+            </select>
+        </div>
+        <div>
+            <label for="selMonth">MONTH</label>
+            <select id="selMonth">
+                <option value="Jun-26">Jun-26</option>
+                <option value="Jul-26">Jul-26</option>
+                <option value="ALL">All Months</option>
+            </select>
+        </div>
+        <button class="btn-load" id="btnLoad">Load</button>
+        <button class="btn-export" id="btnExport">Export to Excel</button>
+    </div>
+
+    <!-- Table Card -->
+    <div class="table-card">
+        <div class="table-banner">
+            <div class="title">Performance in Terms of Vessels Handled -All Vessels</div>
+            <div class="subtitle">Port: JAWAHARLAL NEHRU PORT AUTHORITY</div>
+        </div>
+        <div class="table-container">
+            <table class="rp7-table" id="report7Table">
+                <thead>
+                    <tr>
+                        <th style="min-width:420px; text-align:left;">Item</th>
+                        <th style="width:140px;">Liquid Bulk</th>
+                        <th style="width:140px;">All</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr><td colspan="3" class="text-center" style="padding:30px;">Loading performance data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const selYear = document.getElementById("selYear");
+        const selMonth = document.getElementById("selMonth");
+        const btnLoad = document.getElementById("btnLoad");
+        const btnExport = document.getElementById("btnExport");
+        const tableBody = document.getElementById("tableBody");
+
+        function getCurrentMonthLabel() {
+            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const now = new Date();
+            const m = monthNames[now.getMonth()];
+            const y = String(now.getFullYear()).slice(-2);
+            return `${m}-${y}`;
+        }
+
+        function getCurrentFinYear() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = now.getMonth();
+            const startYr = month >= 3 ? year : year - 1;
+            const endYr = (startYr + 1) % 100;
+            return `${startYr}-${String(endYr).padStart(2, '0')}`;
+        }
+
+        // Initialize default month and year to current date
+        const defaultMonth = getCurrentMonthLabel();
+        const defaultYear = getCurrentFinYear();
+
+        if (!Array.from(selYear.options).some(o => o.value === defaultYear)) {
+            const opt = document.createElement("option");
+            opt.value = defaultYear;
+            opt.textContent = defaultYear;
+            selYear.insertBefore(opt, selYear.firstChild);
+        }
+        selYear.value = defaultYear;
+
+        if (!Array.from(selMonth.options).some(o => o.value === defaultMonth)) {
+            const opt = document.createElement("option");
+            opt.value = defaultMonth;
+            opt.textContent = defaultMonth;
+            selMonth.insertBefore(opt, selMonth.firstChild);
+        }
+        selMonth.value = defaultMonth;
+
+        function loadData() {
+            const yr = selYear.value;
+            const mn = selMonth.value;
+            tableBody.innerHTML = `<tr><td colspan="3" class="text-center" style="padding:30px;">Loading performance data...</td></tr>`;
+
+            fetch(`/api/module/RP01/report7/data?year=${encodeURIComponent(yr)}&month=${encodeURIComponent(mn)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        alert("Error: " + data.error);
+                        return;
+                    }
+                    updateYearDropdown(data.available_years, data.fin_year);
+                    updateMonthDropdown(data.month_labels, data.selected_month);
+                    renderTable(data);
+                })
+                .catch(err => {
+                    console.error(err);
+                    tableBody.innerHTML = `<tr><td colspan="3" class="text-center" style="padding:30px;color:red;">Error loading report data.</td></tr>`;
+                });
+        }
+
+        function updateYearDropdown(years, activeYear) {
+            if (!years || !years.length) return;
+            const existingOptions = Array.from(selYear.options).map(o => o.value);
+            years.forEach(y => {
+                if (!existingOptions.includes(y)) {
+                    const opt = document.createElement("option");
+                    opt.value = y;
+                    opt.textContent = y;
+                    selYear.appendChild(opt);
+                }
+            });
+            selYear.value = activeYear;
+        }
+
+        function updateMonthDropdown(labels, activeMonth) {
+            const currentSel = selMonth.value;
+            selMonth.innerHTML = `<option value="ALL">All Months</option>`;
+            labels.forEach(lbl => {
+                const opt = document.createElement("option");
+                opt.value = lbl;
+                opt.textContent = lbl;
+                selMonth.appendChild(opt);
+            });
+            if (activeMonth && Array.from(selMonth.options).some(o => o.value === activeMonth)) {
+                selMonth.value = activeMonth;
+            } else if (currentSel && Array.from(selMonth.options).some(o => o.value === currentSel)) {
+                selMonth.value = currentSel;
+            }
+        }
+
+        function renderTable(data) {
+            const rowsDef = [
+                { label: "1. No. of Vessels Sailed- (Total No.)", key: "vsl_sailed_total", fmt: "int", bold: true, yellow: true, indent: 0 },
+                { label: "a) At Berth- (No.)", key: "vsl_berth_total", fmt: "int", bold: true, yellow: true, indent: 1 },
+                { label: "(i) Overseas", key: "vsl_overseas", fmt: "int", bold: true, yellow: true, indent: 2 },
+                { label: "(ii) Coastal", key: "vsl_coastal", fmt: "int", bold: true, yellow: true, indent: 2 },
+                { label: "b) At Stream- (No.) (Inn Anchorage)", key: "vsl_stream_total", fmt: "int", bold: false, yellow: false, indent: 1 },
+                { label: "2. Total Cargo Traffic Handled - (000 Tonnes)", key: "traffic_total", fmt: "dec3", bold: true, yellow: true, indent: 0 },
+                { label: "a) At Berth - (000 Tonnes)", key: "traffic_berth", fmt: "dec3", bold: false, yellow: true, indent: 1 },
+                { label: "b) At Stream (Inn Anchorage) - (000 Tonnes)", key: "traffic_stream", fmt: "dec3", bold: false, yellow: false, indent: 1 },
+                { label: "3. Pre Berthing Waiting Time(Hrs)-Total", key: "pbw_total", fmt: "dec2", bold: true, yellow: true, indent: 0 },
+                { label: "a) Pre Berthing Waiting Time(Hrs)-Port a/c", key: "pbw_port", fmt: "dec2", bold: false, yellow: true, indent: 1 },
+                { label: "b) Pre Berthing Waiting Time(Hrs)-Non Port a/c", key: "pbw_non_port", fmt: "dec2", bold: false, yellow: true, indent: 1 },
+                { label: "4. Working Time (Hrs)", key: "working_time", fmt: "dec2", bold: true, yellow: true, indent: 0 },
+                { label: "5. N.W Time at working berth(Hrs)-Total", key: "nw_working_total", fmt: "dec2", bold: true, yellow: true, indent: 0 },
+                { label: "a) N.W Time at working berth(Hrs)-Port a/c", key: "nw_working_port", fmt: "dec2", bold: false, yellow: true, indent: 1 },
+                { label: "b) N.W Time at working berth(Hrs)-N.P a/c", key: "nw_working_non_port", fmt: "dec2", bold: false, yellow: false, indent: 1 },
+                { label: "6. Time at Non working berth(Hrs)-Total", key: "nw_non_working_total", fmt: "dec2", bold: true, yellow: false, indent: 0 },
+                { label: "a) Time at Non working berth(Hrs)-Port a/c", key: "nw_non_working_port", fmt: "dec2", bold: false, yellow: false, indent: 1 },
+                { label: "b) Time at Non working berth(Hrs)-N.P a/c", key: "nw_non_working_non_port", fmt: "dec2", bold: false, yellow: false, indent: 1 },
+                { label: "7. Navigation Time (Hrs)-Total", key: "nav_total", fmt: "dec2", bold: true, yellow: true, indent: 0 },
+                { label: "a) Inward Movement (Hrs)", key: "inward_movement", fmt: "dec2", bold: false, yellow: true, indent: 1 },
+                { label: "b) Outward Movement (Hrs)", key: "outward_movement", fmt: "dec2", bold: false, yellow: true, indent: 1 },
+                { label: "8. Shifting Time", key: "shifting_time", fmt: "dec2", bold: false, yellow: false, indent: 0 },
+                { label: "9. Turn Round Time (Hrs)-Total=(3+4+5+6)", key: "trt_total", fmt: "dec2", bold: true, yellow: false, indent: 0 },
+                { label: "a) Turn Round Time (Hrs)-Port a/c=(3(a)+4+5(a)+6(a)+7+8)", key: "trt_port", fmt: "dec2", bold: false, yellow: false, indent: 1 },
+                { label: "b) Turn Round Time (Hrs)-N.P a/c=(3(b)+5(b)+6(b))", key: "trt_non_port", fmt: "dec2", bold: false, yellow: false, indent: 1 },
+            ];
+
+            let html = "";
+            rowsDef.forEach(r => {
+                const rowCls = r.yellow ? "row-highlight" : "";
+                const boldCls = r.bold ? "row-bold" : "";
+                const indentCls = r.indent === 1 ? "indent-1" : r.indent === 2 ? "indent-2" : "";
+
+                const liqVal = data.liquid_bulk[r.key] !== undefined ? data.liquid_bulk[r.key] : 0;
+                const allVal = data.all_vessels[r.key] !== undefined ? data.all_vessels[r.key] : 0;
+
+                let fLiq = liqVal, fAll = allVal;
+                if (r.fmt === "dec2") {
+                    fLiq = Number(liqVal).toFixed(2);
+                    fAll = Number(allVal).toFixed(2);
+                } else if (r.fmt === "dec3") {
+                    fLiq = Number(liqVal).toFixed(3);
+                    fAll = Number(allVal).toFixed(3);
+                } else {
+                    fLiq = Math.round(liqVal);
+                    fAll = Math.round(allVal);
+                }
+
+                html += `<tr class="${rowCls} ${boldCls}">
+                    <td class="col-item ${indentCls}">${r.label}</td>
+                    <td class="col-liquid text-right">${fLiq}</td>
+                    <td class="col-all text-right">${fAll}</td>
+                </tr>`;
+            });
+
+            tableBody.innerHTML = html;
+        }
+
+        btnLoad.addEventListener("click", loadData);
+
+        btnExport.addEventListener("click", function () {
+            const yr = selYear.value;
+            const mn = selMonth.value;
+            window.location.href = `/api/module/RP01/report7/export?year=${encodeURIComponent(yr)}&month=${encodeURIComponent(mn)}`;
+        });
+
+        loadData();
+    });
+</script>
+{% endblock %}

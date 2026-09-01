@@ -237,12 +237,12 @@ def report13_meta():
         cur.execute("SELECT DISTINCT fin_year, month FROM mis_vessel_master")
         legacy_rows = cur.fetchall()
 
-        # Post-cutover years/months: derived from ldud_header.created_date,
-        # since the new schema has no fin_year/month columns at all.
+        # Post-cutover years/months: derived from ldud_header.cast_off_datetime
         cur.execute("""
-            SELECT DISTINCT NULLIF(created_date, '')::date AS d
+            SELECT DISTINCT REPLACE(cast_off_datetime, 'T', ' ')::timestamp::date AS d
             FROM ldud_header
-            WHERE NULLIF(created_date, '') IS NOT NULL
+            WHERE cast_off_datetime IS NOT NULL
+              AND NULLIF(TRIM(cast_off_datetime), '') IS NOT NULL
         """)
         new_rows = cur.fetchall()
 
@@ -360,7 +360,7 @@ def _fetch_legacy(fin_year: str, month_idx: int):
                 to_char(NULLIF(alongside,'')::timestamp,'{DATETIME_FMT}') AS alongside_time,
                 to_char(NULLIF(ops_commenced,'')::timestamp,'{DATETIME_FMT}') AS cargo_commenced,
                 to_char(NULLIF(cargo_completion,'')::timestamp,'{DATETIME_FMT}') AS cargo_completed,
-                to_char(NULLIF(cast_off,'')::timestamp,'{DATETIME_FMT}') AS cast_off_time,
+                to_char(NULLIF(sail_cast_off,'')::timestamp,'{DATETIME_FMT}') AS cast_off_time,
                 to_char(NULLIF(pilot_board_departure,'')::timestamp,'{DATETIME_FMT}') AS pilot_disembarked,
                 quantity,
                 -- No per-parcel BL quantity in the legacy schema; kept as
@@ -370,7 +370,7 @@ def _fetch_legacy(fin_year: str, month_idx: int):
             FROM mis_vessel_master
             WHERE fin_year = %(fin_year)s
               AND LEFT(LOWER(month), 3) = LEFT(LOWER(%(month_label)s), 3)
-              AND NULLIF(cast_off, '') IS NOT NULL
+              AND NULLIF(sail_cast_off, '') IS NOT NULL
             ORDER BY NULLIF(anchorage_time,'')::timestamp
         """, {
             "fin_year": fin_year,
@@ -387,6 +387,8 @@ def _fetch_legacy(fin_year: str, month_idx: int):
 
     finally:
         cur.close()
+
+
 def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
     period_start, period_end = _period_bounds(fin_year, month_idx)
 
@@ -398,7 +400,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
             WITH po_qty AS (
                 -- Raw nominated (BL) quantity per ldud_id, summed BEFORE
                 -- any join to lueu_parcel_log so it can't be inflated by
-                -- join fan-out (see docstring note above).
+                -- join fan-out.
                 SELECT
                     ldud_id,
                     COALESCE(SUM(quantity), 0) AS raw_bl_quantity
@@ -407,11 +409,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
             ),
 
             short_close_agg AS (
-                -- Total quantity of Short Close log entries per ldud_id,
-                -- reached via ldud_parcel_ops -> lueu_parcel_log and
-                -- summed BEFORE being combined with po_qty, so this join
-                -- can't fan out po_qty's rows either. This amount is
-                -- subtracted from the raw nominated quantity below.
+                -- Total quantity of Short Close log entries per ldud_id
                 SELECT
                     po.ldud_id,
                     COALESCE(SUM(lpl.quantity), 0) AS short_close_qty
@@ -419,7 +417,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                 JOIN lueu_parcel_log lpl
                     ON lpl.parcel_op_id = po.id
                    AND COALESCE(lpl.is_deleted, FALSE) = FALSE
-                   AND UPPER(TRIM(lpl.remarks)) = 'SHORT CLOSE'
+                   AND (COALESCE(lpl.is_shortclose, FALSE) = TRUE OR UPPER(TRIM(lpl.remarks)) = 'SHORT CLOSE')
                 GROUP BY po.ldud_id
             ),
 
@@ -432,24 +430,21 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                         THEN MAX(po.end_dt)
                         ELSE NULL
                     END AS cargo_completed,
-                    -- Actual discharged quantity, summed from the log.
-                    -- Short Close rows are still included here -- only
-                    -- bl_quantity is adjusted for them, per the docstring
-                    -- note above. Exposed as discharged_quantity (kept
-                    -- distinct from the `quantity` field, which now shows
-                    -- the nominal ldud amount minus Short Close instead
-                    -- -- see 2026-07-25 note in the docstring).
+                    -- Actual discharged quantity, excluding Short Close log entries
+                    -- so short close is not counted as discharged and deducted twice.
                     COALESCE(SUM(lpl.quantity), 0) AS discharged_quantity,
                     MAX(po.cargo_name) AS cargo_name
                 FROM ldud_parcel_ops po
                 LEFT JOIN lueu_parcel_log lpl
                     ON lpl.parcel_op_id = po.id
                    AND COALESCE(lpl.is_deleted, FALSE) = FALSE
+                   AND COALESCE(lpl.is_shortclose, FALSE) = FALSE
+                   AND COALESCE(UPPER(TRIM(lpl.remarks)), '') != 'SHORT CLOSE'
                 GROUP BY po.ldud_id
             )
 
             SELECT
-                to_char(NULLIF(lh.created_date, '')::date, 'Mon-YYYY') AS month,
+                to_char(REPLACE(lh.cast_off_datetime, 'T', ' ')::timestamp, 'Mon-YYYY') AS month,
                 vh.via_number AS via_no,
                 COALESCE(v.imo_num, '') AS imo_no,
                 lh.vessel_name AS vessel_name,
@@ -471,12 +466,7 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
                 to_char(NULLIF(lh.cast_off_datetime, '')::timestamp, '{DATETIME_FMT}') AS cast_off_time,
                 to_char(NULLIF(lh.pilot_disembarked, '')::timestamp, '{DATETIME_FMT}') AS pilot_disembarked,
 
-                -- Main "quantity" figure shown on screen / exported as
-                -- TOTAL TONNES: nominal ldud quantity minus Short Close
-                -- (same formula as bl_quantity below), per 2026-07-25
-                -- request -- this replaces the discharged-log sum that
-                -- used to be exposed under this key.
-                pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0) AS quantity,
+                COALESCE(pa.discharged_quantity, 0) AS quantity,
                 COALESCE(pa.discharged_quantity, 0) AS discharged_quantity,
                 pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0) AS bl_quantity,
                 (pq.raw_bl_quantity - COALESCE(sca.short_close_qty, 0)) - COALESCE(pa.discharged_quantity, 0) AS remaining_qty
@@ -502,14 +492,17 @@ def _fetch_new_schema(fin_year: str, month_idx: int) -> list[dict]:
             LEFT JOIN vessel_cargo vc
                 ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(pa.cargo_name))
 
-            WHERE NULLIF(lh.created_date, '') IS NOT NULL
-              AND NULLIF(lh.created_date, '')::date >= %(period_start)s
-              AND NULLIF(lh.created_date, '')::date < %(period_end)s
+            WHERE lh.cast_off_datetime IS NOT NULL
+              AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL
+              AND (
+                  (lh.cast_off_datetime ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' AND SPLIT_PART(lh.cast_off_datetime, 'T', 1)::date >= %(period_start)s AND SPLIT_PART(lh.cast_off_datetime, 'T', 1)::date < %(period_end)s)
+                  OR
+                  (NOT (lh.cast_off_datetime ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}') AND NULLIF(TRIM(lh.cast_off_datetime), '')::timestamp::date >= %(period_start)s AND NULLIF(TRIM(lh.cast_off_datetime), '')::timestamp::date < %(period_end)s)
+              )
               AND COALESCE(lh.is_deleted, FALSE) = FALSE
-              AND NULLIF(lh.cast_off_datetime, '') IS NOT NULL
 
             ORDER BY
-                NULLIF(lh.created_date, '')::date,
+                REPLACE(lh.cast_off_datetime, 'T', ' ')::timestamp,
                 lh.vessel_name
         """, {
             "period_start": period_start,
@@ -664,9 +657,7 @@ def report13_export():
         cell.border = header_border
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # -- Data rows --------------------------------------------------------
-    # Blank (None) for any workbook column with no matching field in the
-    # current row dicts (per EXPORT_FIELD_MAP), instead of guessing.
+    from decimal import Decimal
     for i, row in enumerate(rows, start=1):
         out_row = []
         for key in EXPORT_FIELD_MAP:
@@ -676,6 +667,11 @@ def report13_export():
                 out_row.append(row.get(key))
         out_row[0] = i  # SR. NO.
         ws.append(out_row)
+
+        curr_row = header_row_idx + i
+        for col_idx, val in enumerate(out_row, start=1):
+            if isinstance(val, (int, float, Decimal)) and col_idx != 1:
+                ws.cell(row=curr_row, column=col_idx).number_format = "#,##0.000"
 
     # -- Column widths, matching the reference workbook ------------------
     for idx, width in enumerate(EXPORT_COL_WIDTHS, start=1):
