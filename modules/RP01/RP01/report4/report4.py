@@ -990,6 +990,16 @@ def report4_api_report():
         else:
             lueu_df = pd.DataFrame(columns=["bucket", "quantity_000t", "import_export"])
 
+        # Import Table (Despatched)
+        import_result = compute_report4(
+            df,
+            lueu_df,
+            fin_year,
+            month_idx,
+            operation_type="import",
+            total_key="import_total",
+        )
+
         # Export Table (Received)
         export_result = compute_report4(
             df,
@@ -1000,7 +1010,9 @@ def report4_api_report():
             total_key="export_total",
         )
 
+        import_total = import_result["import_total"]
         export_total = export_result["export_total"]
+        print(f"[report4] IMPORT (Despatched) total ({fin_year} idx={month_idx}): {import_total}")
         print(f"[report4] EXPORT (Received) total ({fin_year} idx={month_idx}): {export_total}")
 
         month_label = idx_to_month_label(fin_year, month_idx)
@@ -1010,10 +1022,14 @@ def report4_api_report():
             "month_label": month_label,
             "source": "lueu_parcel_log" if use_lueu_source(fin_year, month_idx) else "mis_vessel_master",
             "summary": {
+                "import_total": import_total,
                 "export_total": export_total,
             },
-            "rows": export_result["rows"],
-            "grand": export_result["grand"],
+            "rows": import_result["rows"],
+            "grand": import_result["grand"],
+            "import_rows": import_result["rows"],
+            "import_grand": import_result["grand"],
+            "import_total": import_total,
             "export_rows": export_result["rows"],
             "export_grand": export_result["grand"],
             "export_total": export_total,
@@ -1182,6 +1198,16 @@ def report4_api_export():
 
         print("[report4] report4_api_export CODE VERSION = 2026-07-22-dynamic-vessel_cargo-mapping")
 
+        # Import Table (Despatched)
+        import_result = compute_report4(
+            df,
+            lueu_df,
+            fin_year,
+            month_idx,
+            operation_type="import",
+            total_key="import_total",
+        )
+
         # Export Table (Received)
         export_result = compute_report4(
             df,
@@ -1192,14 +1218,14 @@ def report4_api_export():
             total_key="export_total",
         )
 
+        import_total = import_result["import_total"]
         export_total = export_result["export_total"]
+        print(f"[report4] IMPORT (Despatched) total ({fin_year} idx={month_idx}): {import_total}")
         print(f"[report4] EXPORT (Received) total ({fin_year} idx={month_idx}): {export_total}")
 
         month_label = idx_to_month_label(fin_year, month_idx)
 
         wb = Workbook()
-        ws_export = wb.active
-        ws_export.title = "Export"
 
         styles = {
             "bold": Font(bold=True),
@@ -1218,7 +1244,26 @@ def report4_api_export():
             "yellow_fill": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
         }
 
-        # ---- Sheet 1: Export table (Received) ----
+        widths = {"A": 3, "B": 8, "C": 26, "D": 12, "E": 12, "F": 12, "G": 12,
+                  "H": 12, "I": 12, "J": 14, "K": 12, "L": 14, "M": 12}
+
+        # ---- Sheet 1: Import table (Despatched) ----
+        ws_import = wb.active
+        ws_import.title = "Import"
+        _write_report_table(
+            ws_import,
+            start_row=3,
+            title_line="COMMODITY-WISE IMPORT CARGO DESPATCHED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT",
+            verb="Despatched",
+            month_label=month_label,
+            result=import_result,
+            styles=styles,
+        )
+        for col, w in widths.items():
+            ws_import.column_dimensions[col].width = w
+
+        # ---- Sheet 2: Export table (Received) ----
+        ws_export = wb.create_sheet(title="Export")
         _write_report_table(
             ws_export,
             start_row=3,
@@ -1228,9 +1273,6 @@ def report4_api_export():
             result=export_result,
             styles=styles,
         )
-
-        widths = {"A": 3, "B": 8, "C": 26, "D": 12, "E": 12, "F": 12, "G": 12,
-                  "H": 12, "I": 12, "J": 14, "K": 12, "L": 14, "M": 12}
         for col, w in widths.items():
             ws_export.column_dimensions[col].width = w
 
