@@ -71,7 +71,12 @@ def _jjltpl_window(selected_date):
 
 def _jjltpl_month_window(selected_date, window_end=None):
     d = selected_date.date() if isinstance(selected_date, datetime) else selected_date
-    month_start = datetime.combine(d.replace(day=1), time(7, 0, 0))
+    if d.day == 1:
+        prev_month = 12 if d.month == 1 else d.month - 1
+        prev_year = d.year - 1 if d.month == 1 else d.year
+        month_start = datetime(prev_year, prev_month, 1, 7, 0, 0)
+    else:
+        month_start = datetime.combine(d.replace(day=1), time(7, 0, 0))
     month_end = datetime.combine(d, time(7, 0, 0))
     return month_start, month_end
 
