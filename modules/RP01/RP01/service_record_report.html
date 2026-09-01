@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Service Records Report — RP01{% endblock %}
+
+{% block head %}
+<style>
+    .srv-box {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-bottom: 16px;
+        max-width: 780px;
+    }
+    .srv-box h3 { margin: 0 0 8px; font-size: 13px; color: var(--text-primary); }
+    .srv-box p, .srv-box li { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 4px 0; }
+    .srv-btn {
+        background: #4a90d9; color: #fff; border: none; border-radius: 4px;
+        padding: 9px 20px; font-size: 12px; font-weight: 600;
+        cursor: pointer; text-decoration: none; display: inline-block;
+    }
+    .srv-summary { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+    .srv-chip {
+        background: var(--bg-secondary); border: 1px solid var(--border-color);
+        border-radius: 6px; padding: 10px 16px; min-width: 120px;
+    }
+    .srv-chip .val { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+    .srv-chip .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
+    .srv-pick { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+    .srv-pick label { font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 4px; }
+    .srv-pick select {
+        padding: 8px; font-size: 12px; min-width: 300px;
+        background: var(--bg-primary); color: var(--text-primary);
+        border: 1px solid var(--border-color); border-radius: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
+    <h2 style="margin:0;font-size:20px;color:var(--text-primary);">Service Records Report</h2>
+    <span style="background:#4a90d9;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;">RP01</span>
+    <a href="/module/RP01/" style="margin-left:auto;font-size:12px;color:#4a90d9;">&larr; Back to Reports</a>
+</div>
+
+<div class="srv-box">
+    <h3>What this sheet contains</h3>
+    <p>Every <strong>Approved</strong> service record from SRV01 — record number, service,
+       who it bills to, date, billable quantity, and whether it has been billed.
+       Drafts and pending records are excluded: they are still being filled in.</p>
+    <p>SRV01's custom fields differ per service type, so the sheet has two shapes:</p>
+    <ul>
+        <li><strong>All service types</strong> — every approved record, with the custom
+            fields collapsed into one readable <em>Details</em> column.</li>
+        <li><strong>One service type</strong> — only that type's records, with its custom
+            fields as real columns you can sort, filter and pivot on.</li>
+    </ul>
+</div>
+
+<div class="srv-summary" id="srvSummary"></div>
+
+<div class="srv-box">
+    <div class="srv-pick">
+        <div>
+            <label for="srvServiceType">Service type</label>
+            <select id="srvServiceType">
+                <option value="">All service types (Details column)</option>
+            </select>
+        </div>
+        <a class="srv-btn" id="srvExportBtn" href="/api/module/RP01/service-records/export">Download Excel</a>
+    </div>
+    <p id="srvEmptyNote" style="display:none;color:#b45309;margin-top:12px;">
+        No approved service records yet — the sheet would contain only headers.
+    </p>
+</div>
+
+<script>
+function chip(val, lbl) {
+    return `<div class="srv-chip"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`;
+}
+
+async function loadSrvSummary() {
+    const resp = await fetch('/api/module/RP01/service-records/summary');
+    const s = await resp.json();
+
+    document.getElementById('srvSummary').innerHTML =
+        chip(s.approved, 'Approved Records') +
+        chip(s.billed, 'Billed') +
+        chip(s.unbilled, 'Not Yet Billed') +
+        chip(s.service_types.length, 'Service Types');
+
+    const sel = document.getElementById('srvServiceType');
+    s.service_types.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.service_name} (${t.records})`;
+        sel.appendChild(opt);
+    });
+
+    document.getElementById('srvEmptyNote').style.display = s.approved ? 'none' : '';
+}
+
+document.getElementById('srvServiceType').addEventListener('change', function () {
+    const base = '/api/module/RP01/service-records/export';
+    document.getElementById('srvExportBtn').href =
+        this.value ? `${base}?service_type_id=${this.value}` : base;
+});
+
+loadSrvSummary();
+</script>
+{% endblock %}
