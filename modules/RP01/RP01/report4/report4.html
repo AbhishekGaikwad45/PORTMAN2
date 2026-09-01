@@ -125,21 +125,62 @@
 
     <div id="reportStatus"></div>
 
-    <!-- ==================== TABLE: EXPORT (Cargo Received) ==================== -->
+    <!-- ==================== TABLE 1: IMPORT (Cargo Despatched) ==================== -->
     <div class="jjltpl-table-wrap">
 
         <div class="report-header">
             <div class="report-title">{{ port_name }}</div>
-            <div class="report-subtitle">COMMODITY-WISE EXPORT CARGO RECEIVED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT</div>
+            <div class="report-subtitle">COMMODITY-WISE IMPORT CARGO DESPATCHED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT</div>
             <table class="report-info">
                 <tr>
                     <td class="label">Terminal :</td>
                     <td>Bulk Terminal</td>
                     <td class="label">Month :</td>
-                    <td id="reportMonth"></td>
+                    <td class="reportMonth"></td>
                 </tr>
             </table>
             <div class="unit-text">( In Tonnes )</div>
+        </div>
+
+        <table class="traffic-report-table">
+            <thead>
+                <tr>
+                    <th rowspan="2" style="width:6%">Sr. No.</th>
+                    <th rowspan="2" style="width:20%">Commodities</th>
+                    <th colspan="2">Despatched by Rail</th>
+                    <th colspan="2">Despatched by Road</th>
+                    <th colspan="2">Despatched by Inland water<br>Transport or by Coastal Movement</th>
+                    <th colspan="2">Despatched through Pipe Line</th>
+                    <th colspan="2">Total</th>
+                </tr>
+                <tr>
+                    <th>Tonnes</th><th>Percentage</th>
+                    <th>Tonnes</th><th>Percentage</th>
+                    <th>Tonnes</th><th>Percentage</th>
+                    <th>Tonnes</th><th>Percentage</th>
+                    <th>Tonnes</th><th>Percentage</th>
+                </tr>
+            </thead>
+            <tbody id="importCommodityBody"></tbody>
+            <tfoot>
+                <tr class="total-row">
+                    <td colspan="2">TOTAL</td>
+                    <td id="importRailTotal"></td><td id="importRailPctTotal"></td>
+                    <td id="importRoadTotal"></td><td id="importRoadPctTotal"></td>
+                    <td id="importInlandTotal"></td><td id="importInlandPctTotal"></td>
+                    <td id="importPipelineTotal"></td><td id="importPipelinePctTotal"></td>
+                    <td id="importGrandTotal"></td><td id="importGrandPctTotal"></td>
+                </tr>
+            </tfoot>
+        </table>
+
+    </div>
+
+    <!-- ==================== TABLE 2: EXPORT (Cargo Received) ==================== -->
+    <div class="jjltpl-table-wrap">
+
+        <div class="report-header">
+            <div class="report-subtitle" style="margin-bottom:0;">COMMODITY-WISE EXPORT CARGO RECEIVED BY DIFFERENT MODES OF TRANSPORT FROM THE PORT</div>
         </div>
 
         <table class="traffic-report-table">
@@ -161,15 +202,15 @@
                     <th>Tonnes</th><th>Percentage</th>
                 </tr>
             </thead>
-            <tbody id="commodityBody"></tbody>
+            <tbody id="exportCommodityBody"></tbody>
             <tfoot>
                 <tr class="total-row">
                     <td colspan="2">TOTAL</td>
-                    <td id="railTotal"></td><td id="railPctTotal"></td>
-                    <td id="roadTotal"></td><td id="roadPctTotal"></td>
-                    <td id="inlandTotal"></td><td id="inlandPctTotal"></td>
-                    <td id="pipelineTotal"></td><td id="pipelinePctTotal"></td>
-                    <td id="grandTotal"></td><td id="grandPctTotal"></td>
+                    <td id="exportRailTotal"></td><td id="exportRailPctTotal"></td>
+                    <td id="exportRoadTotal"></td><td id="exportRoadPctTotal"></td>
+                    <td id="exportInlandTotal"></td><td id="exportInlandPctTotal"></td>
+                    <td id="exportPipelineTotal"></td><td id="exportPipelinePctTotal"></td>
+                    <td id="exportGrandTotal"></td><td id="exportGrandPctTotal"></td>
                 </tr>
             </tfoot>
         </table>
@@ -276,17 +317,28 @@ function loadReport4() {
         .then(({ ok, j }) => {
             if (!ok) { status.textContent = j.error || "Failed to load report."; return; }
 
-            document.getElementById("reportMonth").textContent = j.month_label || "";
+            document.querySelectorAll(".reportMonth").forEach(el => el.textContent = j.month_label || "");
+
+            // Import Table (Despatched)
+            const importRows = j.import_rows || j.rows;
+            const importGrand = j.import_grand || j.grand;
+            renderTable(importRows, importGrand, "importCommodityBody", {
+                rail: "importRailTotal", railPct: "importRailPctTotal",
+                road: "importRoadTotal", roadPct: "importRoadPctTotal",
+                inland: "importInlandTotal", inlandPct: "importInlandPctTotal",
+                pipeline: "importPipelineTotal", pipelinePct: "importPipelinePctTotal",
+                grand: "importGrandTotal", grandPct: "importGrandPctTotal",
+            });
 
             // Export Table (Received)
-            const exportRows = j.export_rows || j.rows;
-            const exportGrand = j.export_grand || j.grand;
-            renderTable(exportRows, exportGrand, "commodityBody", {
-                rail: "railTotal", railPct: "railPctTotal",
-                road: "roadTotal", roadPct: "roadPctTotal",
-                inland: "inlandTotal", inlandPct: "inlandPctTotal",
-                pipeline: "pipelineTotal", pipelinePct: "pipelinePctTotal",
-                grand: "grandTotal", grandPct: "grandPctTotal",
+            const exportRows = j.export_rows;
+            const exportGrand = j.export_grand;
+            renderTable(exportRows, exportGrand, "exportCommodityBody", {
+                rail: "exportRailTotal", railPct: "exportRailPctTotal",
+                road: "exportRoadTotal", roadPct: "exportRoadPctTotal",
+                inland: "exportInlandTotal", inlandPct: "exportInlandPctTotal",
+                pipeline: "exportPipelineTotal", pipelinePct: "exportPipelinePctTotal",
+                grand: "exportGrandTotal", grandPct: "exportGrandPctTotal",
             });
         })
         .catch(err => { status.textContent = "Failed to load report."; console.error(err); });
