@@ -161,6 +161,19 @@ def _load_masters(cur):
         if p_code:
             port_by_code[p_code.upper()] = p_name
 
+    # 7. Vessel Cargo Master (for Cargo Sub Category 2 mapping)
+    cur.execute("""
+        SELECT cargo_name, cargo_sub_category_2, cargo_category
+        FROM vessel_cargo
+        WHERE cargo_name IS NOT NULL AND TRIM(cargo_name) <> ''
+    """)
+    cargo_sub_cat_map = {}
+    for r in cur.fetchall():
+        c_name = (r['cargo_name'] or '').strip().upper()
+        sub2 = (r['cargo_sub_category_2'] or '').strip()
+        cat = (r['cargo_category'] or '').strip()
+        cargo_sub_cat_map[c_name] = sub2 or cat
+
     return {
         'flags': flag_master,
         'terminals': terminal_master,
@@ -170,8 +183,39 @@ def _load_masters(cur):
         'port_by_name': port_by_name,
         'port_by_code': port_by_code,
         'port_canonical_name': port_canonical_name,
-        'port_list': port_list
+        'port_list': port_list,
+        'cargo_sub_cat_map': cargo_sub_cat_map
     }
+
+
+def _resolve_cargo_sub_category_2(cargo_name: str, hist_sub2: str = None, masters: dict = None) -> str:
+    """
+    Resolve Cargo Sub Category 2 by checking cargo name against vessel_cargo master table.
+    Prioritizes explicit cargo_sub_category_2 from historical record or vessel_cargo master.
+    """
+    if hist_sub2 and hist_sub2.strip():
+        return hist_sub2.strip()
+    cn = (cargo_name or '').strip()
+    if not cn:
+        return 'Unspecified Cargo'
+    c_map = (masters or {}).get('cargo_sub_cat_map', {})
+    # 1. Exact match
+    if cn.upper() in c_map and c_map[cn.upper()]:
+        return c_map[cn.upper()]
+    # 2. Substring match against vessel_cargo master
+    for k, v in c_map.items():
+        if v and (k in cn.upper() or cn.upper() in k):
+            return v
+    # 3. Known heuristics
+    upper_c = cn.upper()
+    if any(term in upper_c for term in ['FO', 'FURNACE', 'DIESEL', 'CRUDE', 'OIL', 'PETROL', 'KEROSENE', 'POL', 'FEED STOCK', 'BASE OIL', 'LUBE']):
+        if any(e in upper_c for e in ['EDIBLE', 'PALM', 'SOYABEAN', 'SUNFLOWER', 'CPO']):
+            return 'EDIBLE OIL'
+        return 'POL'
+    if any(term in upper_c for term in ['ACID', 'ALCOHOL', 'BENZENE', 'TOLUENE', 'CHEMICAL', 'ACETATE', 'MONOMER', 'KETONE', 'GLYCERINE', 'PHENOL', 'ACETONE']):
+        return 'CHEMICAL'
+    return cn
+
 
 
 def _resolve_port(raw_port: str, raw_code: str, masters: dict) -> tuple:
@@ -769,7 +813,12 @@ def statistics_report_index():
     if current_fy not in fin_years:
         fin_years.insert(0, current_fy)
     default_fy = current_fy
-    default_month = current_month_name if current_month_name in MONTH_NAMES else 'April'
+    default_month = 'All'
+    start_y = today.year if today.month >= 4 else today.year - 1
+    default_start_date = f"{start_y}-04-01"
+    default_end_date = today.strftime('%Y-%m-%d')
+    default_start_datetime = f"{start_y}-04-01T00:00"
+    default_end_datetime = f"{today.strftime('%Y-%m-%d')}T23:59"
 
     return render_template(
         'statistics_report/statistics_report.html',
@@ -778,7 +827,11 @@ def statistics_report_index():
         fin_years=fin_years,
         month_names=MONTH_NAMES,
         default_fy=default_fy,
-        default_month=default_month
+        default_month=default_month,
+        default_start_date=default_start_date,
+        default_end_date=default_end_date,
+        default_start_datetime=default_start_datetime,
+        default_end_datetime=default_end_datetime
     )
 
 
@@ -1073,3 +1126,451 @@ def statistics_report_api_export():
         as_attachment=True,
         download_name=filename
     )
+
+
+# =============================================================================
+# MULTI-CATEGORY ANALYTICAL STATISTICS (TAB 2)
+# =============================================================================
+
+def get_detailed_analytics_data(fin_year: str, month: str = 'All', start_date_str: str = None, end_date_str: str = None):
+    """
+    Query and aggregate the 12 analytical tables matching the reference Excel layout.
+    Supports either FY + Month filtering or custom start_date + end_date range.
+    """
+    if start_date_str and end_date_str:
+        s_dt = _parse_dt(start_date_str)
+        e_dt = _parse_dt(end_date_str)
+        if s_dt and e_dt:
+            start_dt = s_dt
+            if len(end_date_str.strip()) == 10:
+                end_dt = datetime.combine(e_dt.date(), datetime.max.time())
+            else:
+                end_dt = e_dt.replace(second=59, microsecond=999999) if e_dt.second == 0 else e_dt
+        else:
+            start_dt, end_dt, _ = _period_bounds(fin_year, month)
+    else:
+        start_dt, end_dt, _ = _period_bounds(fin_year, month)
+
+    conn = get_db()
+    raw_items = []
+    try:
+        cur = get_cursor(conn)
+        masters = _load_masters(cur)
+
+        # 1. Fetch live operations
+        cur.execute("""
+            SELECT
+                lh.id AS ldud_id,
+                lh.cast_off_datetime,
+                lh.discharge_completed,
+                vh.vcn_doc_num,
+                vh.via_number,
+                vh.vessel_name,
+                vh.vessel_agent_name,
+                vh.vessel_run_type,
+                vh.operation_type,
+                vh.load_port,
+                vh.discharge_port,
+                ves.nationality AS vessel_nationality,
+                po.id AS po_id,
+                po.terminal_name,
+                po.cargo_name,
+                po.quantity AS po_qty,
+                po.start_dt,
+                po.end_dt,
+                po.parcel_ids
+            FROM ldud_header lh
+            JOIN vcn_header vh ON vh.id = lh.vcn_id
+            LEFT JOIN vessels ves ON (
+                ves.doc_num = split_part(COALESCE(vh.vessel_master_doc, ''), '/', 1)
+                OR UPPER(REPLACE(TRIM(ves.vessel_name), 'MT ', '')) = UPPER(REPLACE(TRIM(vh.vessel_name), 'MT ', ''))
+            )
+            JOIN ldud_parcel_ops po ON po.ldud_id = lh.id
+            WHERE COALESCE(lh.is_deleted, FALSE) = FALSE
+              AND (
+                  (lh.cast_off_datetime IS NOT NULL AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL)
+                  OR
+                  (lh.discharge_completed IS NOT NULL AND NULLIF(TRIM(lh.discharge_completed), '') IS NOT NULL)
+              )
+            ORDER BY lh.cast_off_datetime, po.id
+        """)
+        live_rows = cur.fetchall()
+
+        for r in live_rows:
+            dt_val = _parse_dt(r['cast_off_datetime']) or _parse_dt(r['discharge_completed'])
+            if not dt_val or dt_val < start_dt or dt_val > end_dt:
+                continue
+
+            po_id = r['po_id']
+            op_type = (r['operation_type'] or '').strip().capitalize()
+            parcel_ids = [int(x.strip()) for x in str(r['parcel_ids'] or '').split(',') if x.strip().isdigit()]
+            tbl = 'vcn_export_cargo_declaration' if op_type == 'Export' else 'vcn_consigners'
+            pipeline = ''
+            customer = ''
+            equipment = ''
+            if parcel_ids:
+                cur.execute(f"""
+                    SELECT pipeline_name, unload_terminal, consigner_name, equipment_names
+                    FROM {tbl}
+                    WHERE id = ANY(%s)
+                """, [parcel_ids])
+                p_rows = cur.fetchall()
+                pipes = list(dict.fromkeys(p['pipeline_name'].strip() for p in p_rows if p['pipeline_name'] and p['pipeline_name'].strip()))
+                custs = list(dict.fromkeys(p['consigner_name'].strip() for p in p_rows if p['consigner_name'] and p['consigner_name'].strip()))
+                eqs = list(dict.fromkeys(p['equipment_names'].strip() for p in p_rows if p['equipment_names'] and p['equipment_names'].strip()))
+                pipeline = ', '.join(pipes)
+                customer = ', '.join(custs)
+                equipment = ', '.join(eqs)
+
+            cur.execute("""
+                SELECT
+                    COALESCE(SUM(quantity), 0) AS handled_qty,
+                    COALESCE(SUM(CASE
+                        WHEN COALESCE(is_shortclose, FALSE) = TRUE
+                          OR LOWER(COALESCE(remarks, '')) LIKE '%%short%%close%%'
+                        THEN quantity ELSE 0 END
+                    ), 0) AS sc_qty,
+                    STRING_AGG(DISTINCT equipment_name, ', ') AS eq_names,
+                    COUNT(*) AS log_count
+                FROM lueu_parcel_log
+                WHERE parcel_op_id = %s AND is_deleted IS NOT TRUE
+            """, [po_id])
+            log_res = cur.fetchone()
+            if log_res and log_res['log_count'] > 0:
+                qty = float(log_res['handled_qty'] or 0.0) - float(log_res['sc_qty'] or 0.0)
+                if log_res['eq_names']:
+                    equipment = log_res['eq_names']
+            else:
+                qty = float(r['po_qty'] or 0.0)
+
+            # Pumping duration hours = end_dt - start_dt
+            s_dt = _parse_dt(r['start_dt'])
+            e_dt = _parse_dt(r['end_dt'])
+            duration_hours = 0.0
+            if s_dt and e_dt and e_dt > s_dt:
+                duration_hours = round((e_dt - s_dt).total_seconds() / 3600.0, 2)
+
+            raw_run = (r['vessel_run_type'] or '').strip()
+            run_type = 'Foreign' if ('fore' in raw_run.lower() or raw_run.lower() == 'f') else ('Costal' if ('cost' in raw_run.lower() or 'coast' in raw_run.lower() or 'ind' in raw_run.lower()) else raw_run)
+            flag = (r['vessel_nationality'] or '').strip() or ('Foreign' if run_type == 'Foreign' else 'India')
+            port_val = (r['load_port'] or r['discharge_port'] or '').strip()
+            _, port_name = _resolve_port(port_val, '', masters)
+
+            raw_cargo = _resolve_cargo_sub_category_2(r['cargo_name'], None, masters)
+
+            raw_items.append({
+                'source': 'Live',
+                'terminal': (r['terminal_name'] or '').strip() or 'Unspecified Terminal',
+                'pipeline': pipeline or 'Unspecified Pipeline',
+                'cargo': raw_cargo,
+                'customer': customer or 'Unspecified Customer',
+                'payment_by': customer or 'Direct',
+                'duration_hours': duration_hours,
+                'agent_name': (r['vessel_agent_name'] or '').strip() or 'Unspecified Agent',
+                'flag_name': flag or 'Unspecified Flag',
+                'port_name': port_name or 'Unspecified Port',
+                'equipment_name': equipment or 'MLA-1',
+                'run_type': run_type or 'Foreign',
+                'operation_type': op_type or 'Import',
+                'qty_mt': max(qty, 0.0)
+            })
+
+        # 2. Fetch historical records
+        cur.execute("""
+            SELECT
+                mh.terminal,
+                mh.cargo_name,
+                mh.cargo_type,
+                mh.cargo_sub_category_2,
+                mh.customer,
+                mh.payment_by,
+                mh.quantity,
+                mh.overseas_coastal,
+                mh.import_export,
+                mvm.month,
+                mvm.agent,
+                mvm.flag,
+                mvm.port_of_loading,
+                mvm.unload_pipeline,
+                mvm.ops_commenced,
+                mvm.cargo_completion,
+                mvm.cast_off,
+                mvm.sail_cast_off
+            FROM mis_history mh
+            LEFT JOIN mis_vessel_master mvm ON mvm.vcn_no = mh.vcn_no
+            WHERE mh.fin_year = %s
+        """, [fin_year])
+        hist_rows = cur.fetchall()
+
+        for h in hist_rows:
+            dt_val = _parse_dt(h['cast_off']) or _parse_dt(h['sail_cast_off']) or _parse_dt(h['cargo_completion'])
+            if dt_val:
+                if dt_val < start_dt or dt_val > end_dt:
+                    continue
+            else:
+                m_text = str(h.get('month') or '').strip()
+                if month and month.lower() != 'all':
+                    m_short = month[:3].lower()
+                    if m_short not in m_text.lower():
+                        continue
+
+            s_dt = _parse_dt(h['ops_commenced'])
+            e_dt = _parse_dt(h['cargo_completion'])
+            duration_hours = 0.0
+            if s_dt and e_dt and e_dt > s_dt:
+                duration_hours = round((e_dt - s_dt).total_seconds() / 3600.0, 2)
+
+            raw_run = (h['overseas_coastal'] or '').strip()
+            run_type = 'Foreign' if ('over' in raw_run.lower() or 'fore' in raw_run.lower()) else 'Costal'
+            op_type = (h['import_export'] or 'Import').strip().capitalize()
+            raw_cargo = _resolve_cargo_sub_category_2(h['cargo_name'] or h['cargo_type'], h.get('cargo_sub_category_2'), masters)
+
+            raw_items.append({
+                'source': 'Historical',
+                'terminal': (h['terminal'] or '').strip() or 'Unspecified Terminal',
+                'pipeline': (h['unload_pipeline'] or '').strip() or 'Unspecified Pipeline',
+                'cargo': raw_cargo,
+                'customer': (h['customer'] or '').strip() or 'Unspecified Customer',
+                'payment_by': (h['payment_by'] or '').strip() or 'Unspecified Payment',
+                'duration_hours': duration_hours,
+                'agent_name': (h['agent'] or '').strip() or 'Unspecified Agent',
+                'flag_name': (h['flag'] or '').strip() or ('Foreign' if run_type == 'Foreign' else 'India'),
+                'port_name': (h['port_of_loading'] or '').strip() or 'Unspecified Port',
+                'equipment_name': 'MLA-1',
+                'run_type': run_type,
+                'operation_type': op_type,
+                'qty_mt': float(h['quantity'] or 0.0)
+            })
+
+    finally:
+        conn.close()
+
+    def _agg_qty(key):
+        totals = {}
+        for it in raw_items:
+            k = it.get(key) or 'Unspecified'
+            totals[k] = totals.get(k, 0.0) + it['qty_mt']
+        grand_total = sum(totals.values())
+        rows = []
+        for k, v in sorted(totals.items(), key=lambda x: -x[1]):
+            pct = (v / grand_total * 100.0) if grand_total > 0 else 0.0
+            rows.append({'name': k, 'qty_mt': round(v, 3), 'pct': round(pct, 1)})
+        return {'rows': rows, 'total_qty': round(grand_total, 3), 'total_pct': 100.0 if grand_total > 0 else 0.0}
+
+    def _agg_pipeline_hours():
+        totals = {}
+        for it in raw_items:
+            pipe = it.get('pipeline') or 'Unspecified Pipeline'
+            totals[pipe] = totals.get(pipe, 0.0) + it['duration_hours']
+        grand_total = sum(totals.values())
+        rows = []
+        for k, v in sorted(totals.items(), key=lambda x: -x[1]):
+            pct = (v / grand_total * 100.0) if grand_total > 0 else 0.0
+            rows.append({'name': k, 'hours': round(v, 2), 'pct': round(pct, 1)})
+        return {'rows': rows, 'total_hours': round(grand_total, 2), 'total_pct': 100.0 if grand_total > 0 else 0.0}
+
+    return {
+        'terminal_wise': _agg_qty('terminal'),
+        'pipeline_wise': _agg_qty('pipeline'),
+        'cargo_wise': _agg_qty('cargo'),
+        'customer_wise': _agg_qty('customer'),
+        'pipeline_utilisation': _agg_pipeline_hours(),
+        'vessel_agent_wise': _agg_qty('agent_name'),
+        'flag_wise': _agg_qty('flag_name'),
+        'port_wise': _agg_qty('port_name'),
+        'payment_type_wise': _agg_qty('payment_by'),
+        'equipment_utilisation': _agg_qty('equipment_name'),
+        'vessel_run_type_wise': _agg_qty('run_type'),
+        'operation_type_wise': _agg_qty('operation_type'),
+        'meta': {
+            'fin_year': fin_year,
+            'month': month or 'All',
+            'start_date': start_dt.strftime('%d-%m-%Y %H:%M') if (start_dt.hour or start_dt.minute) else start_dt.strftime('%d-%m-%Y'),
+            'end_date': end_dt.strftime('%d-%m-%Y %H:%M') if (end_dt.hour != 23 or end_dt.minute != 59) else end_dt.strftime('%d-%m-%Y'),
+            'record_count': len(raw_items)
+        }
+    }
+
+
+@bp.route('/api/module/RP01/statistics-report/analytics-data', methods=['GET'])
+@login_required
+def statistics_report_api_analytics_data():
+    perms = get_perms()
+    if not perms.get('can_read'):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    today = date.today()
+    cur_month = today.strftime('%B')
+    cur_fy = f"{today.year}-{str(today.year + 1)[-2:]}" if today.month >= 4 else f"{today.year - 1}-{str(today.year)[-2:]}"
+
+    fin_year = request.args.get('fin_year', cur_fy).strip()
+    month = request.args.get('month', cur_month).strip()
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
+
+    try:
+        data = get_detailed_analytics_data(fin_year, month, start_date, end_date)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/module/RP01/statistics-report/export-analytics', methods=['GET'])
+@login_required
+def statistics_report_api_export_analytics():
+    perms = get_perms()
+    if not perms.get('can_read'):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    today = date.today()
+    cur_month = today.strftime('%B')
+    cur_fy = f"{today.year}-{str(today.year + 1)[-2:]}" if today.month >= 4 else f"{today.year - 1}-{str(today.year)[-2:]}"
+
+    fin_year = request.args.get('fin_year', cur_fy).strip()
+    month = request.args.get('month', cur_month).strip()
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
+
+    try:
+        data = get_detailed_analytics_data(fin_year, month, start_date, end_date)
+    except Exception as e:
+        return jsonify({'error': f'Analytics calculation failed: {e}'}), 500
+
+    wb = _generate_analytics_excel(data)
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    filename = f"Multi_Category_Analytics_{fin_year}_{month}.xlsx"
+    return send_file(
+        bio,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+def _generate_analytics_excel(data: dict) -> Workbook:
+    """Build the 15-column 3-row multi-category analytics Excel workbook."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Analytics_Report"
+
+    font_title = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+    font_hdr = Font(name="Calibri", size=9, bold=True, color="000000")
+    font_data = Font(name="Calibri", size=9, color="000000")
+    font_tot = Font(name="Calibri", size=9, bold=True, color="000000")
+    font_meta = Font(name="Calibri", size=10, bold=True, color="1F4E78")
+    font_banner = Font(name="Calibri", size=11, bold=True, color="1E4620")
+
+    fill_title = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    fill_hdr = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    fill_tot = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    fill_banner = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+
+    thin = Side(border_style="thin", color="D9D9D9")
+    double = Side(border_style="double", color="000000")
+
+    box_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    tot_border = Border(left=thin, right=thin, top=thin, bottom=double)
+
+    # Top Filters metadata
+    ws.cell(row=2, column=1, value="Year").font = font_meta
+    ws.cell(row=2, column=2, value=data['meta']['fin_year']).font = font_data
+    ws.cell(row=2, column=3, value="Selection date").font = font_meta
+    ws.cell(row=2, column=4, value=f"Start: {data['meta']['start_date']}").font = font_data
+    ws.cell(row=2, column=5, value=f"End: {data['meta']['end_date']}").font = font_data
+    ws.cell(row=2, column=6, value="Month").font = font_meta
+    ws.cell(row=2, column=7, value=data['meta']['month']).font = font_data
+
+    def write_box(start_r, start_c, title, col1_title, col2_title, col3_title, rows, tot_val, is_hours=False):
+        ws.merge_cells(start_row=start_r, start_column=start_c, end_row=start_r, end_column=start_c + 2)
+        t_cell = ws.cell(row=start_r, column=start_c, value=title)
+        t_cell.font = font_title
+        t_cell.fill = fill_title
+        t_cell.alignment = Alignment(horizontal="center", vertical="center")
+        for c in range(start_c, start_c + 3):
+            ws.cell(row=start_r, column=c).border = box_border
+
+        h_row = start_r + 1
+        h_vals = [col1_title, col2_title, col3_title]
+        for idx, hv in enumerate(h_vals):
+            cell = ws.cell(row=h_row, column=start_c + idx, value=hv)
+            cell.font = font_hdr
+            cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = box_border
+
+        curr_r = h_row + 1
+        for item in rows:
+            c1 = ws.cell(row=curr_r, column=start_c, value=item['name'])
+            c1.font = font_data
+            c1.border = box_border
+
+            val = item.get('hours' if is_hours else 'qty_mt', 0.0)
+            c2 = ws.cell(row=curr_r, column=start_c + 1, value=val)
+            c2.font = font_data
+            c2.number_format = "#,##0.00" if is_hours else "#,##0.000"
+            c2.border = box_border
+
+            c3 = ws.cell(row=curr_r, column=start_c + 2, value=(item.get('pct', 0.0) / 100.0))
+            c3.font = font_data
+            c3.number_format = "0.0%"
+            c3.border = box_border
+            curr_r += 1
+
+        t1 = ws.cell(row=curr_r, column=start_c, value="Total")
+        t1.font = font_tot
+        t1.fill = fill_tot
+        t1.border = tot_border
+
+        t2 = ws.cell(row=curr_r, column=start_c + 1, value=tot_val)
+        t2.font = font_tot
+        t2.fill = fill_tot
+        t2.number_format = "#,##0.00" if is_hours else "#,##0.000"
+        t2.border = tot_border
+
+        t3 = ws.cell(row=curr_r, column=start_c + 2, value=1.0 if tot_val > 0 else 0.0)
+        t3.font = font_tot
+        t3.fill = fill_tot
+        t3.number_format = "0.0%"
+        t3.border = tot_border
+
+        return curr_r
+
+    # Row 1 (5 tables)
+    r1_ends = [
+        write_box(4, 1, "Terminalwise", "Terminal", "Qty handled in MT", "% of Qty", data['terminal_wise']['rows'], data['terminal_wise']['total_qty']),
+        write_box(4, 4, "Pipeline wise", "Pipeline", "Qty handled in MT", "% of Qty", data['pipeline_wise']['rows'], data['pipeline_wise']['total_qty']),
+        write_box(4, 7, "Cargowise", "Cargo Type", "Qty handled in MT", "% of Qty", data['cargo_wise']['rows'], data['cargo_wise']['total_qty']),
+        write_box(4, 10, "Customerwise", "Customer Name", "Qty handled in MT", "% of Qty", data['customer_wise']['rows'], data['customer_wise']['total_qty']),
+        write_box(4, 13, "Pipeline Utilisation", "Pipeline", "No of Hours", "% of Hours", data['pipeline_utilisation']['rows'], data['pipeline_utilisation']['total_hours'], is_hours=True),
+    ]
+
+    r2_start = max(r1_ends) + 2
+    # Row 2 (5 tables)
+    r2_ends = [
+        write_box(r2_start, 1, "Vessel Agentwise", "Agent Name", "Qty handled in MT", "% of Qty", data['vessel_agent_wise']['rows'], data['vessel_agent_wise']['total_qty']),
+        write_box(r2_start, 4, "Flagwise", "Flag Wise", "Qty handled in MT", "% of Qty", data['flag_wise']['rows'], data['flag_wise']['total_qty']),
+        write_box(r2_start, 7, "Portwise", "Port Name", "Qty handled in MT", "% of Qty", data['port_wise']['rows'], data['port_wise']['total_qty']),
+        write_box(r2_start, 10, "Payment type wise", "Name", "Qty handled in MT", "% of Qty", data['payment_type_wise']['rows'], data['payment_type_wise']['total_qty']),
+        write_box(r2_start, 13, "Equipment Utilisation", "MLA No", "Qty handled in MT", "% of Qty", data['equipment_utilisation']['rows'], data['equipment_utilisation']['total_qty']),
+    ]
+
+    # Row 3 (2 tables)
+    r3_start = max(r2_ends) + 2
+    write_box(r3_start, 1, "Vessel Run Typewise", "Run Type", "Qty handled in MT", "% of Qty", data['vessel_run_type_wise']['rows'], data['vessel_run_type_wise']['total_qty'])
+    write_box(r3_start, 4, "Operation Type wise", "Operation", "Qty handled in MT", "% of Qty", data['operation_type_wise']['rows'], data['operation_type_wise']['total_qty'])
+
+    # Auto-fit columns 1 to 15
+    for col_idx in range(1, 16):
+        col_letter = get_column_letter(col_idx)
+        max_len = 0
+        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx):
+            val = row[0].value
+            if val is not None:
+                max_len = max(max_len, len(str(val)))
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 13)
+
+    return wb

@@ -7,6 +7,7 @@
     :root {
         --rp-primary: #2563EB;
         --rp-primary-dark: #1D4ED8;
+        --rp-navy: #1F4E78;
         --rp-success: #16A34A;
         --rp-success-dark: #15803D;
         --rp-ink: #111827;
@@ -21,15 +22,15 @@
     .report-wrap {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         color: var(--rp-ink);
-        padding-bottom: 40px;
+        padding-bottom: 50px;
     }
 
     .module-header {
         display: flex;
         align-items: center;
         gap: 12px;
-        margin-bottom: 20px;
-        padding-bottom: 14px;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
         border-bottom: 1px solid var(--rp-border);
     }
     .module-header h2 {
@@ -56,6 +57,37 @@
     }
     .module-header .rp-back:hover { text-decoration: underline; }
 
+    /* Tab Navigation */
+    .report-tabs-nav {
+        display: flex;
+        gap: 8px;
+        border-bottom: 2px solid var(--rp-border);
+        margin-bottom: 18px;
+    }
+    .tab-btn {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 10px 18px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--rp-muted);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.15s ease;
+        margin-bottom: -2px;
+    }
+    .tab-btn:hover {
+        color: var(--rp-primary);
+    }
+    .tab-btn.active {
+        color: var(--rp-primary);
+        border-bottom-color: var(--rp-primary);
+        font-weight: 700;
+    }
+
     /* Filter Toolbar */
     .filter-toolbar {
         display: flex;
@@ -66,7 +98,7 @@
         border: 1px solid var(--rp-border);
         border-radius: 10px;
         padding: 14px 18px;
-        margin-bottom: 24px;
+        margin-bottom: 20px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .filter-group {
@@ -80,20 +112,21 @@
         color: var(--rp-muted);
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        white-space: nowrap;
     }
-    .filter-group select {
+    .filter-group select, .filter-group input[type="date"], .filter-group input[type="datetime-local"] {
         font-size: 13px;
         font-weight: 600;
         color: var(--rp-ink);
         background: var(--rp-bg);
         border: 1px solid var(--rp-border);
         border-radius: 6px;
-        padding: 8px 12px;
+        padding: 7px 10px;
         outline: none;
         cursor: pointer;
-        min-width: 130px;
+        min-width: 120px;
     }
-    .filter-group select:focus {
+    .filter-group select:focus, .filter-group input[type="date"]:focus, .filter-group input[type="datetime-local"]:focus {
         border-color: var(--rp-primary);
         box-shadow: 0 0 0 2px rgba(37,99,235,0.15);
     }
@@ -130,22 +163,70 @@
     }
     .btn-export:hover { background: var(--rp-success-dark); }
 
-    /* 4-Table Horizontal Container matching the Reference Excel */
+    /* Tab Panels */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Tables Horizontal Scroll Container */
     .tables-scroll-wrapper {
         overflow-x: auto;
-        padding-bottom: 12px;
+        padding-bottom: 16px;
     }
+
+    /* Tab 1: Overview Grid */
     .overview-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(320px, 1fr));
+        grid-template-columns: repeat(4, minmax(310px, 1fr));
         gap: 16px;
         align-items: start;
-        min-width: 1320px;
+        min-width: 1300px;
     }
+
+    /* Tab 2: Multi-Category Analytics Layout (Equal Heights) */
+    .analytics-grid-5 {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(250px, 1fr));
+        gap: 14px;
+        align-items: stretch;
+        min-width: 1350px;
+        margin-bottom: 22px;
+    }
+    .analytics-grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(320px, 450px));
+        gap: 16px;
+        align-items: stretch;
+        margin-bottom: 22px;
+    }
+
+    .analytics-grid-5 .report-box, .analytics-grid-2 .report-box {
+        height: 380px;
+        display: flex;
+        flex-direction: column;
+    }
+    .analytics-grid-5 .table-container, .analytics-grid-2 .table-container {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        overflow-x: auto;
+        max-height: none;
+        display: flex;
+        flex-direction: column;
+    }
+    .analytics-grid-5 .data-table, .analytics-grid-2 .data-table {
+        min-height: 100%;
+        width: 100%;
+    }
+    .table-filler-row td {
+        height: 100%;
+        padding: 0 !important;
+        border: none !important;
+        background: transparent !important;
+    }
+
     .report-box {
         background: var(--rp-card);
         border: 1px solid var(--rp-border);
-        border-radius: 10px;
+        border-radius: 8px;
         overflow: hidden;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         display: flex;
@@ -153,12 +234,11 @@
     }
     .report-box-header {
         background: #F3F4F6;
-        border-bottom: 2px solid #E5E7EB;
-        padding: 12px 14px;
-        min-height: 58px;
+        border-bottom: 1px solid #E5E7EB;
+        padding: 9px 12px;
         display: flex;
-        flex-direction: column;
-        justify-content: center;
+        align-items: center;
+        justify-content: space-between;
     }
     .report-box-title {
         font-size: 13px;
@@ -168,14 +248,9 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .report-box-sub {
-        font-size: 11px;
-        color: var(--rp-muted);
-        margin-top: 2px;
-    }
     .table-container {
         overflow-x: auto;
-        max-height: 560px;
+        max-height: 480px;
         position: relative;
     }
 
@@ -187,23 +262,25 @@
         text-align: left;
     }
     table.data-table th {
-        background: #3d6be9;
+        background: #1F4E78;
         color: #FFFFFF;
         font-weight: 700;
-        padding: 9px 10px;
-        border: 1px solid #3B82F6;
+        padding: 7px 9px;
+        border: 1px solid #1A3E61;
         white-space: nowrap;
         position: sticky;
         top: 0;
         z-index: 2;
+        font-size: 11.5px;
     }
     table.data-table td {
-        padding: 8px 10px;
+        padding: 6px 9px;
         border: 1px solid #E5E7EB;
         color: var(--rp-ink);
+        font-size: 12px;
     }
     table.data-table tbody tr:nth-child(even) {
-        background-color: #F9FAFB;
+        background-color: #F8FAFC;
     }
     table.data-table tbody tr:hover {
         background-color: #EFF6FF;
@@ -215,17 +292,20 @@
         text-align: center;
     }
     table.data-table tfoot td {
-        background: #E0E7FF;
-        color: #1E3A8A;
+        background: #EBF3FC;
+        color: #1F4E78;
         font-weight: 700;
-        border-top: 2px solid #1E3A8A;
-        border-bottom: 2px solid #1E3A8A;
-        padding: 9px 10px;
+        border-top: 2px solid #1F4E78;
+        border-bottom: 2px solid #1F4E78;
+        padding: 7px 9px;
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
     }
 
     .pill {
         display: inline-block;
-        padding: 2px 8px;
+        padding: 2px 7px;
         border-radius: 4px;
         font-size: 11px;
         font-weight: 600;
@@ -233,6 +313,14 @@
     .pill-blue { background: #DBEAFE; color: #1E40AF; }
     .pill-green { background: #DCFCE7; color: #166534; }
     .pill-red { background: #FEE2E2; color: #991B1B; }
+
+    .font-mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .pct-val {
+        color: #2563EB;
+        font-weight: 600;
+    }
 </style>
 {% endblock %}
 
@@ -240,143 +328,320 @@
 <div class="report-wrap">
     <!-- Header -->
     <div class="module-header">
-        <h2> Statistics Report</h2>
+        <h2>Statistics Report</h2>
         <span class="rp-badge">RP01</span>
-       
         <a href="/module/RP01/" class="rp-back">&larr; Back to Reports</a>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="report-tabs-nav">
+        <button class="tab-btn active" id="tabBtnOverview" onclick="switchTab('overview')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            Overview Summary
+        </button>
+        <button class="tab-btn" id="tabBtnAnalytics" onclick="switchTab('analytics')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            Multi-Category Analytics 
+        </button>
     </div>
 
     <!-- Filter Toolbar -->
     <div class="filter-toolbar">
-        <div class="filter-group">
+        <div class="filter-group" id="grpFinYear">
             <label for="selFinYear">Financial Year</label>
-            <select id="selFinYear">
+            <select id="selFinYear" onchange="onFinYearOrMonthChange()">
                 {% for fy in fin_years %}
                 <option value="{{ fy }}" {% if fy == default_fy %}selected{% endif %}>{{ fy }}</option>
                 {% endfor %}
             </select>
         </div>
-        <div class="filter-group">
+        <div class="filter-group" id="grpMonth">
             <label for="selMonth">Month</label>
-            <select id="selMonth">
+            <select id="selMonth" onchange="onFinYearOrMonthChange()">
                 {% for m in month_names %}
                 <option value="{{ m }}" {% if m == default_month %}selected{% endif %}>{{ m }}</option>
                 {% endfor %}
             </select>
         </div>
-        <button class="btn-apply" onclick="loadReportData()">
+        <div class="filter-group" id="grpStartDateTime" style="display: none;">
+            <label for="txtStartDateTime">Start Date & Time</label>
+            <input type="datetime-local" id="txtStartDateTime" value="{{ default_start_datetime }}" onchange="updateExportUrl()">
+        </div>
+        <div class="filter-group" id="grpEndDateTime" style="display: none;">
+            <label for="txtEndDateTime">End Date & Time</label>
+            <input type="datetime-local" id="txtEndDateTime" value="{{ default_end_datetime }}" onchange="updateExportUrl()">
+        </div>
+
+        <button class="btn-apply" onclick="applyCurrentFilter()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
             Load Report
         </button>
-        <a id="btnExportExcel" class="btn-export" href="#" onclick="exportExcel(event)">
+        <a id="btnExportExcel" class="btn-export" href="#">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             Export to Excel
         </a>
     </div>
 
-    <!-- 4 Tables Horizontal Layout (Matching Reference Excel) -->
-    <div class="tables-scroll-wrapper">
-        <div class="overview-grid">
-            <!-- Table 1: Cargo Handled Terminal and pipeline wise -->
-            <div class="report-box">
-                <div class="report-box-header">
-                    <div class="report-box-title">Cargo Handled Terminal and pipeline wise</div>
-
+    <!-- TAB 1: OVERVIEW SUMMARY -->
+    <div id="panelOverview" class="tab-panel active">
+        <div class="tables-scroll-wrapper">
+            <div class="overview-grid">
+                <!-- Table 1: Cargo Handled Terminal and pipeline wise -->
+                <div class="report-box">
+                    <div class="report-box-header">
+                        <div class="report-box-title">Cargo Handled Terminal and pipeline wise</div>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblOverviewTerminal">
+                            <thead>
+                                <tr>
+                                    <th>Terminal</th>
+                                    <th>Pipeline</th>
+                                    <th>Cargo</th>
+                                    <th class="text-right">Qty handled in MT</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="3">Total</td>
+                                    <td class="text-right font-mono" id="totOverviewTerminal">0.000</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
                 </div>
-                <div class="table-container">
-                    <table class="data-table" id="tblOverviewTerminal">
-                        <thead>
-                            <tr>
-                                <th>Terminal</th>
-                                <th>Pipeline</th>
-                                <th>Cargo</th>
-                                <th class="text-right">Qty handled in MT</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="3">Total</td>
-                                <td class="text-right" id="totOverviewTerminal">0.000</td>
-                            </tr>
-                        </tfoot>
-                    </table>
+
+                <!-- Table 2: Cargo Handled Vessel Agent wise -->
+                <div class="report-box">
+                    <div class="report-box-header">
+                        <div class="report-box-title">Cargo Handled Vessel Agent wise</div>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblOverviewAgent">
+                            <thead>
+                                <tr>
+                                    <th>Vessel Agent Name</th>
+                                    <th class="text-right">Qty handled in MT</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                            <tfoot>
+                                <tr>
+                                    <td>Total</td>
+                                    <td class="text-right font-mono" id="totOverviewAgent">0.000</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Table 3: Cargo Handled Flag Wise -->
+                <div class="report-box">
+                    <div class="report-box-header">
+                        <div class="report-box-title">Cargo Handled Flag Wise</div>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblOverviewFlag">
+                            <thead>
+                                <tr>
+                                    <th>Flag type</th>
+                                    <th>Flag Name</th>
+                                    <th class="text-right">Qty handled in MT</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="2">Total</td>
+                                    <td class="text-right font-mono" id="totOverviewFlag">0.000</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Table 4: Cargo Handled Port Wise -->
+                <div class="report-box">
+                    <div class="report-box-header">
+                        <div class="report-box-title">Cargo Handled Port Wise</div>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblOverviewPort">
+                            <thead>
+                                <tr>
+                                    <th>Port Code</th>
+                                    <th>Port Name</th>
+                                    <th class="text-right">Qty handled in MT</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="2">Total</td>
+                                    <td class="text-right font-mono" id="totOverviewPort">0.000</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: MULTI-CATEGORY ANALYTICS (DPR GRID) -->
+    <div id="panelAnalytics" class="tab-panel">
+        <div class="tables-scroll-wrapper">
+            <!-- Row 1: 5 Tables -->
+            <div class="analytics-grid-5">
+                <!-- 1. Terminalwise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Terminalwise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsTerminal">
+                            <thead><tr><th>Terminal</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsTerminalQty">0.000</td><td class="text-right font-mono" id="totAnalyticsTerminalPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 2. Pipeline wise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Pipeline wise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsPipeline">
+                            <thead><tr><th>Pipeline</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsPipelineQty">0.000</td><td class="text-right font-mono" id="totAnalyticsPipelinePct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 3. Cargowise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Cargowise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsCargo">
+                            <thead><tr><th>Cargo Type</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsCargoQty">0.000</td><td class="text-right font-mono" id="totAnalyticsCargoPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 4. Customerwise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Customerwise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsCustomer">
+                            <thead><tr><th>Customer Name</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsCustomerQty">0.000</td><td class="text-right font-mono" id="totAnalyticsCustomerPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 5. Pipeline Utilisation -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Pipeline Utilisation</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsPipeUtil">
+                            <thead><tr><th>Pipeline</th><th class="text-right">No of Hours</th><th class="text-right">% of Hours</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsPipeUtilHours">0.00</td><td class="text-right font-mono" id="totAnalyticsPipeUtilPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- Table 2: Cargo Handled Vessel Agent wise -->
-            <div class="report-box">
-                <div class="report-box-header">
-                    <div class="report-box-title">Cargo Handled Vessel Agent wise</div>
+            <!-- Row 2: 5 Tables -->
+            <div class="analytics-grid-5">
+                <!-- 6. Vessel Agentwise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Vessel Agentwise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsAgent">
+                            <thead><tr><th>Vessel Agent Name</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsAgentQty">0.000</td><td class="text-right font-mono" id="totAnalyticsAgentPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
                 </div>
-                <div class="table-container">
-                    <table class="data-table" id="tblOverviewAgent">
-                        <thead>
-                            <tr>
-                                <th>Vessel Agent Name</th>
-                                <th class="text-right">Qty handled in MT</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                        <tfoot>
-                            <tr>
-                                <td>Total</td>
-                                <td class="text-right" id="totOverviewAgent">0.000</td>
-                            </tr>
-                        </tfoot>
-                    </table>
+
+                <!-- 7. Flagwise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Flagwise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsFlag">
+                            <thead><tr><th>Flag Name</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsFlagQty">0.000</td><td class="text-right font-mono" id="totAnalyticsFlagPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 8. Portwise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Portwise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsPort">
+                            <thead><tr><th>Port Name</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsPortQty">0.000</td><td class="text-right font-mono" id="totAnalyticsPortPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 9. Payment type wise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Payment type wise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsPayment">
+                            <thead><tr><th>Payment Type</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsPaymentQty">0.000</td><td class="text-right font-mono" id="totAnalyticsPaymentPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 10. Equipment Utilisation -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Equipment Utilisation</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsEquipment">
+                            <thead><tr><th>MLA No</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsEquipmentQty">0.000</td><td class="text-right font-mono" id="totAnalyticsEquipmentPct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- Table 3: Cargo Handled Flag Wise -->
-            <div class="report-box">
-                <div class="report-box-header">
-                    <div class="report-box-title">Cargo Handled Flag Wise</div>
-                   
+            <!-- Row 3: 2 Tables -->
+            <div class="analytics-grid-2">
+                <!-- 11. Vessel Run Typewise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Vessel Run Typewise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsRunType">
+                            <thead><tr><th>Vessel Run Type</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsRunTypeQty">0.000</td><td class="text-right font-mono" id="totAnalyticsRunTypePct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
                 </div>
-                <div class="table-container">
-                    <table class="data-table" id="tblOverviewFlag">
-                        <thead>
-                            <tr>
-                                <th>Flag type</th>
-                                <th>Flag Name</th>
-                                <th class="text-right">Qty handled in MT</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="2">Total</td>
-                                <td class="text-right" id="totOverviewFlag">0.000</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </div>
 
-            <!-- Table 4: Cargo Handled Port Wise -->
-            <div class="report-box">
-                <div class="report-box-header">
-                    <div class="report-box-title">Cargo Handled Port Wise</div>
-                  
-                </div>
-                <div class="table-container">
-                    <table class="data-table" id="tblOverviewPort">
-                        <thead>
-                            <tr>
-                                <th>Port Code</th>
-                                <th>Port Name</th>
-                                <th class="text-right">Qty handled in MT</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="2">Total</td>
-                                <td class="text-right" id="totOverviewPort">0.000</td>
-                            </tr>
-                        </tfoot>
-                    </table>
+                <!-- 12. Operation Type wise -->
+                <div class="report-box">
+                    <div class="report-box-header"><div class="report-box-title">Operation Type wise</div></div>
+                    <div class="table-container">
+                        <table class="data-table" id="tblAnalyticsOpType">
+                            <thead><tr><th>Operation Type</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <tbody></tbody>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsOpTypeQty">0.000</td><td class="text-right font-mono" id="totAnalyticsOpTypePct">100.0%</td></tr></tfoot>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -386,42 +651,149 @@
 
 {% block scripts %}
 <script>
-    let reportData = null;
+    let currentTab = 'overview';
+    let overviewLoaded = false;
+    let analyticsLoaded = false;
+
+    const MONTH_NUMBERS = {
+        "April": 4, "May": 5, "June": 6, "July": 7, "August": 8, "September": 9,
+        "October": 10, "November": 11, "December": 12, "January": 1, "February": 2, "March": 3
+    };
 
     function formatNumber(num) {
         if (num === null || num === undefined || isNaN(num)) return "0.000";
         return Number(num).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
     }
 
-    async function loadReportData() {
+    function formatHours(num) {
+        if (num === null || num === undefined || isNaN(num)) return "0.00";
+        return Number(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatPct(num) {
+        if (num === null || num === undefined || isNaN(num)) return "0.0%";
+        return Number(num).toFixed(1) + '%';
+    }
+
+    function switchTab(tabId) {
+        currentTab = tabId;
+        document.getElementById('tabBtnOverview').classList.toggle('active', tabId === 'overview');
+        document.getElementById('tabBtnAnalytics').classList.toggle('active', tabId === 'analytics');
+        document.getElementById('panelOverview').classList.toggle('active', tabId === 'overview');
+        document.getElementById('panelAnalytics').classList.toggle('active', tabId === 'analytics');
+
+        const grpMonth = document.getElementById('grpMonth');
+        const grpStart = document.getElementById('grpStartDateTime');
+        const grpEnd = document.getElementById('grpEndDateTime');
+
+        if (tabId === 'overview') {
+            if (grpMonth) grpMonth.style.display = 'flex';
+            if (grpStart) grpStart.style.display = 'none';
+            if (grpEnd) grpEnd.style.display = 'none';
+        } else {
+            if (grpMonth) grpMonth.style.display = 'flex';
+            if (grpStart) grpStart.style.display = 'flex';
+            if (grpEnd) grpEnd.style.display = 'flex';
+        }
+
+        updateExportUrl();
+
+        if (tabId === 'overview' && !overviewLoaded) {
+            loadOverviewData();
+        } else if (tabId === 'analytics' && !analyticsLoaded) {
+            loadAnalyticsData();
+        }
+    }
+
+    function onFinYearOrMonthChange() {
         const fy = document.getElementById('selFinYear').value;
         const mo = document.getElementById('selMonth').value;
 
+        const parts = fy.split('-');
+        let startYear = parseInt(parts[0], 10) || 2026;
+
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const todayStr = `${yyyy}-${mm}-${dd}`;
+
+        let sDateTime = `${startYear}-04-01T00:00`;
+        let eDateTime = `${todayStr}T23:59`;
+
+        if (mo && mo.toLowerCase() !== 'all') {
+            const mNum = MONTH_NUMBERS[mo] || 4;
+            const y = mNum >= 4 ? startYear : (startYear + 1);
+            const mStr = String(mNum).padStart(2, '0');
+            sDateTime = `${y}-${mStr}-01T00:00`;
+            const lastDay = new Date(y, mNum, 0).getDate();
+            const lastDayStr = String(lastDay).padStart(2, '0');
+            eDateTime = `${y}-${mStr}-${lastDayStr}T23:59`;
+        } else {
+            if (startYear + 1 < yyyy || (startYear + 1 === yyyy && today.getMonth() >= 3)) {
+                eDateTime = `${startYear + 1}-03-31T23:59`;
+            } else {
+                eDateTime = `${todayStr}T23:59`;
+            }
+        }
+
+        const txtStart = document.getElementById('txtStartDateTime');
+        const txtEnd = document.getElementById('txtEndDateTime');
+        if (txtStart) txtStart.value = sDateTime;
+        if (txtEnd) txtEnd.value = eDateTime;
+
+        updateExportUrl();
+    }
+
+    function updateExportUrl() {
+        const fy = document.getElementById('selFinYear').value;
+        const mo = document.getElementById('selMonth').value;
+        const txtStart = document.getElementById('txtStartDateTime');
+        const txtEnd = document.getElementById('txtEndDateTime');
+        const sDateTime = txtStart ? txtStart.value : '';
+        const eDateTime = txtEnd ? txtEnd.value : '';
+
         const exportBtn = document.getElementById('btnExportExcel');
-        exportBtn.href = `/api/module/RP01/statistics-report/export?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}`;
+        if (currentTab === 'overview') {
+            exportBtn.href = `/api/module/RP01/statistics-report/export?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}`;
+        } else {
+            exportBtn.href = `/api/module/RP01/statistics-report/export-analytics?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}&start_date=${encodeURIComponent(sDateTime)}&end_date=${encodeURIComponent(eDateTime)}`;
+        }
+    }
+
+    function applyCurrentFilter() {
+        updateExportUrl();
+        if (currentTab === 'overview') {
+            loadOverviewData();
+        } else {
+            loadAnalyticsData();
+        }
+    }
+
+    async function loadOverviewData() {
+        const fy = document.getElementById('selFinYear').value;
+        const mo = document.getElementById('selMonth').value;
+
+        updateExportUrl();
 
         try {
             const res = await fetch(`/api/module/RP01/statistics-report/data?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}`);
             if (!res.ok) {
                 const err = await res.json();
-                alert('Error loading data: ' + (err.error || res.statusText));
+                alert('Error loading overview data: ' + (err.error || res.statusText));
                 return;
             }
-            reportData = await res.json();
-            renderReport(reportData);
+            const data = await res.json();
+            renderOverviewReport(data);
+            overviewLoaded = true;
         } catch (e) {
             console.error('Fetch error:', e);
-            alert('Failed to fetch report data: ' + e);
+            alert('Failed to fetch overview data: ' + e);
         }
     }
 
-    function exportExcel(e) {
-        // dynamic link
-    }
-
-    function renderReport(data) {
+    function renderOverviewReport(data) {
         if (!data) return;
-
         renderTerminalTable('tblOverviewTerminal', 'totOverviewTerminal', data.terminal_pipeline_cargo);
         renderAgentTable('tblOverviewAgent', 'totOverviewAgent', data.vessel_agent);
         renderFlagTable('tblOverviewFlag', 'totOverviewFlag', data.flag_wise);
@@ -501,8 +873,96 @@
         document.getElementById(totId).textContent = formatNumber(tot);
     }
 
+    /* TAB 2: ANALYTICS RENDERING */
+    async function loadAnalyticsData() {
+        const fy = document.getElementById('selFinYear').value;
+        const mo = document.getElementById('selMonth').value;
+        const txtStart = document.getElementById('txtStartDateTime');
+        const txtEnd = document.getElementById('txtEndDateTime');
+        const sDateTime = txtStart ? txtStart.value : '';
+        const eDateTime = txtEnd ? txtEnd.value : '';
+
+        updateExportUrl();
+
+        try {
+            const url = `/api/module/RP01/statistics-report/analytics-data?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}&start_date=${encodeURIComponent(sDateTime)}&end_date=${encodeURIComponent(eDateTime)}`;
+            const res = await fetch(url);
+            if (!res.ok) {
+                const err = await res.json();
+                alert('Error loading analytics data: ' + (err.error || res.statusText));
+                return;
+            }
+            const data = await res.json();
+            renderAnalyticsReport(data);
+            analyticsLoaded = true;
+        } catch (e) {
+            console.error('Fetch analytics error:', e);
+            alert('Failed to fetch analytics data: ' + e);
+        }
+    }
+
+    function renderAnalyticsReport(data) {
+        if (!data) return;
+
+        // Row 1
+        renderAnalyticsTable('tblAnalyticsTerminal', 'totAnalyticsTerminalQty', 'totAnalyticsTerminalPct', data.terminal_wise, false);
+        renderAnalyticsTable('tblAnalyticsPipeline', 'totAnalyticsPipelineQty', 'totAnalyticsPipelinePct', data.pipeline_wise, false);
+        renderAnalyticsTable('tblAnalyticsCargo', 'totAnalyticsCargoQty', 'totAnalyticsCargoPct', data.cargo_wise, false);
+        renderAnalyticsTable('tblAnalyticsCustomer', 'totAnalyticsCustomerQty', 'totAnalyticsCustomerPct', data.customer_wise, false);
+        renderAnalyticsTable('tblAnalyticsPipeUtil', 'totAnalyticsPipeUtilHours', 'totAnalyticsPipeUtilPct', data.pipeline_utilisation, true);
+
+        // Row 2
+        renderAnalyticsTable('tblAnalyticsAgent', 'totAnalyticsAgentQty', 'totAnalyticsAgentPct', data.vessel_agent_wise, false);
+        renderAnalyticsTable('tblAnalyticsFlag', 'totAnalyticsFlagQty', 'totAnalyticsFlagPct', data.flag_wise, false);
+        renderAnalyticsTable('tblAnalyticsPort', 'totAnalyticsPortQty', 'totAnalyticsPortPct', data.port_wise, false);
+        renderAnalyticsTable('tblAnalyticsPayment', 'totAnalyticsPaymentQty', 'totAnalyticsPaymentPct', data.payment_type_wise, false);
+        renderAnalyticsTable('tblAnalyticsEquipment', 'totAnalyticsEquipmentQty', 'totAnalyticsEquipmentPct', data.equipment_utilisation, false);
+
+        // Row 3
+        renderAnalyticsTable('tblAnalyticsRunType', 'totAnalyticsRunTypeQty', 'totAnalyticsRunTypePct', data.vessel_run_type_wise, false);
+        renderAnalyticsTable('tblAnalyticsOpType', 'totAnalyticsOpTypeQty', 'totAnalyticsOpTypePct', data.operation_type_wise, false);
+    }
+
+    function renderAnalyticsTable(tblId, totValId, totPctId, groupData, isHours) {
+        const tbody = document.querySelector(`#${tblId} tbody`);
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        const rows = (groupData && groupData.rows) ? groupData.rows : [];
+        rows.forEach(r => {
+            const tr = document.createElement('tr');
+            const valFormatted = isHours ? formatHours(r.hours) : formatNumber(r.qty_mt);
+            tr.innerHTML = `
+                <td><strong>${r.name || '-'}</strong></td>
+                <td class="text-right font-mono">${valFormatted}</td>
+                <td class="text-right font-mono pct-val">${formatPct(r.pct)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Filler row to ensure all tables have identical visual height and pin Total to the bottom
+        const fillerTr = document.createElement('tr');
+        fillerTr.className = 'table-filler-row';
+        fillerTr.innerHTML = '<td colspan="3"></td>';
+        tbody.appendChild(fillerTr);
+
+        const totalVal = isHours ? (groupData ? groupData.total_hours : 0) : (groupData ? groupData.total_qty : 0);
+        const totalPct = groupData ? groupData.total_pct : 100.0;
+
+        const totValEl = document.getElementById(totValId);
+        if (totValEl) {
+            totValEl.textContent = isHours ? formatHours(totalVal) : formatNumber(totalVal);
+        }
+        const totPctEl = document.getElementById(totPctId);
+        if (totPctEl) {
+            totPctEl.textContent = formatPct(totalPct);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
-        loadReportData();
+        onFinYearOrMonthChange();
+        loadOverviewData();
     });
 </script>
 {% endblock %}
+
