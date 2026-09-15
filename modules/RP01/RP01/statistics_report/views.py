@@ -1132,20 +1132,56 @@ def statistics_report_api_export():
 # MULTI-CATEGORY ANALYTICAL STATISTICS (TAB 2)
 # =============================================================================
 
-def get_detailed_analytics_data(fin_year: str, month: str = 'All', start_date_str: str = None, end_date_str: str = None):
+def get_detailed_analytics_data(
+    fin_year: str,
+    month: str = 'All',
+    start_date_str: str = None,
+    end_date_str: str = None
+):
     """
-    Query and aggregate the 12 analytical tables matching the reference Excel layout.
-    Supports either FY + Month filtering or custom start_date + end_date range.
+    Query and aggregate the analytical tables.
+
+    Customer logic:
+        vcn_consigners.consigner_name
+                    ↓
+              vessel_customers
+                    ↓
+         Customer Code + Customer Name
+                    ↓
+         Customer-wise quantity aggregation
+
+    Existing quantity logic:
+        LUEU handled quantity - Short Close quantity
+
+    Equipment utilisation:
+        Equipment quantity is calculated directly from
+        lueu_parcel_log equipment-wise.
     """
+
+    # -------------------------------------------------------------------------
+    # DATE RANGE
+    # -------------------------------------------------------------------------
     if start_date_str and end_date_str:
         s_dt = _parse_dt(start_date_str)
         e_dt = _parse_dt(end_date_str)
+
         if s_dt and e_dt:
             start_dt = s_dt
+
             if len(end_date_str.strip()) == 10:
-                end_dt = datetime.combine(e_dt.date(), datetime.max.time())
+                end_dt = datetime.combine(
+                    e_dt.date(),
+                    datetime.max.time()
+                )
             else:
-                end_dt = e_dt.replace(second=59, microsecond=999999) if e_dt.second == 0 else e_dt
+                end_dt = (
+                    e_dt.replace(
+                        second=59,
+                        microsecond=999999
+                    )
+                    if e_dt.second == 0
+                    else e_dt
+                )
         else:
             start_dt, end_dt, _ = _period_bounds(fin_year, month)
     else:
@@ -1153,16 +1189,238 @@ def get_detailed_analytics_data(fin_year: str, month: str = 'All', start_date_st
 
     conn = get_db()
     raw_items = []
+
+    # -------------------------------------------------------------------------
+    # EQUIPMENT-WISE TOTALS
+    #
+    # IMPORTANT:
+    # Do not calculate equipment utilisation from raw_items because one
+    # parcel operation can have multiple equipment entries.
+    #
+    # Example:
+    #     MLA-1 = 5000 MT
+    #     MLA-3 = 3000 MT
+    #
+    # Each equipment receives only its actual logged quantity.
+    # -------------------------------------------------------------------------
+    equipment_totals = {}
+
     try:
         cur = get_cursor(conn)
+
+        # ---------------------------------------------------------------------
+        # LOAD EXISTING MASTERS
+        # ---------------------------------------------------------------------
         masters = _load_masters(cur)
 
-        # 1. Fetch live operations
+        # ---------------------------------------------------------------------
+        # VESSEL CUSTOMER MASTER
+        #
+        # We intentionally inspect the table structure instead of assuming
+        # exact column names.
+        # ---------------------------------------------------------------------
+        customer_master = {}
+
+        try:
+            cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'vessel_customers'
+                ORDER BY ordinal_position
+            """)
+
+            customer_columns = [
+                row['column_name']
+                for row in cur.fetchall()
+            ]
+
+            # Normalize column names for matching.
+            normalized_columns = {
+                str(col).lower().replace('_', ''): col
+                for col in customer_columns
+            }
+
+            # -------------------------------------------------------------
+            # Find customer code column
+            # -------------------------------------------------------------
+            customer_code_col = None
+
+            code_candidates = [
+                'customer_code',
+                'customercode',
+                'customer_cd',
+                'customerid',
+                'customer_id',
+                'code',
+                'cust_code',
+                'custcode'
+            ]
+
+            for candidate in code_candidates:
+                key = candidate.lower().replace('_', '')
+
+                if key in normalized_columns:
+                    customer_code_col = normalized_columns[key]
+                    break
+
+            # -------------------------------------------------------------
+            # Find customer name column
+            # -------------------------------------------------------------
+            customer_name_col = None
+
+            name_candidates = [
+                'customer_name',
+                'customername',
+                'name',
+                'customer',
+                'cust_name',
+                'custname'
+            ]
+
+            for candidate in name_candidates:
+                key = candidate.lower().replace('_', '')
+
+                if key in normalized_columns:
+                    customer_name_col = normalized_columns[key]
+                    break
+
+            # -------------------------------------------------------------
+            # If exact candidates were not found, inspect columns
+            # -------------------------------------------------------------
+            if not customer_code_col:
+                for col in customer_columns:
+                    lc = str(col).lower()
+
+                    if (
+                        'customer' in lc
+                        and (
+                            'code' in lc
+                            or lc.endswith('cd')
+                            or lc.endswith('id')
+                        )
+                    ):
+                        customer_code_col = col
+                        break
+
+            if not customer_name_col:
+                for col in customer_columns:
+                    lc = str(col).lower()
+
+                    if (
+                        'customer' in lc
+                        and 'name' in lc
+                    ):
+                        customer_name_col = col
+                        break
+
+            # -------------------------------------------------------------
+            # Build customer master lookup
+            # -------------------------------------------------------------
+            if customer_code_col and customer_name_col:
+
+                safe_code_col = '"' + customer_code_col.replace('"', '""') + '"'
+                safe_name_col = '"' + customer_name_col.replace('"', '""') + '"'
+
+                cur.execute(f"""
+                    SELECT
+                        {safe_code_col} AS customer_code,
+                        {safe_name_col} AS customer_name
+                    FROM vessel_customers
+                """)
+
+                customer_rows = cur.fetchall()
+
+                for cm in customer_rows:
+
+                    code = str(
+                        cm['customer_code'] or ''
+                    ).strip()
+
+                    name = str(
+                        cm['customer_name'] or ''
+                    ).strip()
+
+                    if not code and not name:
+                        continue
+
+                    # Lookup by customer code.
+                    if code:
+                        customer_master[
+                            ('code', code.upper())
+                        ] = {
+                            'customer_code': code,
+                            'customer_name': name
+                        }
+
+                    # Lookup by customer name.
+                    if name:
+                        customer_master[
+                            ('name', name.upper())
+                        ] = {
+                            'customer_code': code,
+                            'customer_name': name
+                        }
+
+            else:
+                # Do not stop the entire report if the master structure
+                # cannot be resolved.
+                customer_master = {}
+
+        except Exception:
+            # Customer master must not break the complete report.
+            customer_master = {}
+
+        # ---------------------------------------------------------------------
+        # CUSTOMER RESOLVER
+        # ---------------------------------------------------------------------
+        def resolve_customer(raw_customer):
+            """
+            Resolve consigner/customer value against vessel_customers.
+
+            Returns:
+                {
+                    'customer_code': ...,
+                    'customer_name': ...
+                }
+            """
+
+            raw_customer = str(raw_customer or '').strip()
+
+            if not raw_customer:
+                return {
+                    'customer_code': '',
+                    'customer_name': 'Unspecified Customer'
+                }
+
+            # First try exact name match.
+            key_name = ('name', raw_customer.upper())
+
+            if key_name in customer_master:
+                return customer_master[key_name]
+
+            # Then try exact code match.
+            key_code = ('code', raw_customer.upper())
+
+            if key_code in customer_master:
+                return customer_master[key_code]
+
+            # If master does not contain the value, retain the original
+            # customer name rather than changing existing report behaviour.
+            return {
+                'customer_code': '',
+                'customer_name': raw_customer
+            }
+
+        # =========================================================================
+        # 1. FETCH LIVE OPERATIONS
+        # =========================================================================
         cur.execute("""
             SELECT
                 lh.id AS ldud_id,
                 lh.cast_off_datetime,
                 lh.discharge_completed,
+
                 vh.vcn_doc_num,
                 vh.via_number,
                 vh.vessel_name,
@@ -1171,7 +1429,9 @@ def get_detailed_analytics_data(fin_year: str, month: str = 'All', start_date_st
                 vh.operation_type,
                 vh.load_port,
                 vh.discharge_port,
+
                 ves.nationality AS vessel_nationality,
+
                 po.id AS po_id,
                 po.terminal_name,
                 po.cargo_name,
@@ -1179,105 +1439,616 @@ def get_detailed_analytics_data(fin_year: str, month: str = 'All', start_date_st
                 po.start_dt,
                 po.end_dt,
                 po.parcel_ids
+
             FROM ldud_header lh
-            JOIN vcn_header vh ON vh.id = lh.vcn_id
-            LEFT JOIN vessels ves ON (
-                ves.doc_num = split_part(COALESCE(vh.vessel_master_doc, ''), '/', 1)
-                OR UPPER(REPLACE(TRIM(ves.vessel_name), 'MT ', '')) = UPPER(REPLACE(TRIM(vh.vessel_name), 'MT ', ''))
-            )
-            JOIN ldud_parcel_ops po ON po.ldud_id = lh.id
+
+            JOIN vcn_header vh
+                ON vh.id = lh.vcn_id
+
+            LEFT JOIN vessels ves
+                ON (
+                    ves.doc_num =
+                        split_part(
+                            COALESCE(vh.vessel_master_doc, ''),
+                            '/',
+                            1
+                        )
+
+                    OR
+
+                    UPPER(
+                        REPLACE(
+                            TRIM(ves.vessel_name),
+                            'MT ',
+                            ''
+                        )
+                    )
+                    =
+                    UPPER(
+                        REPLACE(
+                            TRIM(vh.vessel_name),
+                            'MT ',
+                            ''
+                        )
+                    )
+                )
+
+            JOIN ldud_parcel_ops po
+                ON po.ldud_id = lh.id
+
             WHERE COALESCE(lh.is_deleted, FALSE) = FALSE
+
               AND (
-                  (lh.cast_off_datetime IS NOT NULL AND NULLIF(TRIM(lh.cast_off_datetime), '') IS NOT NULL)
-                  OR
-                  (lh.discharge_completed IS NOT NULL AND NULLIF(TRIM(lh.discharge_completed), '') IS NOT NULL)
+                    (
+                        lh.cast_off_datetime IS NOT NULL
+                        AND NULLIF(
+                            TRIM(lh.cast_off_datetime),
+                            ''
+                        ) IS NOT NULL
+                    )
+
+                    OR
+
+                    (
+                        lh.discharge_completed IS NOT NULL
+                        AND NULLIF(
+                            TRIM(lh.discharge_completed),
+                            ''
+                        ) IS NOT NULL
+                    )
               )
-            ORDER BY lh.cast_off_datetime, po.id
+
+            ORDER BY
+                lh.cast_off_datetime,
+                po.id
         """)
+
         live_rows = cur.fetchall()
 
+        # ---------------------------------------------------------------------
+        # PROCESS LIVE DATA
+        # ---------------------------------------------------------------------
         for r in live_rows:
-            dt_val = _parse_dt(r['cast_off_datetime']) or _parse_dt(r['discharge_completed'])
-            if not dt_val or dt_val < start_dt or dt_val > end_dt:
+
+            # Existing report date logic.
+            dt_val = (
+                _parse_dt(r['cast_off_datetime'])
+                or
+                _parse_dt(r['discharge_completed'])
+            )
+
+            if not dt_val:
+                continue
+
+            if dt_val < start_dt or dt_val > end_dt:
                 continue
 
             po_id = r['po_id']
-            op_type = (r['operation_type'] or '').strip().capitalize()
-            parcel_ids = [int(x.strip()) for x in str(r['parcel_ids'] or '').split(',') if x.strip().isdigit()]
-            tbl = 'vcn_export_cargo_declaration' if op_type == 'Export' else 'vcn_consigners'
+
+            # -----------------------------------------------------------------
+            # OPERATION TYPE
+            # -----------------------------------------------------------------
+            op_type = (
+                r['operation_type'] or ''
+            ).strip().capitalize()
+
+            # -----------------------------------------------------------------
+            # PARCEL IDS
+            # -----------------------------------------------------------------
+            parcel_ids = [
+                int(x.strip())
+                for x in str(r['parcel_ids'] or '').split(',')
+                if x.strip().isdigit()
+            ]
+
+            tbl = (
+                'vcn_export_cargo_declaration'
+                if op_type == 'Export'
+                else
+                'vcn_consigners'
+            )
+
             pipeline = ''
             customer = ''
             equipment = ''
+            terminal = (
+                r['terminal_name'] or ''
+            ).strip()
+
+            # -----------------------------------------------------------------
+            # PARCEL INFORMATION
+            # -----------------------------------------------------------------
             if parcel_ids:
-                cur.execute(f"""
-                    SELECT pipeline_name, unload_terminal, consigner_name, equipment_names
-                    FROM {tbl}
-                    WHERE id = ANY(%s)
-                """, [parcel_ids])
+
+                cur.execute(
+                    f"""
+                        SELECT
+                            pipeline_name,
+                            unload_terminal,
+                            consigner_name,
+                            equipment_names
+
+                        FROM {tbl}
+
+                        WHERE id = ANY(%s)
+                    """,
+                    [parcel_ids]
+                )
+
                 p_rows = cur.fetchall()
-                pipes = list(dict.fromkeys(p['pipeline_name'].strip() for p in p_rows if p['pipeline_name'] and p['pipeline_name'].strip()))
-                custs = list(dict.fromkeys(p['consigner_name'].strip() for p in p_rows if p['consigner_name'] and p['consigner_name'].strip()))
-                eqs = list(dict.fromkeys(p['equipment_names'].strip() for p in p_rows if p['equipment_names'] and p['equipment_names'].strip()))
+
+                pipes = list(
+                    dict.fromkeys(
+                        p['pipeline_name'].strip()
+                        for p in p_rows
+                        if (
+                            p['pipeline_name']
+                            and p['pipeline_name'].strip()
+                        )
+                    )
+                )
+
+                custs = list(
+                    dict.fromkeys(
+                        p['consigner_name'].strip()
+                        for p in p_rows
+                        if (
+                            p['consigner_name']
+                            and p['consigner_name'].strip()
+                        )
+                    )
+                )
+
+                eqs = list(
+                    dict.fromkeys(
+                        p['equipment_names'].strip()
+                        for p in p_rows
+                        if (
+                            p['equipment_names']
+                            and p['equipment_names'].strip()
+                        )
+                    )
+                )
+
                 pipeline = ', '.join(pipes)
+
+                # -------------------------------------------------------------
+                # Existing raw customer extraction
+                # -------------------------------------------------------------
                 customer = ', '.join(custs)
+
+                # -------------------------------------------------------------
+                # Equipment from parcel master is retained only as fallback
+                # display information.
+                #
+                # Actual Equipment Utilisation is calculated below from
+                # lueu_parcel_log.
+                # -------------------------------------------------------------
                 equipment = ', '.join(eqs)
 
+                # -------------------------------------------------------------
+                # Terminal fallback
+                # -------------------------------------------------------------
+                if not terminal:
+
+                    terms = list(
+                        dict.fromkeys(
+                            p['unload_terminal'].strip()
+                            for p in p_rows
+                            if (
+                                p['unload_terminal']
+                                and p['unload_terminal'].strip()
+                            )
+                        )
+                    )
+
+                    terminal = ', '.join(terms)
+
+            # -----------------------------------------------------------------
+            # CUSTOMER MASTER RESOLUTION
+            # -----------------------------------------------------------------
+            customer_master_values = []
+
+            for customer_value in (
+                customer.split(',')
+                if customer
+                else []
+            ):
+
+                customer_value = customer_value.strip()
+
+                if not customer_value:
+                    continue
+
+                resolved = resolve_customer(customer_value)
+
+                customer_master_values.append(resolved)
+
+            # Keep unique customer codes/names.
+            unique_customer_codes = []
+            unique_customer_names = []
+
+            for cm in customer_master_values:
+
+                code = (
+                    cm.get('customer_code') or ''
+                ).strip()
+
+                name = (
+                    cm.get('customer_name') or ''
+                ).strip()
+
+                if code and code not in unique_customer_codes:
+                    unique_customer_codes.append(code)
+
+                if name and name not in unique_customer_names:
+                    unique_customer_names.append(name)
+
+            customer_code = ', '.join(unique_customer_codes)
+
+            customer_name = ', '.join(unique_customer_names)
+
+            # -----------------------------------------------------------------
+            # LUEU QUANTITY
+            #
+            # Overall quantity:
+            #     Handled Qty - Short Close Qty
+            #
+            # Equipment utilisation:
+            #     Actual equipment-wise quantity from lueu_parcel_log.
+            # -----------------------------------------------------------------
             cur.execute("""
                 SELECT
-                    COALESCE(SUM(quantity), 0) AS handled_qty,
-                    COALESCE(SUM(CASE
-                        WHEN COALESCE(is_shortclose, FALSE) = TRUE
-                          OR LOWER(COALESCE(remarks, '')) LIKE '%%short%%close%%'
-                        THEN quantity ELSE 0 END
-                    ), 0) AS sc_qty,
-                    STRING_AGG(DISTINCT equipment_name, ', ') AS eq_names,
+                    COALESCE(
+                        SUM(quantity),
+                        0
+                    ) AS handled_qty,
+
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN
+                                    COALESCE(
+                                        is_shortclose,
+                                        FALSE
+                                    ) = TRUE
+
+                                    OR
+
+                                    LOWER(
+                                        COALESCE(
+                                            remarks,
+                                            ''
+                                        )
+                                    ) LIKE '%%short%%close%%'
+
+                                THEN quantity
+
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS sc_qty,
+
                     COUNT(*) AS log_count
+
                 FROM lueu_parcel_log
-                WHERE parcel_op_id = %s AND is_deleted IS NOT TRUE
+
+                WHERE parcel_op_id = %s
+
+                  AND is_deleted IS NOT TRUE
+
             """, [po_id])
+
             log_res = cur.fetchone()
-            if log_res and log_res['log_count'] > 0:
-                qty = float(log_res['handled_qty'] or 0.0) - float(log_res['sc_qty'] or 0.0)
-                if log_res['eq_names']:
-                    equipment = log_res['eq_names']
+
+            if (
+                log_res
+                and log_res['log_count'] > 0
+            ):
+
+                # -------------------------------------------------------------
+                # Overall operation quantity
+                # -------------------------------------------------------------
+                qty = (
+                    float(
+                        log_res['handled_qty']
+                        or 0.0
+                    )
+                    -
+                    float(
+                        log_res['sc_qty']
+                        or 0.0
+                    )
+                )
+
+                # -------------------------------------------------------------
+                # ACTUAL EQUIPMENT-WISE QUANTITY
+                #
+                # IMPORTANT:
+                # Do NOT use STRING_AGG here.
+                #
+                # Every equipment receives only its own quantity.
+                # -------------------------------------------------------------
+                cur.execute("""
+                    SELECT
+                        NULLIF(
+                            TRIM(equipment_name),
+                            ''
+                        ) AS equipment_name,
+
+                        COALESCE(
+                            SUM(
+                                CASE
+                                    WHEN
+                                        COALESCE(
+                                            is_shortclose,
+                                            FALSE
+                                        ) = TRUE
+
+                                        OR
+
+                                        LOWER(
+                                            COALESCE(
+                                                remarks,
+                                                ''
+                                            )
+                                        ) LIKE '%%short%%close%%'
+
+                                    THEN 0
+
+                                    ELSE COALESCE(
+                                        quantity,
+                                        0
+                                    )
+                                END
+                            ),
+                            0
+                        ) AS equipment_qty
+
+                    FROM lueu_parcel_log
+
+                    WHERE parcel_op_id = %s
+                      AND is_deleted IS NOT TRUE
+
+                    GROUP BY
+                        NULLIF(
+                            TRIM(equipment_name),
+                            ''
+                        )
+
+                    ORDER BY
+                        NULLIF(
+                            TRIM(equipment_name),
+                            ''
+                        )
+                """, [po_id])
+
+                equipment_rows = cur.fetchall()
+
+                for eq_row in equipment_rows:
+
+                    eq_name = (
+                        eq_row['equipment_name']
+                        or
+                        '-'
+                    ).strip()
+
+                    eq_qty = float(
+                        eq_row['equipment_qty']
+                        or 0.0
+                    )
+
+                    if eq_qty <= 0:
+                        continue
+
+                    equipment_totals[eq_name] = (
+                        equipment_totals.get(
+                            eq_name,
+                            0.0
+                        )
+                        +
+                        eq_qty
+                    )
+
             else:
-                qty = float(r['po_qty'] or 0.0)
+                # No LUEU log available.
+                qty = float(
+                    r['po_qty']
+                    or 0.0
+                )
 
-            # Pumping duration hours = end_dt - start_dt
-            s_dt = _parse_dt(r['start_dt'])
-            e_dt = _parse_dt(r['end_dt'])
+            # -----------------------------------------------------------------
+            # PUMPING DURATION
+            # -----------------------------------------------------------------
+            s_dt = _parse_dt(
+                r['start_dt']
+            )
+
+            e_dt = _parse_dt(
+                r['end_dt']
+            )
+
             duration_hours = 0.0
-            if s_dt and e_dt and e_dt > s_dt:
-                duration_hours = round((e_dt - s_dt).total_seconds() / 3600.0, 2)
 
-            raw_run = (r['vessel_run_type'] or '').strip()
-            run_type = 'Foreign' if ('fore' in raw_run.lower() or raw_run.lower() == 'f') else ('Costal' if ('cost' in raw_run.lower() or 'coast' in raw_run.lower() or 'ind' in raw_run.lower()) else raw_run)
-            flag = (r['vessel_nationality'] or '').strip() or ('Foreign' if run_type == 'Foreign' else 'India')
-            port_val = (r['load_port'] or r['discharge_port'] or '').strip()
-            _, port_name = _resolve_port(port_val, '', masters)
+            if (
+                s_dt
+                and
+                e_dt
+                and
+                e_dt > s_dt
+            ):
+                duration_hours = round(
+                    (
+                        e_dt - s_dt
+                    ).total_seconds()
+                    / 3600.0,
+                    2
+                )
 
-            raw_cargo = _resolve_cargo_sub_category_2(r['cargo_name'], None, masters)
+            # -----------------------------------------------------------------
+            # VESSEL RUN TYPE
+            # -----------------------------------------------------------------
+            raw_run = (
+                r['vessel_run_type']
+                or ''
+            ).strip()
 
+            run_type = (
+                'Foreign'
+                if (
+                    'fore' in raw_run.lower()
+                    or raw_run.lower() == 'f'
+                )
+
+                else
+
+                (
+                    'Costal'
+                    if (
+                        'cost' in raw_run.lower()
+                        or 'coast' in raw_run.lower()
+                        or 'ind' in raw_run.lower()
+                    )
+
+                    else raw_run
+                )
+            )
+
+            # -----------------------------------------------------------------
+            # FLAG
+            # -----------------------------------------------------------------
+            flag = (
+                r['vessel_nationality']
+                or ''
+            ).strip()
+
+            if not flag:
+                flag = (
+                    'Foreign'
+                    if run_type == 'Foreign'
+                    else 'India'
+                )
+
+            # -----------------------------------------------------------------
+            # PORT
+            # -----------------------------------------------------------------
+            port_val = (
+                r['load_port']
+                or
+                r['discharge_port']
+                or
+                ''
+            ).strip()
+
+            _, port_name = _resolve_port(
+                port_val,
+                '',
+                masters
+            )
+
+            # -----------------------------------------------------------------
+            # CARGO
+            # -----------------------------------------------------------------
+            raw_cargo = _resolve_cargo_sub_category_2(
+                r['cargo_name'],
+                None,
+                masters
+            )
+
+            # -----------------------------------------------------------------
+            # APPEND LIVE ITEM
+            # -----------------------------------------------------------------
             raw_items.append({
+
                 'source': 'Live',
-                'terminal': (r['terminal_name'] or '').strip() or 'Unspecified Terminal',
-                'pipeline': pipeline or 'Unspecified Pipeline',
-                'cargo': raw_cargo,
-                'customer': customer or 'Unspecified Customer',
-                'payment_by': customer or 'Direct',
-                'duration_hours': duration_hours,
-                'agent_name': (r['vessel_agent_name'] or '').strip() or 'Unspecified Agent',
-                'flag_name': flag or 'Unspecified Flag',
-                'port_name': port_name or 'Unspecified Port',
-                'equipment_name': equipment or 'MLA-1',
-                'run_type': run_type or 'Foreign',
-                'operation_type': op_type or 'Import',
-                'qty_mt': max(qty, 0.0)
+
+                'terminal':
+                    terminal
+                    or
+                    '-',
+
+                # Blank pipeline means Flexible Hose.
+                'pipeline':
+                    pipeline
+                    or
+                    'Flexible Hose',
+
+                'cargo':
+                    raw_cargo,
+
+                # Customer Name used for display.
+                'customer':
+                    customer_name
+                    or
+                    customer
+                    or
+                    '-',
+
+                # Customer Code retained separately.
+                'customer_code':
+                    customer_code,
+
+                'payment_by':
+                    customer_name
+                    or
+                    customer
+                    or
+                    'Direct',
+
+                'duration_hours':
+                    duration_hours,
+
+                'agent_name':
+                    (
+                        r['vessel_agent_name']
+                        or ''
+                    ).strip()
+                    or
+                    'Unspecified Agent',
+
+                'flag_name':
+                    flag
+                    or
+                    'Unspecified Flag',
+
+                'port_name':
+                    port_name
+                    or
+                    'Unspecified Port',
+
+                # Do not force missing equipment to MLA-1.
+                #
+                # Actual Equipment Utilisation comes from
+                # equipment_totals.
+                'equipment_name':
+                    equipment
+                    or
+                    'Unspecified Equipment',
+
+                'run_type':
+                    run_type
+                    or
+                    'Foreign',
+
+                'operation_type':
+                    op_type
+                    or
+                    'Import',
+
+                'qty_mt':
+                    max(
+                        qty,
+                        0.0
+                    )
             })
 
-        # 2. Fetch historical records
+        # =========================================================================
+        # 2. FETCH HISTORICAL RECORDS
+        # =========================================================================
         cur.execute("""
             SELECT
+
                 mh.terminal,
                 mh.cargo_name,
                 mh.cargo_type,
@@ -1287,6 +2058,7 @@ def get_detailed_analytics_data(fin_year: str, month: str = 'All', start_date_st
                 mh.quantity,
                 mh.overseas_coastal,
                 mh.import_export,
+
                 mvm.month,
                 mvm.agent,
                 mvm.flag,
@@ -1296,101 +2068,695 @@ def get_detailed_analytics_data(fin_year: str, month: str = 'All', start_date_st
                 mvm.cargo_completion,
                 mvm.cast_off,
                 mvm.sail_cast_off
+
             FROM mis_history mh
-            LEFT JOIN mis_vessel_master mvm ON mvm.vcn_no = mh.vcn_no
+
+            LEFT JOIN mis_vessel_master mvm
+                ON mvm.vcn_no = mh.vcn_no
+
             WHERE mh.fin_year = %s
+
         """, [fin_year])
+
         hist_rows = cur.fetchall()
 
+        # ---------------------------------------------------------------------
+        # PROCESS HISTORICAL DATA
+        # ---------------------------------------------------------------------
         for h in hist_rows:
-            dt_val = _parse_dt(h['cast_off']) or _parse_dt(h['sail_cast_off']) or _parse_dt(h['cargo_completion'])
+
+            dt_val = (
+                _parse_dt(h['cast_off'])
+                or
+                _parse_dt(h['sail_cast_off'])
+                or
+                _parse_dt(h['cargo_completion'])
+            )
+
             if dt_val:
-                if dt_val < start_dt or dt_val > end_dt:
+
+                if (
+                    dt_val < start_dt
+                    or
+                    dt_val > end_dt
+                ):
                     continue
+
             else:
-                m_text = str(h.get('month') or '').strip()
-                if month and month.lower() != 'all':
-                    m_short = month[:3].lower()
-                    if m_short not in m_text.lower():
+
+                m_text = str(
+                    h.get('month')
+                    or
+                    ''
+                ).strip()
+
+                if (
+                    month
+                    and
+                    month.lower() != 'all'
+                ):
+
+                    m_short = (
+                        month[:3]
+                        .lower()
+                    )
+
+                    if (
+                        m_short
+                        not in
+                        m_text.lower()
+                    ):
                         continue
 
-            s_dt = _parse_dt(h['ops_commenced'])
-            e_dt = _parse_dt(h['cargo_completion'])
+            # -----------------------------------------------------------------
+            # DURATION
+            # -----------------------------------------------------------------
+            s_dt = _parse_dt(
+                h['ops_commenced']
+            )
+
+            e_dt = _parse_dt(
+                h['cargo_completion']
+            )
+
             duration_hours = 0.0
-            if s_dt and e_dt and e_dt > s_dt:
-                duration_hours = round((e_dt - s_dt).total_seconds() / 3600.0, 2)
 
-            raw_run = (h['overseas_coastal'] or '').strip()
-            run_type = 'Foreign' if ('over' in raw_run.lower() or 'fore' in raw_run.lower()) else 'Costal'
-            op_type = (h['import_export'] or 'Import').strip().capitalize()
-            raw_cargo = _resolve_cargo_sub_category_2(h['cargo_name'] or h['cargo_type'], h.get('cargo_sub_category_2'), masters)
+            if (
+                s_dt
+                and
+                e_dt
+                and
+                e_dt > s_dt
+            ):
 
+                duration_hours = round(
+                    (
+                        e_dt - s_dt
+                    ).total_seconds()
+                    / 3600.0,
+                    2
+                )
+
+            # -----------------------------------------------------------------
+            # RUN TYPE
+            # -----------------------------------------------------------------
+            raw_run = (
+                h['overseas_coastal']
+                or
+                ''
+            ).strip()
+
+            run_type = (
+                'Foreign'
+                if (
+                    'over'
+                    in raw_run.lower()
+
+                    or
+
+                    'fore'
+                    in raw_run.lower()
+                )
+
+                else
+
+                'Costal'
+            )
+
+            # -----------------------------------------------------------------
+            # OPERATION TYPE
+            # -----------------------------------------------------------------
+            op_type = (
+                h['import_export']
+                or
+                'Import'
+            ).strip().capitalize()
+
+            # -----------------------------------------------------------------
+            # CARGO
+            # -----------------------------------------------------------------
+            raw_cargo = _resolve_cargo_sub_category_2(
+                h['cargo_name']
+                or
+                h['cargo_type'],
+                h.get('cargo_sub_category_2'),
+                masters
+            )
+
+            # -----------------------------------------------------------------
+            # HISTORICAL CUSTOMER MASTER LOOKUP
+            # -----------------------------------------------------------------
+            historical_customer = (
+                h['customer']
+                or
+                ''
+            ).strip()
+
+            historical_customer_resolved = resolve_customer(
+                historical_customer
+            )
+
+            historical_customer_code = (
+                historical_customer_resolved.get(
+                    'customer_code'
+                )
+                or
+                ''
+            ).strip()
+
+            historical_customer_name = (
+                historical_customer_resolved.get(
+                    'customer_name'
+                )
+                or
+                historical_customer
+                or
+                'Unspecified Customer'
+            ).strip()
+
+            # -----------------------------------------------------------------
+            # APPEND HISTORICAL ITEM
+            # -----------------------------------------------------------------
             raw_items.append({
+
                 'source': 'Historical',
-                'terminal': (h['terminal'] or '').strip() or 'Unspecified Terminal',
-                'pipeline': (h['unload_pipeline'] or '').strip() or 'Unspecified Pipeline',
-                'cargo': raw_cargo,
-                'customer': (h['customer'] or '').strip() or 'Unspecified Customer',
-                'payment_by': (h['payment_by'] or '').strip() or 'Unspecified Payment',
-                'duration_hours': duration_hours,
-                'agent_name': (h['agent'] or '').strip() or 'Unspecified Agent',
-                'flag_name': (h['flag'] or '').strip() or ('Foreign' if run_type == 'Foreign' else 'India'),
-                'port_name': (h['port_of_loading'] or '').strip() or 'Unspecified Port',
-                'equipment_name': 'MLA-1',
-                'run_type': run_type,
-                'operation_type': op_type,
-                'qty_mt': float(h['quantity'] or 0.0)
+
+                'terminal':
+                    (
+                        h['terminal']
+                        or
+                        ''
+                    ).strip()
+                    or
+                    'Unspecified Terminal',
+
+                # Blank historical pipeline means Flexible Hose.
+                'pipeline':
+                    (
+                        h['unload_pipeline']
+                        or
+                        ''
+                    ).strip()
+                    or
+                    'Flexible Hose',
+
+                'cargo':
+                    raw_cargo,
+
+                'customer':
+                    historical_customer_name,
+
+                'customer_code':
+                    historical_customer_code,
+
+                'payment_by':
+                    (
+                        h['payment_by']
+                        or
+                        ''
+                    ).strip()
+                    or
+                    'Unspecified Payment',
+
+                'duration_hours':
+                    duration_hours,
+
+                'agent_name':
+                    (
+                        h['agent']
+                        or
+                        ''
+                    ).strip()
+                    or
+                    'Unspecified Agent',
+
+                'flag_name':
+                    (
+                        h['flag']
+                        or
+                        ''
+                    ).strip()
+                    or
+                    (
+                        'Foreign'
+                        if run_type == 'Foreign'
+                        else
+                        'India'
+                    ),
+
+                'port_name':
+                    (
+                        h['port_of_loading']
+                        or
+                        ''
+                    ).strip()
+                    or
+                    'Unspecified Port',
+
+                # Historical source does not provide actual equipment-wise
+                # equipment log information in this function.
+                #
+                # Do NOT put historical quantity into MLA-1.
+                'equipment_name':
+                    'Unspecified Equipment',
+
+                'run_type':
+                    run_type,
+
+                'operation_type':
+                    op_type,
+
+                'qty_mt':
+                    float(
+                        h['quantity']
+                        or
+                        0.0
+                    )
             })
 
     finally:
         conn.close()
 
+    # =========================================================================
+    # GENERIC QUANTITY AGGREGATION
+    # =========================================================================
     def _agg_qty(key):
-        totals = {}
-        for it in raw_items:
-            k = it.get(key) or 'Unspecified'
-            totals[k] = totals.get(k, 0.0) + it['qty_mt']
-        grand_total = sum(totals.values())
-        rows = []
-        for k, v in sorted(totals.items(), key=lambda x: -x[1]):
-            pct = (v / grand_total * 100.0) if grand_total > 0 else 0.0
-            rows.append({'name': k, 'qty_mt': round(v, 3), 'pct': round(pct, 1)})
-        return {'rows': rows, 'total_qty': round(grand_total, 3), 'total_pct': 100.0 if grand_total > 0 else 0.0}
 
+        totals = {}
+
+        for it in raw_items:
+
+            k = (
+                it.get(key)
+                or
+                'Unspecified'
+            )
+
+            totals[k] = (
+                totals.get(k, 0.0)
+                +
+                it['qty_mt']
+            )
+
+        grand_total = sum(
+            totals.values()
+        )
+
+        rows = []
+
+        for k, v in sorted(
+            totals.items(),
+            key=lambda x: -x[1]
+        ):
+
+            pct = (
+                v / grand_total * 100.0
+                if grand_total > 0
+                else 0.0
+            )
+
+            rows.append({
+                'name': k,
+                'qty_mt': round(
+                    v,
+                    3
+                ),
+                'pct': round(
+                    pct,
+                    1
+                )
+            })
+
+        return {
+            'rows': rows,
+
+            'total_qty':
+                round(
+                    grand_total,
+                    3
+                ),
+
+            'total_pct':
+                100.0
+                if grand_total > 0
+                else 0.0
+        }
+
+    # =========================================================================
+    # CUSTOMER-WISE AGGREGATION
+    #
+    # IMPORTANT:
+    # Same Customer Code is combined into one row.
+    #
+    # Display:
+    #     CUSTOMER_CODE - CUSTOMER_NAME
+    #
+    # If a record has no master code, its original customer name is retained.
+    # =========================================================================
+    def _agg_customer():
+
+        totals = {}
+
+        for it in raw_items:
+
+            customer_code = (
+                it.get('customer_code')
+                or
+                ''
+            ).strip()
+
+            customer_name = (
+                it.get('customer')
+                or
+                'Unspecified Customer'
+            ).strip()
+
+            if customer_code:
+
+                key = customer_code.upper()
+
+                display_name = (
+                    f"{customer_code} - "
+                    f"{customer_name}"
+                )
+
+            else:
+
+                key = (
+                    'NAME:'
+                    +
+                    customer_name.upper()
+                )
+
+                display_name = customer_name
+
+            if key not in totals:
+
+                totals[key] = {
+
+                    'customer_code':
+                        customer_code,
+
+                    'customer_name':
+                        customer_name,
+
+                    'display_name':
+                        display_name,
+
+                    'qty_mt':
+                        0.0
+                }
+
+            totals[key]['qty_mt'] += (
+                it['qty_mt']
+            )
+
+        grand_total = sum(
+            x['qty_mt']
+            for x in totals.values()
+        )
+
+        rows = []
+
+        for item in sorted(
+            totals.values(),
+            key=lambda x: -x['qty_mt']
+        ):
+
+            qty = item['qty_mt']
+
+            pct = (
+                qty / grand_total * 100.0
+                if grand_total > 0
+                else 0.0
+            )
+
+            rows.append({
+
+                'name':
+                    item['display_name'],
+
+                'customer_code':
+                    item['customer_code'],
+
+                'customer_name':
+                    item['customer_name'],
+
+                'qty_mt':
+                    round(
+                        qty,
+                        3
+                    ),
+
+                'pct':
+                    round(
+                        pct,
+                        1
+                    )
+            })
+
+        return {
+            'rows': rows,
+
+            'total_qty':
+                round(
+                    grand_total,
+                    3
+                ),
+
+            'total_pct':
+                100.0
+                if grand_total > 0
+                else 0.0
+        }
+
+    # =========================================================================
+    # PIPELINE UTILISATION
+    # =========================================================================
     def _agg_pipeline_hours():
-        totals = {}
-        for it in raw_items:
-            pipe = it.get('pipeline') or 'Unspecified Pipeline'
-            totals[pipe] = totals.get(pipe, 0.0) + it['duration_hours']
-        grand_total = sum(totals.values())
-        rows = []
-        for k, v in sorted(totals.items(), key=lambda x: -x[1]):
-            pct = (v / grand_total * 100.0) if grand_total > 0 else 0.0
-            rows.append({'name': k, 'hours': round(v, 2), 'pct': round(pct, 1)})
-        return {'rows': rows, 'total_hours': round(grand_total, 2), 'total_pct': 100.0 if grand_total > 0 else 0.0}
 
+        totals = {}
+
+        for it in raw_items:
+
+            pipe = (
+                it.get('pipeline')
+                or
+                'Flexible Hose'
+            )
+
+            totals[pipe] = (
+                totals.get(pipe, 0.0)
+                +
+                it['duration_hours']
+            )
+
+        grand_total = sum(
+            totals.values()
+        )
+
+        rows = []
+
+        for k, v in sorted(
+            totals.items(),
+            key=lambda x: -x[1]
+        ):
+
+            pct = (
+                v / grand_total * 100.0
+                if grand_total > 0
+                else 0.0
+            )
+
+            rows.append({
+                'name': k,
+                'hours': round(
+                    v,
+                    2
+                ),
+                'pct': round(
+                    pct,
+                    1
+                )
+            })
+
+        return {
+            'rows': rows,
+
+            'total_hours':
+                round(
+                    grand_total,
+                    2
+                ),
+
+            'total_pct':
+                100.0
+                if grand_total > 0
+                else 0.0
+        }
+
+    # =========================================================================
+    # EQUIPMENT UTILISATION
+    #
+    # IMPORTANT:
+    # This is NOT calculated from raw_items.
+    #
+    # It uses actual equipment-wise quantity from lueu_parcel_log.
+    #
+    # Therefore:
+    #     MLA-1 -> actual MLA-1 quantity
+    #     MLA-3 -> actual MLA-3 quantity
+    #     Flexible Hose / other equipment -> actual logged quantity
+    #
+    # No missing equipment quantity is automatically assigned to MLA-1.
+    # =========================================================================
+    def _agg_equipment():
+
+        totals = dict(
+            equipment_totals
+        )
+
+        grand_total = sum(
+            totals.values()
+        )
+
+        rows = []
+
+        for equipment_name, qty in sorted(
+            totals.items(),
+            key=lambda x: -x[1]
+        ):
+
+            pct = (
+                qty / grand_total * 100.0
+                if grand_total > 0
+                else 0.0
+            )
+
+            rows.append({
+                'name':
+                    equipment_name,
+
+                'qty_mt':
+                    round(
+                        qty,
+                        3
+                    ),
+
+                'pct':
+                    round(
+                        pct,
+                        1
+                    )
+            })
+
+        return {
+            'rows':
+                rows,
+
+            'total_qty':
+                round(
+                    grand_total,
+                    3
+                ),
+
+            'total_pct':
+                100.0
+                if grand_total > 0
+                else 0.0
+        }
+
+    # =========================================================================
+    # FINAL RESPONSE
+    # =========================================================================
     return {
-        'terminal_wise': _agg_qty('terminal'),
-        'pipeline_wise': _agg_qty('pipeline'),
-        'cargo_wise': _agg_qty('cargo'),
-        'customer_wise': _agg_qty('customer'),
-        'pipeline_utilisation': _agg_pipeline_hours(),
-        'vessel_agent_wise': _agg_qty('agent_name'),
-        'flag_wise': _agg_qty('flag_name'),
-        'port_wise': _agg_qty('port_name'),
-        'payment_type_wise': _agg_qty('payment_by'),
-        'equipment_utilisation': _agg_qty('equipment_name'),
-        'vessel_run_type_wise': _agg_qty('run_type'),
-        'operation_type_wise': _agg_qty('operation_type'),
+
+        'terminal_wise':
+            _agg_qty('terminal'),
+
+        'pipeline_wise':
+            _agg_qty('pipeline'),
+
+        'cargo_wise':
+            _agg_qty('cargo'),
+
+        # -------------------------------------------------------------
+        # CUSTOMER MASTER BASED
+        # -------------------------------------------------------------
+        'customer_wise':
+            _agg_customer(),
+
+        'pipeline_utilisation':
+            _agg_pipeline_hours(),
+
+        'vessel_agent_wise':
+            _agg_qty('agent_name'),
+
+        'flag_wise':
+            _agg_qty('flag_name'),
+
+        'port_wise':
+            _agg_qty('port_name'),
+
+        'payment_type_wise':
+            _agg_qty('payment_by'),
+
+        # IMPORTANT:
+        # Equipment utilisation now comes from actual
+        # lueu_parcel_log equipment-wise quantities.
+        'equipment_utilisation':
+            _agg_equipment(),
+
+        'vessel_run_type_wise':
+            _agg_qty('run_type'),
+
+        'operation_type_wise':
+            _agg_qty('operation_type'),
+
         'meta': {
-            'fin_year': fin_year,
-            'month': month or 'All',
-            'start_date': start_dt.strftime('%d-%m-%Y %H:%M') if (start_dt.hour or start_dt.minute) else start_dt.strftime('%d-%m-%Y'),
-            'end_date': end_dt.strftime('%d-%m-%Y %H:%M') if (end_dt.hour != 23 or end_dt.minute != 59) else end_dt.strftime('%d-%m-%Y'),
-            'record_count': len(raw_items)
+
+            'fin_year':
+                fin_year,
+
+            'month':
+                month or 'All',
+
+            'start_date':
+                (
+                    start_dt.strftime(
+                        '%d-%m-%Y %H:%M'
+                    )
+                    if (
+                        start_dt.hour
+                        or
+                        start_dt.minute
+                    )
+                    else
+                    start_dt.strftime(
+                        '%d-%m-%Y'
+                    )
+                ),
+
+            'end_date':
+                (
+                    end_dt.strftime(
+                        '%d-%m-%Y %H:%M'
+                    )
+                    if (
+                        end_dt.hour != 23
+                        or
+                        end_dt.minute != 59
+                    )
+                    else
+                    end_dt.strftime(
+                        '%d-%m-%Y'
+                    )
+                ),
+
+            'record_count':
+                len(raw_items)
         }
     }
-
 
 @bp.route('/api/module/RP01/statistics-report/analytics-data', methods=['GET'])
 @login_required
