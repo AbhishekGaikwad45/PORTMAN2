@@ -535,9 +535,9 @@
                     <div class="report-box-header"><div class="report-box-title">Customerwise</div></div>
                     <div class="table-container">
                         <table class="data-table" id="tblAnalyticsCustomer">
-                            <thead><tr><th>Customer Name</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <thead><tr><th>Customer Code</th><th>Pipeline</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
                             <tbody></tbody>
-                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsCustomerQty">0.000</td><td class="text-right font-mono" id="totAnalyticsCustomerPct">100.0%</td></tr></tfoot>
+                            <tfoot><tr><td colspan="2">Total</td><td class="text-right font-mono" id="totAnalyticsCustomerQty">0.000</td><td class="text-right font-mono" id="totAnalyticsCustomerPct">100.0%</td></tr></tfoot>
                         </table>
                     </div>
                 </div>
@@ -908,7 +908,7 @@
         renderAnalyticsTable('tblAnalyticsTerminal', 'totAnalyticsTerminalQty', 'totAnalyticsTerminalPct', data.terminal_wise, false);
         renderAnalyticsTable('tblAnalyticsPipeline', 'totAnalyticsPipelineQty', 'totAnalyticsPipelinePct', data.pipeline_wise, false);
         renderAnalyticsTable('tblAnalyticsCargo', 'totAnalyticsCargoQty', 'totAnalyticsCargoPct', data.cargo_wise, false);
-        renderAnalyticsTable('tblAnalyticsCustomer', 'totAnalyticsCustomerQty', 'totAnalyticsCustomerPct', data.customer_wise, false);
+        renderCustomerTable('tblAnalyticsCustomer', 'totAnalyticsCustomerQty', 'totAnalyticsCustomerPct', data.customer_wise);
         renderAnalyticsTable('tblAnalyticsPipeUtil', 'totAnalyticsPipeUtilHours', 'totAnalyticsPipeUtilPct', data.pipeline_utilisation, true);
 
         // Row 2
@@ -921,6 +921,39 @@
         // Row 3
         renderAnalyticsTable('tblAnalyticsRunType', 'totAnalyticsRunTypeQty', 'totAnalyticsRunTypePct', data.vessel_run_type_wise, false);
         renderAnalyticsTable('tblAnalyticsOpType', 'totAnalyticsOpTypeQty', 'totAnalyticsOpTypePct', data.operation_type_wise, false);
+    }
+
+    function renderCustomerTable(tblId, totValId, totPctId, groupData) {
+        const tbody = document.querySelector(`#${tblId} tbody`);
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        const rows = (groupData && groupData.rows) ? groupData.rows : [];
+        rows.forEach(r => {
+            const tr = document.createElement('tr');
+            const code = r.customer_code || r.name || '-';
+            tr.innerHTML = `
+                <td><strong>${code}</strong></td>
+                <td>${r.pipeline || '-'}</td>
+                <td class="text-right font-mono">${formatNumber(r.qty_mt)}</td>
+                <td class="text-right font-mono pct-val">${formatPct(r.pct)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Filler row to maintain equal visual height
+        const fillerTr = document.createElement('tr');
+        fillerTr.className = 'table-filler-row';
+        fillerTr.innerHTML = '<td colspan="4"></td>';
+        tbody.appendChild(fillerTr);
+
+        const totalVal = groupData ? groupData.total_qty : 0;
+        const totalPct = groupData ? groupData.total_pct : 100.0;
+
+        const totValEl = document.getElementById(totValId);
+        if (totValEl) totValEl.textContent = formatNumber(totalVal);
+        const totPctEl = document.getElementById(totPctId);
+        if (totPctEl) totPctEl.textContent = formatPct(totalPct);
     }
 
     function renderAnalyticsTable(tblId, totValId, totPctId, groupData, isHours) {

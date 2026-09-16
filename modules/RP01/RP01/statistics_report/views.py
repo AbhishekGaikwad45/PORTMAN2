@@ -1550,6 +1550,7 @@ def get_detailed_analytics_data(
 
             pipeline = ''
             customer = ''
+            raw_payer = ''
             equipment = ''
             terminal = (
                 r['terminal_name'] or ''
@@ -1566,6 +1567,7 @@ def get_detailed_analytics_data(
                             pipeline_name,
                             unload_terminal,
                             consigner_name,
+                            importer_name,
                             equipment_names
 
                         FROM {tbl}
@@ -1599,6 +1601,17 @@ def get_detailed_analytics_data(
                     )
                 )
 
+                payers = list(
+                    dict.fromkeys(
+                        p['importer_name'].strip()
+                        for p in p_rows
+                        if (
+                            p['importer_name']
+                            and p['importer_name'].strip()
+                        )
+                    )
+                )
+
                 eqs = list(
                     dict.fromkeys(
                         p['equipment_names'].strip()
@@ -1611,6 +1624,7 @@ def get_detailed_analytics_data(
                 )
 
                 pipeline = ', '.join(pipes)
+                raw_payer = ', '.join(payers)
 
                 # -------------------------------------------------------------
                 # Existing raw customer extraction
@@ -1990,11 +2004,10 @@ def get_detailed_analytics_data(
                     customer_code,
 
                 'payment_by':
-                    customer_name
+                    raw_payer
                     or
-                    customer
-                    or
-                    'Direct',
+                    'Unspecified Payment',
+
 
                 'duration_hours':
                     duration_hours,
@@ -2403,77 +2416,143 @@ def get_detailed_analytics_data(
         }
 
     # =========================================================================
-    # CUSTOMER-WISE AGGREGATION
+    # AGENT-WISE AGGREGATION
     #
-    # IMPORTANT:
-    # Same Customer Code is combined into one row.
+    # Dynamically groups agents by checking against the `agent_master`
+    # loaded from `vessel_agents` table, avoiding any hardcoded replacements.
+    # =========================================================================
+
+    def resolve_agent(raw_name):
+        raw = (raw_name or '').strip()
+        if not raw:
+            return 'Unspecified Agent'
+        
+        up = raw.upper()
+        # masters['agents'] is populated from vessel_agents (mapping code/name to canonical name)
+        if up in masters['agents']:
+            return masters['agents'][up]
+            
+        return raw
+
+    def _agg_agent():
+        """
+        Aggregate qty by vessel agent, resolving names dynamically against master.
+        """
+        totals = {}
+
+        for it in raw_items:
+
+            raw_name = (
+                it.get('agent_name') or 'Unspecified Agent'
+            ).strip()
+
+            resolved_name = resolve_agent(raw_name)
+
+            if resolved_name not in totals:
+                totals[resolved_name] = 0.0
+
+            totals[resolved_name] += it['qty_mt']
+
+        grand_total = sum(totals.values())
+
+        rows = []
+
+        for name, qty in sorted(
+            totals.items(),
+            key=lambda x: -x[1]
+        ):
+            pct = qty / grand_total * 100.0 if grand_total > 0 else 0.0
+
+            rows.append({
+                'name': name,
+                'qty_mt': round(qty, 3),
+                'pct': round(pct, 1)
+            })
+
+        return {
+            'rows': rows,
+            'total_qty': round(grand_total, 3),
+            'total_pct': 100.0 if grand_total > 0 else 0.0
+        }
+
     #
-    # Display:
-    #     CUSTOMER_CODE - CUSTOMER_NAME
+    # Groups by CUSTOMER CODE from vessel_customers master table.
     #
-    # If a record has no master code, its original customer name is retained.
+    # Logic:
+    #   1. raw customer name (from consigner / mis_history) is resolved
+    #      against vessel_customers master via resolve_customer().
+    #   2. If a code is found  → key = customer_code (UPPER)
+    #      If no code in master → key = 'NAME:' + customer_name (UPPER)
+    #      This ensures all records for the same customer code
+    #      collapse into ONE row even if the name spelling differs.
+    #   3. Pipelines used by that customer are collected (unique, ordered)
+    #      and shown joined with  " / "  in the Pipeline column.
+    #
+    # Display columns:
+    #     Customer Code  |  Customer Name  |  Pipeline(s)  |  Qty  |  %
     # =========================================================================
     def _agg_customer():
 
+        # key  = customer_code.upper()  OR  'NAME:' + customer_name.upper()
+        # value = {customer_code, customer_name, pipelines[], qty_mt}
         totals = {}
 
         for it in raw_items:
 
             customer_code = (
-                it.get('customer_code')
-                or
-                ''
+                it.get('customer_code') or ''
             ).strip()
 
             customer_name = (
-                it.get('customer')
-                or
-                'Unspecified Customer'
+                it.get('customer') or 'Unspecified Customer'
             ).strip()
 
+            pipeline_name = (
+                it.get('pipeline') or 'Flexible Hose'
+            ).strip()
+
+            # ----------------------------------------------------------------
+            # Determine grouping key
+            # ----------------------------------------------------------------
             if customer_code:
-
-                key = customer_code.upper()
-
-                display_name = (
-                    f"{customer_code} - "
-                    f"{customer_name}"
-                )
-
+                # Grouped by master code — different name spellings merge here
+                group_key = customer_code.upper()
             else:
+                # No code found in master — group by name
+                group_key = 'NAME:' + customer_name.upper()
 
-                key = (
-                    'NAME:'
-                    +
-                    customer_name.upper()
-                )
-
-                display_name = customer_name
-
-            if key not in totals:
-
-                totals[key] = {
-
-                    'customer_code':
-                        customer_code,
-
-                    'customer_name':
-                        customer_name,
-
-                    'display_name':
-                        display_name,
-
-                    'qty_mt':
-                        0.0
+            # ----------------------------------------------------------------
+            # Initialise slot
+            # ----------------------------------------------------------------
+            if group_key not in totals:
+                totals[group_key] = {
+                    'customer_code': customer_code,
+                    'customer_name': customer_name,
+                    'pipelines': [],
+                    'qty_mt': 0.0
                 }
+            else:
+                # If the slot already exists but code was added later,
+                # prefer a non-empty code/name.
+                if not totals[group_key]['customer_code'] and customer_code:
+                    totals[group_key]['customer_code'] = customer_code
+                if (
+                    totals[group_key]['customer_name'] in (
+                        '', 'Unspecified Customer'
+                    )
+                    and customer_name
+                    and customer_name != 'Unspecified Customer'
+                ):
+                    totals[group_key]['customer_name'] = customer_name
 
-            totals[key]['qty_mt'] += (
-                it['qty_mt']
-            )
+            totals[group_key]['qty_mt'] += it['qty_mt']
+
+            # Collect unique pipelines in insertion order
+            if pipeline_name not in totals[group_key]['pipelines']:
+                totals[group_key]['pipelines'].append(pipeline_name)
 
         grand_total = sum(
-            x['qty_mt']
-            for x in totals.values()
+            x['qty_mt'] for x in totals.values()
         )
 
         rows = []
@@ -2482,56 +2561,67 @@ def get_detailed_analytics_data(
             totals.values(),
             key=lambda x: -x['qty_mt']
         ):
-
             qty = item['qty_mt']
+            pct = qty / grand_total * 100.0 if grand_total > 0 else 0.0
+            pipeline_display = ' / '.join(item['pipelines'])
 
-            pct = (
-                qty / grand_total * 100.0
-                if grand_total > 0
-                else 0.0
-            )
+            code = item['customer_code']
+            name = item['customer_name']
 
             rows.append({
-
+                # 'name' = what the HTML first column shows
                 'name':
-                    item['display_name'],
+                    code if code else name,
 
                 'customer_code':
-                    item['customer_code'],
+                    code,
 
                 'customer_name':
-                    item['customer_name'],
+                    name,
+
+                'pipeline':
+                    pipeline_display,
 
                 'qty_mt':
-                    round(
-                        qty,
-                        3
-                    ),
+                    round(qty, 3),
 
                 'pct':
-                    round(
-                        pct,
-                        1
-                    )
+                    round(pct, 1)
             })
 
         return {
             'rows': rows,
-
-            'total_qty':
-                round(
-                    grand_total,
-                    3
-                ),
-
-            'total_pct':
-                100.0
-                if grand_total > 0
-                else 0.0
+            'total_qty': round(grand_total, 3),
+            'total_pct': 100.0 if grand_total > 0 else 0.0
         }
+
+
+    # =========================================================================
+    # PIPELINE SPLIT HELPER
+    #
+    # Splits a combined pipeline string into individual pipeline names.
+    #
+    # Handles ALL common separators used in live and historical data:
+    #     ,        (live data: code joins with ", ")
+    #     " & "    (historical data: "12" & 8" dia GBL SS")
+    #     " + "    (historical data: "8" dia Suraj + 12" dia GBL")
+    #
+    # Each resulting piece is stripped. Empty pieces are discarded.
+    # If nothing remains, defaults to ["Flexible Hose"].
+    # =========================================================================
+    _PIPE_SPLIT_RE = re.compile(r',|\s+&\s+|\s+\+\s+')
+
+    def _split_pipeline(raw_pipe):
+        raw_pipe = (raw_pipe or 'Flexible Hose').strip()
+        parts = [p.strip() for p in _PIPE_SPLIT_RE.split(raw_pipe) if p.strip()]
+        return parts or ['Flexible Hose']
 
     # =========================================================================
     # PIPELINE UTILISATION
+    #
+    # Combined pipeline strings are split into individual pipelines.
+    # Hours are distributed EQUALLY among each individual pipeline so the
+    # grand total remains accurate and each pipeline appears exactly ONCE.
     # =========================================================================
     def _agg_pipeline_hours():
 
@@ -2539,21 +2629,14 @@ def get_detailed_analytics_data(
 
         for it in raw_items:
 
-            pipe = (
-                it.get('pipeline')
-                or
-                'Flexible Hose'
-            )
+            pipes = _split_pipeline(it.get('pipeline'))
+            n = len(pipes)
+            share = it['duration_hours'] / n if n > 0 else 0.0
 
-            totals[pipe] = (
-                totals.get(pipe, 0.0)
-                +
-                it['duration_hours']
-            )
+            for pipe in pipes:
+                totals[pipe] = totals.get(pipe, 0.0) + share
 
-        grand_total = sum(
-            totals.values()
-        )
+        grand_total = sum(totals.values())
 
         rows = []
 
@@ -2561,39 +2644,68 @@ def get_detailed_analytics_data(
             totals.items(),
             key=lambda x: -x[1]
         ):
-
             pct = (
                 v / grand_total * 100.0
                 if grand_total > 0
                 else 0.0
             )
-
             rows.append({
                 'name': k,
-                'hours': round(
-                    v,
-                    2
-                ),
-                'pct': round(
-                    pct,
-                    1
-                )
+                'hours': round(v, 2),
+                'pct': round(pct, 1)
             })
 
         return {
             'rows': rows,
+            'total_hours': round(grand_total, 2),
+            'total_pct': 100.0 if grand_total > 0 else 0.0
+        }
 
-            'total_hours':
-                round(
-                    grand_total,
-                    2
-                ),
+    # =========================================================================
+    # PIPELINE WISE QTY
+    #
+    # Same split logic as Pipeline Utilisation:
+    # Combined strings split on  ,  /  &  /  +  separators.
+    # Qty distributed equally. Each pipeline appears exactly ONCE.
+    # =========================================================================
+    def _agg_pipeline_qty():
 
-            'total_pct':
-                100.0
+        totals = {}
+
+        for it in raw_items:
+
+            pipes = _split_pipeline(it.get('pipeline'))
+            n = len(pipes)
+            share = it['qty_mt'] / n if n > 0 else 0.0
+
+            for pipe in pipes:
+                totals[pipe] = totals.get(pipe, 0.0) + share
+
+        grand_total = sum(totals.values())
+
+        rows = []
+
+        for k, v in sorted(
+            totals.items(),
+            key=lambda x: -x[1]
+        ):
+            pct = (
+                v / grand_total * 100.0
                 if grand_total > 0
                 else 0.0
+            )
+            rows.append({
+                'name': k,
+                'qty_mt': round(v, 3),
+                'pct': round(pct, 1)
+            })
+
+        return {
+            'rows': rows,
+            'total_qty': round(grand_total, 3),
+            'total_pct': 100.0 if grand_total > 0 else 0.0
         }
+
 
     # =========================================================================
     # EQUIPMENT UTILISATION
@@ -2675,7 +2787,7 @@ def get_detailed_analytics_data(
             _agg_qty('terminal'),
 
         'pipeline_wise':
-            _agg_qty('pipeline'),
+            _agg_pipeline_qty(),
 
         'cargo_wise':
             _agg_qty('cargo'),
@@ -2690,7 +2802,7 @@ def get_detailed_analytics_data(
             _agg_pipeline_hours(),
 
         'vessel_agent_wise':
-            _agg_qty('agent_name'),
+            _agg_agent(),
 
         'flag_wise':
             _agg_qty('flag_name'),
@@ -2818,86 +2930,318 @@ def statistics_report_api_export_analytics():
 
 
 def _generate_analytics_excel(data: dict) -> Workbook:
-    """Build the 15-column 3-row multi-category analytics Excel workbook."""
+    """
+    Build the multi-category analytics Excel workbook.
+
+    Existing sheets remain unchanged.
+    Adds one new sheet:
+        Pipeline_Operation_Detail
+
+    Columns:
+        Pipeline Name
+        Vessel Name
+        Operation Start
+        Operation Stop
+    """
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Analytics_Report"
 
-    font_title = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-    font_hdr = Font(name="Calibri", size=9, bold=True, color="000000")
-    font_data = Font(name="Calibri", size=9, color="000000")
-    font_tot = Font(name="Calibri", size=9, bold=True, color="000000")
-    font_meta = Font(name="Calibri", size=10, bold=True, color="1F4E78")
-    font_banner = Font(name="Calibri", size=11, bold=True, color="1E4620")
+    font_title = Font(
+        name="Calibri",
+        size=10,
+        bold=True,
+        color="FFFFFF"
+    )
 
-    fill_title = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
-    fill_hdr = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-    fill_tot = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-    fill_banner = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+    font_hdr = Font(
+        name="Calibri",
+        size=9,
+        bold=True,
+        color="000000"
+    )
 
-    thin = Side(border_style="thin", color="D9D9D9")
-    double = Side(border_style="double", color="000000")
+    font_data = Font(
+        name="Calibri",
+        size=9,
+        color="000000"
+    )
 
-    box_border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    tot_border = Border(left=thin, right=thin, top=thin, bottom=double)
+    font_tot = Font(
+        name="Calibri",
+        size=9,
+        bold=True,
+        color="000000"
+    )
 
-    # Top Filters metadata
-    ws.cell(row=2, column=1, value="Year").font = font_meta
-    ws.cell(row=2, column=2, value=data['meta']['fin_year']).font = font_data
-    ws.cell(row=2, column=3, value="Selection date").font = font_meta
-    ws.cell(row=2, column=4, value=f"Start: {data['meta']['start_date']}").font = font_data
-    ws.cell(row=2, column=5, value=f"End: {data['meta']['end_date']}").font = font_data
-    ws.cell(row=2, column=6, value="Month").font = font_meta
-    ws.cell(row=2, column=7, value=data['meta']['month']).font = font_data
+    font_meta = Font(
+        name="Calibri",
+        size=10,
+        bold=True,
+        color="1F4E78"
+    )
 
-    def write_box(start_r, start_c, title, col1_title, col2_title, col3_title, rows, tot_val, is_hours=False):
-        ws.merge_cells(start_row=start_r, start_column=start_c, end_row=start_r, end_column=start_c + 2)
-        t_cell = ws.cell(row=start_r, column=start_c, value=title)
+    font_banner = Font(
+        name="Calibri",
+        size=11,
+        bold=True,
+        color="1E4620"
+    )
+
+    fill_title = PatternFill(
+        start_color="1F4E78",
+        end_color="1F4E78",
+        fill_type="solid"
+    )
+
+    fill_hdr = PatternFill(
+        start_color="D9E1F2",
+        end_color="D9E1F2",
+        fill_type="solid"
+    )
+
+    fill_tot = PatternFill(
+        start_color="F2F2F2",
+        end_color="F2F2F2",
+        fill_type="solid"
+    )
+
+    fill_banner = PatternFill(
+        start_color="E2EFDA",
+        end_color="E2EFDA",
+        fill_type="solid"
+    )
+
+    thin = Side(
+        border_style="thin",
+        color="D9D9D9"
+    )
+
+    double = Side(
+        border_style="double",
+        color="000000"
+    )
+
+    box_border = Border(
+        left=thin,
+        right=thin,
+        top=thin,
+        bottom=thin
+    )
+
+    tot_border = Border(
+        left=thin,
+        right=thin,
+        top=thin,
+        bottom=double
+    )
+
+    # -------------------------------------------------------------------------
+    # TOP FILTER METADATA
+    # -------------------------------------------------------------------------
+    ws.cell(
+        row=2,
+        column=1,
+        value="Year"
+    ).font = font_meta
+
+    ws.cell(
+        row=2,
+        column=2,
+        value=data['meta']['fin_year']
+    ).font = font_data
+
+    ws.cell(
+        row=2,
+        column=3,
+        value="Selection date"
+    ).font = font_meta
+
+    ws.cell(
+        row=2,
+        column=4,
+        value=f"Start: {data['meta']['start_date']}"
+    ).font = font_data
+
+    ws.cell(
+        row=2,
+        column=5,
+        value=f"End: {data['meta']['end_date']}"
+    ).font = font_data
+
+    ws.cell(
+        row=2,
+        column=6,
+        value="Month"
+    ).font = font_meta
+
+    ws.cell(
+        row=2,
+        column=7,
+        value=data['meta']['month']
+    ).font = font_data
+
+    # -------------------------------------------------------------------------
+    # COMMON WRITE BOX
+    # -------------------------------------------------------------------------
+    def write_box(
+        start_r,
+        start_c,
+        title,
+        col1_title,
+        col2_title,
+        col3_title,
+        rows,
+        tot_val,
+        is_hours=False
+    ):
+
+        ws.merge_cells(
+            start_row=start_r,
+            start_column=start_c,
+            end_row=start_r,
+            end_column=start_c + 2
+        )
+
+        t_cell = ws.cell(
+            row=start_r,
+            column=start_c,
+            value=title
+        )
+
         t_cell.font = font_title
         t_cell.fill = fill_title
-        t_cell.alignment = Alignment(horizontal="center", vertical="center")
-        for c in range(start_c, start_c + 3):
-            ws.cell(row=start_r, column=c).border = box_border
+        t_cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center"
+        )
+
+        for c in range(
+            start_c,
+            start_c + 3
+        ):
+            ws.cell(
+                row=start_r,
+                column=c
+            ).border = box_border
 
         h_row = start_r + 1
-        h_vals = [col1_title, col2_title, col3_title]
+
+        h_vals = [
+            col1_title,
+            col2_title,
+            col3_title
+        ]
+
         for idx, hv in enumerate(h_vals):
-            cell = ws.cell(row=h_row, column=start_c + idx, value=hv)
+
+            cell = ws.cell(
+                row=h_row,
+                column=start_c + idx,
+                value=hv
+            )
+
             cell.font = font_hdr
             cell.fill = fill_hdr
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True
+            )
             cell.border = box_border
 
         curr_r = h_row + 1
+
         for item in rows:
-            c1 = ws.cell(row=curr_r, column=start_c, value=item['name'])
+
+            c1 = ws.cell(
+                row=curr_r,
+                column=start_c,
+                value=item['name']
+            )
+
             c1.font = font_data
             c1.border = box_border
 
-            val = item.get('hours' if is_hours else 'qty_mt', 0.0)
-            c2 = ws.cell(row=curr_r, column=start_c + 1, value=val)
+            val = item.get(
+                'hours'
+                if is_hours
+                else
+                'qty_mt',
+                0.0
+            )
+
+            c2 = ws.cell(
+                row=curr_r,
+                column=start_c + 1,
+                value=val
+            )
+
             c2.font = font_data
-            c2.number_format = "#,##0.00" if is_hours else "#,##0.000"
+
+            c2.number_format = (
+                "#,##0.00"
+                if is_hours
+                else
+                "#,##0.000"
+            )
+
             c2.border = box_border
 
-            c3 = ws.cell(row=curr_r, column=start_c + 2, value=(item.get('pct', 0.0) / 100.0))
+            c3 = ws.cell(
+                row=curr_r,
+                column=start_c + 2,
+                value=(
+                    item.get('pct', 0.0)
+                    / 100.0
+                )
+            )
+
             c3.font = font_data
             c3.number_format = "0.0%"
             c3.border = box_border
+
             curr_r += 1
 
-        t1 = ws.cell(row=curr_r, column=start_c, value="Total")
+        t1 = ws.cell(
+            row=curr_r,
+            column=start_c,
+            value="Total"
+        )
+
         t1.font = font_tot
         t1.fill = fill_tot
         t1.border = tot_border
 
-        t2 = ws.cell(row=curr_r, column=start_c + 1, value=tot_val)
+        t2 = ws.cell(
+            row=curr_r,
+            column=start_c + 1,
+            value=tot_val
+        )
+
         t2.font = font_tot
         t2.fill = fill_tot
-        t2.number_format = "#,##0.00" if is_hours else "#,##0.000"
+
+        t2.number_format = (
+            "#,##0.00"
+            if is_hours
+            else
+            "#,##0.000"
+        )
+
         t2.border = tot_border
 
-        t3 = ws.cell(row=curr_r, column=start_c + 2, value=1.0 if tot_val > 0 else 0.0)
+        t3 = ws.cell(
+            row=curr_r,
+            column=start_c + 2,
+            value=(
+                1.0
+                if tot_val > 0
+                else 0.0
+            )
+        )
+
         t3.font = font_tot
         t3.fill = fill_tot
         t3.number_format = "0.0%"
@@ -2905,38 +3249,868 @@ def _generate_analytics_excel(data: dict) -> Workbook:
 
         return curr_r
 
-    # Row 1 (5 tables)
+    # -------------------------------------------------------------------------
+    # CUSTOMER-WISE WRITE BOX  (4 columns: Code, Pipeline, Qty, %)
+    # -------------------------------------------------------------------------
+    def write_customer_box(
+        start_r,
+        start_c,
+        rows,
+        tot_val
+    ):
+
+        # Title spans 4 columns
+        ws.merge_cells(
+            start_row=start_r,
+            start_column=start_c,
+            end_row=start_r,
+            end_column=start_c + 3
+        )
+
+        t_cell = ws.cell(
+            row=start_r,
+            column=start_c,
+            value="Customerwise"
+        )
+        t_cell.font = font_title
+        t_cell.fill = fill_title
+        t_cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center"
+        )
+
+        for c in range(start_c, start_c + 4):
+            ws.cell(row=start_r, column=c).border = box_border
+
+        h_row = start_r + 1
+
+        for idx, hv in enumerate(
+            ["Customer Code", "Pipeline", "Qty handled in MT", "% of Qty"]
+        ):
+            cell = ws.cell(
+                row=h_row,
+                column=start_c + idx,
+                value=hv
+            )
+            cell.font = font_hdr
+            cell.fill = fill_hdr
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True
+            )
+            cell.border = box_border
+
+        curr_r = h_row + 1
+
+        for item in rows:
+
+            # Customer Code
+            c1 = ws.cell(
+                row=curr_r,
+                column=start_c,
+                value=item.get('customer_code') or item.get('name', '')
+            )
+            c1.font = font_data
+            c1.border = box_border
+
+            # Pipeline
+            c2 = ws.cell(
+                row=curr_r,
+                column=start_c + 1,
+                value=item.get('pipeline', '')
+            )
+            c2.font = font_data
+            c2.border = box_border
+
+            # Qty
+            c3 = ws.cell(
+                row=curr_r,
+                column=start_c + 2,
+                value=item.get('qty_mt', 0.0)
+            )
+            c3.font = font_data
+            c3.number_format = "#,##0.000"
+            c3.border = box_border
+
+            # %
+            c4 = ws.cell(
+                row=curr_r,
+                column=start_c + 3,
+                value=item.get('pct', 0.0) / 100.0
+            )
+            c4.font = font_data
+            c4.number_format = "0.0%"
+            c4.border = box_border
+
+            curr_r += 1
+
+        # Total row spans Code + Pipeline columns
+        ws.merge_cells(
+            start_row=curr_r,
+            start_column=start_c,
+            end_row=curr_r,
+            end_column=start_c + 1
+        )
+
+        t1 = ws.cell(
+            row=curr_r,
+            column=start_c,
+            value="Total"
+        )
+        t1.font = font_tot
+        t1.fill = fill_tot
+        t1.border = tot_border
+
+        ws.cell(row=curr_r, column=start_c + 1).border = tot_border
+
+        t2 = ws.cell(
+            row=curr_r,
+            column=start_c + 2,
+            value=tot_val
+        )
+        t2.font = font_tot
+        t2.fill = fill_tot
+        t2.number_format = "#,##0.000"
+        t2.border = tot_border
+
+        t3 = ws.cell(
+            row=curr_r,
+            column=start_c + 3,
+            value=1.0 if tot_val > 0 else 0.0
+        )
+        t3.font = font_tot
+        t3.fill = fill_tot
+        t3.number_format = "0.0%"
+        t3.border = tot_border
+
+        return curr_r
+
+
+
+    # -------------------------------------------------------------------------
+    # ROW 1
+    # -------------------------------------------------------------------------
     r1_ends = [
-        write_box(4, 1, "Terminalwise", "Terminal", "Qty handled in MT", "% of Qty", data['terminal_wise']['rows'], data['terminal_wise']['total_qty']),
-        write_box(4, 4, "Pipeline wise", "Pipeline", "Qty handled in MT", "% of Qty", data['pipeline_wise']['rows'], data['pipeline_wise']['total_qty']),
-        write_box(4, 7, "Cargowise", "Cargo Type", "Qty handled in MT", "% of Qty", data['cargo_wise']['rows'], data['cargo_wise']['total_qty']),
-        write_box(4, 10, "Customerwise", "Customer Name", "Qty handled in MT", "% of Qty", data['customer_wise']['rows'], data['customer_wise']['total_qty']),
-        write_box(4, 13, "Pipeline Utilisation", "Pipeline", "No of Hours", "% of Hours", data['pipeline_utilisation']['rows'], data['pipeline_utilisation']['total_hours'], is_hours=True),
+
+        write_box(
+            4,
+            1,
+            "Terminalwise",
+            "Terminal",
+            "Qty handled in MT",
+            "% of Qty",
+            data['terminal_wise']['rows'],
+            data['terminal_wise']['total_qty']
+        ),
+
+        write_box(
+            4,
+            4,
+            "Pipeline wise",
+            "Pipeline",
+            "Qty handled in MT",
+            "% of Qty",
+            data['pipeline_wise']['rows'],
+            data['pipeline_wise']['total_qty']
+        ),
+
+        write_box(
+            4,
+            7,
+            "Cargowise",
+            "Cargo Type",
+            "Qty handled in MT",
+            "% of Qty",
+            data['cargo_wise']['rows'],
+            data['cargo_wise']['total_qty']
+        ),
+
+        write_customer_box(
+            4,
+            10,
+            data['customer_wise']['rows'],
+            data['customer_wise']['total_qty']
+        ),
+
+        write_box(
+            4,
+            13,
+            "Pipeline Utilisation",
+            "Pipeline",
+            "No of Hours",
+            "% of Hours",
+            data['pipeline_utilisation']['rows'],
+            data['pipeline_utilisation']['total_hours'],
+            is_hours=True
+        )
     ]
 
     r2_start = max(r1_ends) + 2
-    # Row 2 (5 tables)
+
+    # -------------------------------------------------------------------------
+    # ROW 2
+    # -------------------------------------------------------------------------
     r2_ends = [
-        write_box(r2_start, 1, "Vessel Agentwise", "Agent Name", "Qty handled in MT", "% of Qty", data['vessel_agent_wise']['rows'], data['vessel_agent_wise']['total_qty']),
-        write_box(r2_start, 4, "Flagwise", "Flag Wise", "Qty handled in MT", "% of Qty", data['flag_wise']['rows'], data['flag_wise']['total_qty']),
-        write_box(r2_start, 7, "Portwise", "Port Name", "Qty handled in MT", "% of Qty", data['port_wise']['rows'], data['port_wise']['total_qty']),
-        write_box(r2_start, 10, "Payment type wise", "Name", "Qty handled in MT", "% of Qty", data['payment_type_wise']['rows'], data['payment_type_wise']['total_qty']),
-        write_box(r2_start, 13, "Equipment Utilisation", "MLA No", "Qty handled in MT", "% of Qty", data['equipment_utilisation']['rows'], data['equipment_utilisation']['total_qty']),
+
+        write_box(
+            r2_start,
+            1,
+            "Vessel Agentwise",
+            "Agent Name",
+            "Qty handled in MT",
+            "% of Qty",
+            data['vessel_agent_wise']['rows'],
+            data['vessel_agent_wise']['total_qty']
+        ),
+
+        write_box(
+            r2_start,
+            4,
+            "Flagwise",
+            "Flag Wise",
+            "Qty handled in MT",
+            "% of Qty",
+            data['flag_wise']['rows'],
+            data['flag_wise']['total_qty']
+        ),
+
+        write_box(
+            r2_start,
+            7,
+            "Portwise",
+            "Port Name",
+            "Qty handled in MT",
+            "% of Qty",
+            data['port_wise']['rows'],
+            data['port_wise']['total_qty']
+        ),
+
+        write_box(
+            r2_start,
+            10,
+            "Payment type wise",
+            "Name",
+            "Qty handled in MT",
+            "% of Qty",
+            data['payment_type_wise']['rows'],
+            data['payment_type_wise']['total_qty']
+        ),
+
+        write_box(
+            r2_start,
+            13,
+            "Equipment Utilisation",
+            "MLA No",
+            "Qty handled in MT",
+            "% of Qty",
+            data['equipment_utilisation']['rows'],
+            data['equipment_utilisation']['total_qty']
+        )
     ]
 
-    # Row 3 (2 tables)
+    # -------------------------------------------------------------------------
+    # ROW 3
+    # -------------------------------------------------------------------------
     r3_start = max(r2_ends) + 2
-    write_box(r3_start, 1, "Vessel Run Typewise", "Run Type", "Qty handled in MT", "% of Qty", data['vessel_run_type_wise']['rows'], data['vessel_run_type_wise']['total_qty'])
-    write_box(r3_start, 4, "Operation Type wise", "Operation", "Qty handled in MT", "% of Qty", data['operation_type_wise']['rows'], data['operation_type_wise']['total_qty'])
 
-    # Auto-fit columns 1 to 15
+    write_box(
+        r3_start,
+        1,
+        "Vessel Run Typewise",
+        "Run Type",
+        "Qty handled in MT",
+        "% of Qty",
+        data['vessel_run_type_wise']['rows'],
+        data['vessel_run_type_wise']['total_qty']
+    )
+
+    write_box(
+        r3_start,
+        4,
+        "Operation Type wise",
+        "Operation",
+        "Qty handled in MT",
+        "% of Qty",
+        data['operation_type_wise']['rows'],
+        data['operation_type_wise']['total_qty']
+    )
+
+    # -------------------------------------------------------------------------
+    # AUTO-FIT EXISTING ANALYTICS SHEET
+    # -------------------------------------------------------------------------
     for col_idx in range(1, 16):
-        col_letter = get_column_letter(col_idx)
+
+        col_letter = get_column_letter(
+            col_idx
+        )
+
         max_len = 0
-        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx):
+
+        for row in ws.iter_rows(
+            min_col=col_idx,
+            max_col=col_idx
+        ):
+
             val = row[0].value
+
             if val is not None:
-                max_len = max(max_len, len(str(val)))
-        ws.column_dimensions[col_letter].width = max(max_len + 3, 13)
+                max_len = max(
+                    max_len,
+                    len(str(val))
+                )
+
+        ws.column_dimensions[
+            col_letter
+        ].width = max(
+            max_len + 3,
+            13
+        )
+
+    # =========================================================================
+    # NEW SHEET:
+    # PIPELINE OPERATION DETAIL
+    # =========================================================================
+    #
+    # IMPORTANT:
+    # This sheet is populated directly from the database using the
+    # selected date/time range.
+    #
+    # It does NOT change the existing Analytics_Report calculations.
+    # =========================================================================
+
+    ws_pipeline = wb.create_sheet(
+        title="Pipeline_Operation_Detail"
+    )
+
+    # -------------------------------------------------------------------------
+    # GET SELECTED DATE/TIME RANGE
+    # -------------------------------------------------------------------------
+    try:
+
+        start_text = data['meta'].get(
+            'start_date',
+            ''
+        )
+
+        end_text = data['meta'].get(
+            'end_date',
+            ''
+        )
+
+        selected_start = _parse_dt(
+            start_text
+        )
+
+        selected_end = _parse_dt(
+            end_text
+        )
+
+        # If metadata contains only dates, use complete date range.
+        if selected_start and selected_end:
+
+            if len(str(start_text).strip()) == 10:
+                selected_start = datetime.combine(
+                    selected_start.date(),
+                    datetime.min.time()
+                )
+
+            # End-of-day: apply when string is date-only (len=10) OR
+            # when the parsed time is exactly midnight 00:00 (the default
+            # when no meaningful time was set for the end boundary).
+            if (
+                len(str(end_text).strip()) == 10
+                or (
+                    selected_end.hour == 0
+                    and selected_end.minute == 0
+                    and selected_end.second == 0
+                )
+            ):
+                selected_end = datetime.combine(
+                    selected_end.date(),
+                    datetime.max.time()
+                )
+
+        else:
+            selected_start = None
+            selected_end = None
+
+    except Exception:
+        selected_start = None
+        selected_end = None
+
+    pipeline_operation_rows = []
+
+    # -------------------------------------------------------------------------
+    # DATABASE QUERY
+    # -------------------------------------------------------------------------
+    conn_pipeline = None
+
+    try:
+
+        conn_pipeline = get_db()
+        cur_pipeline = get_cursor(
+            conn_pipeline
+        )
+
+        # -------------------------------------------------------------
+        # Get live vessel calls WITH cast_off_datetime
+        # (same field the main analytics uses for date filtering)
+        # -------------------------------------------------------------
+        cur_pipeline.execute("""
+            SELECT
+                lh.id AS ldud_id,
+                lh.cast_off_datetime,
+                lh.discharge_completed,
+                vh.vessel_name,
+                vh.operation_type
+
+            FROM ldud_header lh
+
+            JOIN vcn_header vh
+                ON vh.id = lh.vcn_id
+
+            WHERE COALESCE(
+                lh.is_deleted,
+                FALSE
+            ) = FALSE
+        """)
+
+        vessel_rows = cur_pipeline.fetchall()
+
+        for vessel_row in vessel_rows:
+
+            ldud_id = vessel_row['ldud_id']
+
+            # Use cast_off_datetime (or discharge_completed) as the
+            # filter reference date — exactly what main analytics uses.
+            vessel_ref_dt = (
+                _parse_dt(vessel_row['cast_off_datetime'])
+                or
+                _parse_dt(vessel_row['discharge_completed'])
+            )
+
+            # Skip vessels that fall outside the selected date range.
+            if vessel_ref_dt:
+                if selected_start and vessel_ref_dt < selected_start:
+                    continue
+                if selected_end and vessel_ref_dt > selected_end:
+                    continue
+            # If no cast_off date at all, skip (vessel not completed).
+            else:
+                continue
+
+            vessel_name = (
+                vessel_row['vessel_name']
+                or
+                'Missing Vessel'
+            ).strip()
+
+            operation_type = (
+                vessel_row['operation_type']
+                or
+                ''
+            ).strip().capitalize()
+
+            # ---------------------------------------------------------
+            # Get parcel operations
+            # ---------------------------------------------------------
+            cur_pipeline.execute("""
+                SELECT
+                    po.id AS po_id,
+                    po.parcel_ids,
+                    po.start_dt,
+                    po.end_dt
+
+                FROM ldud_parcel_ops po
+
+                WHERE po.ldud_id = %s
+
+                ORDER BY
+                    po.start_dt,
+                    po.id
+            """, [ldud_id])
+
+            parcel_ops = cur_pipeline.fetchall()
+
+            if not parcel_ops:
+                continue
+
+            # ---------------------------------------------------------
+            # Correct parcel master based on operation type
+            # ---------------------------------------------------------
+            tbl = (
+                'vcn_export_cargo_declaration'
+                if operation_type == 'Export'
+                else
+                'vcn_consigners'
+            )
+
+            for po in parcel_ops:
+
+                operation_start = _parse_dt(
+                    po['start_dt']
+                )
+
+                operation_stop = _parse_dt(
+                    po['end_dt']
+                )
+
+                # Date filtering is already done at the vessel level
+                # using cast_off_datetime above. All parcel ops for
+                # a vessel that passed the filter are included here.
+
+                # -----------------------------------------------------
+                # Parcel IDs
+                # -----------------------------------------------------
+                parcel_ids = [
+                    int(x.strip())
+                    for x in str(
+                        po['parcel_ids']
+                        or
+                        ''
+                    ).split(',')
+                    if x.strip().isdigit()
+                ]
+
+                pipeline_names = []
+
+                if parcel_ids:
+
+                    cur_pipeline.execute(
+                        f"""
+                            SELECT
+                                pipeline_name
+
+                            FROM {tbl}
+
+                            WHERE id = ANY(%s)
+                        """,
+                        [parcel_ids]
+                    )
+
+                    pipeline_rows = (
+                        cur_pipeline.fetchall()
+                    )
+
+                    for pipeline_row in pipeline_rows:
+
+                        pipeline_name = (
+                            pipeline_row[
+                                'pipeline_name'
+                            ]
+                            or
+                            ''
+                        ).strip()
+
+                        if pipeline_name:
+                            if pipeline_name not in pipeline_names:
+                                pipeline_names.append(
+                                    pipeline_name
+                                )
+
+                # -----------------------------------------------------
+                # Business rule:
+                # Empty pipeline = Flexible Hose
+                # -----------------------------------------------------
+                if pipeline_names:
+
+                    pipeline_name_display = ', '.join(
+                        pipeline_names
+                    )
+
+                else:
+
+                    pipeline_name_display = (
+                        'Flexible Hose'
+                    )
+
+                pipeline_operation_rows.append({
+                    'pipeline_name':
+                        pipeline_name_display,
+
+                    'vessel_name':
+                        vessel_name,
+
+                    'operation_start':
+                        operation_start,
+
+                    'operation_stop':
+                        operation_stop,
+
+                    'source': 'Live'
+                })
+
+        # ---------------------------------------------------------------------
+        # HISTORICAL RECORDS from mis_history + mis_vessel_master
+        # (Same source the main analytics uses for Sheet 1 pipeline totals)
+        # ---------------------------------------------------------------------
+        fin_year_meta = data.get('meta', {}).get('fin_year', '')
+        month_meta = data.get('meta', {}).get('month', 'All')
+
+        if fin_year_meta:
+            cur_pipeline.execute("""
+                SELECT
+                    mvm.vessel_name,
+                    mvm.unload_pipeline,
+                    mvm.ops_commenced,
+                    mvm.cargo_completion,
+                    mvm.cast_off,
+                    mvm.sail_cast_off,
+                    mvm.month
+                FROM mis_history mh
+                LEFT JOIN mis_vessel_master mvm
+                    ON mvm.vcn_no = mh.vcn_no
+                WHERE mh.fin_year = %s
+            """, [fin_year_meta])
+
+            hist_vessel_rows = cur_pipeline.fetchall()
+
+            seen_hist = set()
+
+            for hv in hist_vessel_rows:
+
+                # Same date-filter logic as the main analytics
+                dt_val = (
+                    _parse_dt(hv['cast_off'])
+                    or _parse_dt(hv['sail_cast_off'])
+                    or _parse_dt(hv['cargo_completion'])
+                )
+
+                if dt_val:
+                    if selected_start and dt_val < selected_start:
+                        continue
+                    if selected_end and dt_val > selected_end:
+                        continue
+                else:
+                    m_text = str(hv.get('month') or '').strip()
+                    if month_meta and month_meta.lower() != 'all':
+                        m_short = month_meta[:3].lower()
+                        if m_short not in m_text.lower():
+                            continue
+
+                pipe_raw = (hv['unload_pipeline'] or '').strip()
+                pipe_display = pipe_raw or 'Flexible Hose'
+                vessel_h = (hv['vessel_name'] or 'Unknown Vessel').strip()
+                op_start_h = _parse_dt(hv['ops_commenced'])
+                op_stop_h = _parse_dt(hv['cargo_completion'])
+
+                # De-duplicate: same vessel + pipeline + start
+                dedup_key = (pipe_display, vessel_h, str(op_start_h))
+                if dedup_key in seen_hist:
+                    continue
+                seen_hist.add(dedup_key)
+
+                pipeline_operation_rows.append({
+                    'pipeline_name': pipe_display,
+                    'vessel_name': vessel_h,
+                    'operation_start': op_start_h,
+                    'operation_stop': op_stop_h,
+                    'source': 'Historical'
+                })
+
+    except Exception as _pipe_exc:
+        # Do not break the complete Excel export, but preserve the
+        # error so it can be seen during debugging.
+        pipeline_operation_rows = []
+
+    finally:
+
+        if conn_pipeline:
+            conn_pipeline.close()
+
+    # -------------------------------------------------------------------------
+    # SHEET TITLE
+    # -------------------------------------------------------------------------
+    ws_pipeline.merge_cells(
+        start_row=1,
+        start_column=1,
+        end_row=1,
+        end_column=5
+    )
+
+    title_cell = ws_pipeline.cell(
+        row=1,
+        column=1,
+        value="Pipeline Operation Detail"
+    )
+
+    title_cell.font = font_title
+    title_cell.fill = fill_title
+    title_cell.alignment = Alignment(
+        horizontal="center",
+        vertical="center"
+    )
+
+    # -------------------------------------------------------------------------
+    # SELECTED RANGE
+    # -------------------------------------------------------------------------
+    ws_pipeline.merge_cells(
+        start_row=2,
+        start_column=1,
+        end_row=2,
+        end_column=5
+    )
+
+    range_cell = ws_pipeline.cell(
+        row=2,
+        column=1,
+        value=(
+            f"Selected Range: "
+            f"{data['meta']['start_date']} "
+            f"to "
+            f"{data['meta']['end_date']}"
+        )
+    )
+
+    range_cell.font = font_meta
+    range_cell.alignment = Alignment(
+        horizontal="center",
+        vertical="center"
+    )
+
+    # -------------------------------------------------------------------------
+    # HEADERS
+    # -------------------------------------------------------------------------
+    pipeline_headers = [
+        "Pipeline Name",
+        "Vessel Name",
+        "Operation Start",
+        "Operation Stop",
+        "Source"
+    ]
+
+    for idx, header in enumerate(
+        pipeline_headers,
+        start=1
+    ):
+
+        cell = ws_pipeline.cell(
+            row=4,
+            column=idx,
+            value=header
+        )
+
+        cell.font = font_hdr
+        cell.fill = fill_hdr
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True
+        )
+        cell.border = box_border
+
+    # -------------------------------------------------------------------------
+    # DATA
+    # -------------------------------------------------------------------------
+    # Sort rows by Pipeline Name for consistency with Sheet 1 order
+    pipeline_operation_rows.sort(
+        key=lambda x: x.get('pipeline_name', '').lower()
+    )
+
+    current_row = 5
+
+    for item in pipeline_operation_rows:
+
+        c1 = ws_pipeline.cell(
+            row=current_row,
+            column=1,
+            value=item['pipeline_name']
+        )
+
+        c2 = ws_pipeline.cell(
+            row=current_row,
+            column=2,
+            value=item['vessel_name']
+        )
+
+        c3 = ws_pipeline.cell(
+            row=current_row,
+            column=3,
+            value=item['operation_start']
+        )
+
+        c4 = ws_pipeline.cell(
+            row=current_row,
+            column=4,
+            value=item['operation_stop']
+        )
+
+        c5 = ws_pipeline.cell(
+            row=current_row,
+            column=5,
+            value=item.get('source', '')
+        )
+
+        for cell in (c1, c2, c3, c4, c5):
+
+            cell.font = font_data
+            cell.border = box_border
+            cell.alignment = Alignment(
+                vertical="center"
+            )
+
+        if item['operation_start']:
+
+            c3.number_format = (
+                "dd-mm-yyyy hh:mm:ss"
+            )
+
+        if item['operation_stop']:
+
+            c4.number_format = (
+                "dd-mm-yyyy hh:mm:ss"
+            )
+
+        current_row += 1
+
+    # -------------------------------------------------------------------------
+    # NO DATA MESSAGE
+    # -------------------------------------------------------------------------
+    if not pipeline_operation_rows:
+
+        ws_pipeline.merge_cells(
+            start_row=5,
+            start_column=1,
+            end_row=5,
+            end_column=5
+        )
+
+        no_data_cell = ws_pipeline.cell(
+            row=5,
+            column=1,
+            value=(
+                "No pipeline operations found "
+                "for the selected date and time range."
+            )
+        )
+
+        no_data_cell.font = font_data
+        no_data_cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center"
+        )
+
+    # -------------------------------------------------------------------------
+    # AUTO-FIT NEW SHEET
+    # -------------------------------------------------------------------------
+    pipeline_widths = {
+        1: 32,
+        2: 32,
+        3: 22,
+        4: 22,
+        5: 12
+    }
+
+    for col_idx, width in pipeline_widths.items():
+
+        ws_pipeline.column_dimensions[
+            get_column_letter(col_idx)
+        ].width = width
+
+    # -------------------------------------------------------------------------
+    # FREEZE HEADER
+    # -------------------------------------------------------------------------
+    ws_pipeline.freeze_panes = "A5"
 
     return wb
