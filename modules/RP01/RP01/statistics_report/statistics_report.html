@@ -754,11 +754,7 @@
         const eDateTime = txtEnd ? txtEnd.value : '';
 
         const exportBtn = document.getElementById('btnExportExcel');
-        if (currentTab === 'overview') {
-            exportBtn.href = `/api/module/RP01/statistics-report/export?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}`;
-        } else {
-            exportBtn.href = `/api/module/RP01/statistics-report/export-analytics?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}&start_date=${encodeURIComponent(sDateTime)}&end_date=${encodeURIComponent(eDateTime)}`;
-        }
+        exportBtn.href = `/api/module/RP01/statistics-report/export?fin_year=${encodeURIComponent(fy)}&month=${encodeURIComponent(mo)}&start_date=${encodeURIComponent(sDateTime)}&end_date=${encodeURIComponent(eDateTime)}`;
     }
 
     function applyCurrentFilter() {

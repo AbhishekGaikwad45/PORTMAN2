@@ -871,9 +871,12 @@ def statistics_report_api_export():
 
     fin_year = request.args.get('fin_year', cur_fy).strip()
     month = request.args.get('month', cur_month).strip()
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
 
     try:
         data = get_other_statistics_data(fin_year, month)
+        data_analytics = get_detailed_analytics_data(fin_year, month, start_date, end_date)
     except Exception as e:
         return jsonify({'error': f'Export failed: {e}'}), 500
 
@@ -1107,6 +1110,8 @@ def statistics_report_api_export():
         ws5.cell(row=cur_row, column=c).fill = fill_total
         ws5.cell(row=cur_row, column=c).border = total_border
     auto_fit_columns(ws5, 11)
+
+    _generate_analytics_excel(data_analytics, wb)
 
     bio = io.BytesIO()
     wb.save(bio)
@@ -2929,7 +2934,7 @@ def statistics_report_api_export_analytics():
     )
 
 
-def _generate_analytics_excel(data: dict) -> Workbook:
+def _generate_analytics_excel(data: dict, wb: Workbook = None) -> Workbook:
     """
     Build the multi-category analytics Excel workbook.
 
@@ -2944,9 +2949,13 @@ def _generate_analytics_excel(data: dict) -> Workbook:
         Operation Stop
     """
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Analytics_Report"
+    if wb is None:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Analytics_Report"
+    else:
+        ws = wb.create_sheet(title="Analytics_Report")
+
 
     font_title = Font(
         name="Calibri",
