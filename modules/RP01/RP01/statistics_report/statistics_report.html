@@ -15,7 +15,7 @@
         --rp-border: #E5E7EB;
         --rp-bg: #F9FAFB;
         --rp-card: #FFFFFF;
-        --rp-header-bg: #1E3A8A;
+        --rp-header-bg: #3e5bad;
     }
 
     .report-wrap * { box-sizing: border-box; }
@@ -219,7 +219,10 @@
     .table-filler-row td {
         height: 100%;
         padding: 0 !important;
-        border: none !important;
+        border-left: 1px solid #E5E7EB !important;
+        border-right: 1px solid #E5E7EB !important;
+        border-top: none !important;
+        border-bottom: none !important;
         background: transparent !important;
     }
 
@@ -262,16 +265,18 @@
         text-align: left;
     }
     table.data-table th {
-        background: #1F4E78;
-        color: #FFFFFF;
+        background: #EBF3FC;
+        color: #1F4E78;
         font-weight: 700;
         padding: 7px 9px;
-        border: 1px solid #1A3E61;
+        border: 1px solid #D1E3F8;
         white-space: nowrap;
         position: sticky;
         top: 0;
         z-index: 2;
         font-size: 11.5px;
+        background-clip: padding-box;
+        box-shadow: inset 0 1px 0 #D1E3F8, inset 0 -1px 0 #D1E3F8;
     }
     table.data-table td {
         padding: 6px 9px;
@@ -293,14 +298,17 @@
     }
     table.data-table tfoot td {
         background: #EBF3FC;
-        color: #1F4E78;
+        color: #225b8d;
         font-weight: 700;
-        border-top: 2px solid #1F4E78;
-        border-bottom: 2px solid #1F4E78;
+        border: 1px solid #E5E7EB !important;
+        border-top: 2px solid #1F4E78 !important;
+        border-bottom: 2px solid #1F4E78 !important;
         padding: 7px 9px;
         position: sticky;
         bottom: 0;
         z-index: 2;
+        background-clip: padding-box;
+        box-shadow: inset 0 2px 0 #1F4E78, inset 0 -2px 0 #1F4E78;
     }
 
     .pill {
@@ -535,9 +543,9 @@
                     <div class="report-box-header"><div class="report-box-title">Customerwise</div></div>
                     <div class="table-container">
                         <table class="data-table" id="tblAnalyticsCustomer">
-                            <thead><tr><th>Customer Code</th><th>Pipeline</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
+                            <thead><tr><th>Customer Code</th><th class="text-right">Qty handled in MT</th><th class="text-right">% of Qty</th></tr></thead>
                             <tbody></tbody>
-                            <tfoot><tr><td colspan="2">Total</td><td class="text-right font-mono" id="totAnalyticsCustomerQty">0.000</td><td class="text-right font-mono" id="totAnalyticsCustomerPct">100.0%</td></tr></tfoot>
+                            <tfoot><tr><td>Total</td><td class="text-right font-mono" id="totAnalyticsCustomerQty">0.000</td><td class="text-right font-mono" id="totAnalyticsCustomerPct">100.0%</td></tr></tfoot>
                         </table>
                     </div>
                 </div>
@@ -718,22 +726,22 @@
         const dd = String(today.getDate()).padStart(2, '0');
         const todayStr = `${yyyy}-${mm}-${dd}`;
 
-        let sDateTime = `${startYear}-04-01T00:00`;
-        let eDateTime = `${todayStr}T23:59`;
+        let sDateTime = `${startYear}-04-01T07:00`;
+        let eDateTime = `${todayStr}T07:00`;
 
         if (mo && mo.toLowerCase() !== 'all') {
             const mNum = MONTH_NUMBERS[mo] || 4;
             const y = mNum >= 4 ? startYear : (startYear + 1);
             const mStr = String(mNum).padStart(2, '0');
-            sDateTime = `${y}-${mStr}-01T00:00`;
+            sDateTime = `${y}-${mStr}-01T07:00`;
             const lastDay = new Date(y, mNum, 0).getDate();
             const lastDayStr = String(lastDay).padStart(2, '0');
-            eDateTime = `${y}-${mStr}-${lastDayStr}T23:59`;
+            eDateTime = `${y}-${mStr}-${lastDayStr}T07:00`;
         } else {
             if (startYear + 1 < yyyy || (startYear + 1 === yyyy && today.getMonth() >= 3)) {
-                eDateTime = `${startYear + 1}-03-31T23:59`;
+                eDateTime = `${startYear + 1}-03-31T07:00`;
             } else {
-                eDateTime = `${todayStr}T23:59`;
+                eDateTime = `${todayStr}T07:00`;
             }
         }
 
@@ -930,7 +938,6 @@
             const code = r.customer_code || r.name || '-';
             tr.innerHTML = `
                 <td><strong>${code}</strong></td>
-                <td>${r.pipeline || '-'}</td>
                 <td class="text-right font-mono">${formatNumber(r.qty_mt)}</td>
                 <td class="text-right font-mono pct-val">${formatPct(r.pct)}</td>
             `;
@@ -940,7 +947,7 @@
         // Filler row to maintain equal visual height
         const fillerTr = document.createElement('tr');
         fillerTr.className = 'table-filler-row';
-        fillerTr.innerHTML = '<td colspan="4"></td>';
+        fillerTr.innerHTML = '<td colspan="3"></td>';
         tbody.appendChild(fillerTr);
 
         const totalVal = groupData ? groupData.total_qty : 0;
