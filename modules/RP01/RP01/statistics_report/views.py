@@ -3435,7 +3435,7 @@ def _generate_analytics_excel(data: dict) -> Workbook:
 
         write_box(
             4,
-            13,
+            14,
             "Pipeline Utilisation",
             "Pipeline",
             "No of Hours",
@@ -3539,7 +3539,7 @@ def _generate_analytics_excel(data: dict) -> Workbook:
     # -------------------------------------------------------------------------
     # AUTO-FIT EXISTING ANALYTICS SHEET
     # -------------------------------------------------------------------------
-    for col_idx in range(1, 16):
+    for col_idx in range(1, 17):
 
         col_letter = get_column_letter(
             col_idx
