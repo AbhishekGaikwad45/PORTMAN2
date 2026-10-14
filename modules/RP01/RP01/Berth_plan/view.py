@@ -291,6 +291,8 @@ def _cumulative_as_of(cur, ldud_id, window_end):
         WHERE parcel_op_id = ANY(%s)
           AND is_deleted IS NOT TRUE
           AND is_shortclose IS NOT TRUE
+          AND COALESCE(UPPER(TRIM(remarks)), '') != 'SHORT CLOSE'
+          AND (remarks IS NULL OR remarks NOT ILIKE '%%short%%close%%')
           AND (NULLIF(entry_date, '')::timestamp
                + COALESCE(NULLIF(from_time, '')::time, '00:00'::time)) < %s
         GROUP BY parcel_op_id
@@ -346,6 +348,8 @@ def _per_parcel_completion(cur, ldud_id, window_end):
             WHERE parcel_op_id = %s
               AND is_deleted IS NOT TRUE
               AND is_shortclose IS NOT TRUE
+              AND COALESCE(UPPER(TRIM(remarks)), '') != 'SHORT CLOSE'
+              AND (remarks IS NULL OR remarks NOT ILIKE '%%short%%close%%')
         ''', [po_id])
         row = cur.fetchone()
         logged_qty = float(row['qty'] or 0)
@@ -454,6 +458,8 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
             WHERE parcel_op_id = %s
               AND is_deleted IS NOT TRUE
               AND is_shortclose IS NOT TRUE
+              AND COALESCE(UPPER(TRIM(remarks)), '') != 'SHORT CLOSE'
+              AND (remarks IS NULL OR remarks NOT ILIKE '%%short%%close%%')
         ''', [po_id])
         logged_qty = float(cur.fetchone()['qty'] or 0)
         in_progress = (target - logged_qty) > 0
@@ -522,6 +528,8 @@ def _enrich_vessel(cur, vcn_id, ldud_id, window_start, window_end):
         WHERE po.ldud_id = %s
         AND l.is_deleted IS NOT TRUE
         AND l.is_shortclose IS NOT TRUE
+        AND COALESCE(UPPER(TRIM(l.remarks)), '') != 'SHORT CLOSE'
+        AND (l.remarks IS NULL OR l.remarks NOT ILIKE '%%short%%close%%')
         AND (
                 NULLIF(l.entry_date, '')::timestamp
                 + COALESCE(NULLIF(l.from_time, '')::time, '00:00'::time)
@@ -783,6 +791,31 @@ def get_sailed_vessels(window_start, window_end, berths):
                 window_end
             )
         )
+
+        # Section B QUANTITY: Show Net BL Quantity matching LDUD01
+        # (Declared VCN BL + additional - short close)
+        cur.execute('''
+            SELECT COALESCE(SUM(po.additional_qty), 0) AS a
+            FROM ldud_parcel_ops po
+            WHERE po.ldud_id = %s
+        ''', [h['ldud_id']])
+        add_qty = float(cur.fetchone()['a'] or 0)
+
+        cur.execute('''
+            SELECT COALESCE(SUM(lg.quantity), 0) AS sc
+            FROM lueu_parcel_log lg
+            JOIN ldud_parcel_ops po ON po.id = lg.parcel_op_id
+            WHERE po.ldud_id = %s
+              AND lg.is_shortclose IS TRUE
+              AND lg.is_deleted IS NOT TRUE
+        ''', [h['ldud_id']])
+        sc_qty = float(cur.fetchone()['sc'] or 0)
+
+        decl_target = float(row.get('quantity') or 0)
+        net_bl_qty = decl_target + add_qty - sc_qty
+        row['declared_quantity'] = decl_target
+        row['quantity'] = int(net_bl_qty) if net_bl_qty.is_integer() else round(net_bl_qty, 3)
+
         if row.get("ops_commenced") and row.get("cargo_completion") and row.get("quantity"):
             try:
                 ops = datetime.strptime(row["ops_commenced"], "%d-%m-%Y %H:%M")
