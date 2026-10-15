@@ -147,7 +147,8 @@ def _load_live_pipeline_rows():
             JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
             JOIN ldud_header ld ON ld.id = po.ldud_id
             JOIN vcn_header h ON h.id = ld.vcn_id
-            WHERE l.is_deleted IS NOT TRUE
+            WHERE COALESCE(l.is_deleted, FALSE) = FALSE
+              AND COALESCE(ld.is_deleted, FALSE) = FALSE
               AND COALESCE(l.is_shortclose, FALSE) = FALSE
             GROUP BY ld.id,
                      ld.cast_off_datetime,
@@ -487,6 +488,9 @@ def build_report7_data(fin_year: str, selected_month: str = "Jun-26"):
         filtered_rows = [r for r in all_dataset_rows if str(r.get('month') or '').strip() == selected_month]
     else:
         filtered_rows = all_dataset_rows
+
+    # Only include vessels where cast off is complete (exclude partial data)
+    filtered_rows = [r for r in filtered_rows if r.get('cast_off')]
 
     def is_liquid(r):
         b = str(r.get('berth_no') or '').strip().upper()

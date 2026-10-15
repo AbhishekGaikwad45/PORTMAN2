@@ -217,7 +217,9 @@ def fetch_vessel_delay_data(year_filter=None, month_filter=None):
                 "delay_account": (r['delay_account'] or 'Port').strip(),
                 "start_time": _format_datetime(d_start),
                 "end_time": _format_datetime(d_end),
-                "hours": hrs_val
+                "hours": hrs_val,
+                "_raw_start": d_start,
+                "_raw_end": d_end
             })
 
         # =========================================================================
@@ -245,6 +247,7 @@ def fetch_vessel_delay_data(year_filter=None, month_filter=None):
               AND TRIM(lh.cast_off_datetime) != ''
             ORDER BY lh.id ASC
         """)
+        
         for r in cur.fetchall():
             d_cast_off = _parse_datetime(r['cast_off_datetime'])
             if not d_cast_off:
@@ -261,77 +264,108 @@ def fetch_vessel_delay_data(year_filter=None, month_filter=None):
             d_alongside = _parse_datetime(r['alongside_datetime'])
             d_pilot_dis = _parse_datetime(r['pilot_disembarked'])
 
+            # Universal Milestone Deduplication Helper
+            def is_milestone_duplicate(v_vcn, ms_start, ms_end, ms_type):
+                if not ms_start or not ms_end:
+                    return False
+                for existing in raw_rows:
+                    if existing.get("source_priority") == 1 and existing.get("vcn_no") == v_vcn:
+                        ex_start = existing.get("_raw_start")
+                        ex_end = existing.get("_raw_end")
+                        ex_name = str(existing.get("delay_name") or "").lower().replace(" ", "")
+                        
+                        if ex_start and ex_end:
+                            # 1. Specialized overlap check for Berth Not Available / Port Congestion
+                            if ms_type == "berth":
+                                has_berth = "berth" in ex_name
+                                has_congestion = "congestion" in ex_name
+                                is_unavailable = any(x in ex_name for x in ["notavail", "unavail", "notavaileb", "occup"])
+                                if (has_berth and is_unavailable) or has_congestion:
+                                    if ex_start <= ms_end and ms_start <= ex_end:
+                                        return True
+                            
+                            # 2. Universal exact-match check for ANY milestone
+                            # If a manual delay is virtually identical in time (within 1 hour)
+                            start_diff = abs((ex_start - ms_start).total_seconds())
+                            end_diff = abs((ex_end - ms_end).total_seconds())
+                            if start_diff <= 3600 and end_diff <= 3600:
+                                return True
+                return False
+
             # 1) Berth Not availeb (Anchorage / NOR -> Pilot Pickup)
             if d_anchored and d_pilot:
                 diff_sec = (d_pilot - d_anchored).total_seconds()
                 if diff_sec > 0:
-                    raw_rows.append({
-                        "sort_dt": ref_dt,
-                        "delay_dt": d_anchored,
-                        "source_priority": 2,
-                        "fin_year": fy,
-                        "month_idx": m_idx,
-                        "vcn_no": v_vcn,
-                        "vessel_name": v_vessel,
-                        "month": m_str,
-                        "delay_name": "Berth Not availeb",
-                        "delay_type": "Port",
-                        "delay_account": "Port",
-                        "start_time": _format_datetime(d_anchored),
-                        "end_time": _format_datetime(d_pilot),
-                        "hours": _format_duration_hh_mm(diff_sec)
-                    })
+                    if not is_milestone_duplicate(v_vcn, d_anchored, d_pilot, "berth"):
+                        raw_rows.append({
+                            "sort_dt": ref_dt,
+                            "delay_dt": d_anchored,
+                            "source_priority": 2,
+                            "fin_year": fy,
+                            "month_idx": m_idx,
+                            "vcn_no": v_vcn,
+                            "vessel_name": v_vessel,
+                            "month": m_str,
+                            "delay_name": "Berth Not availeb",
+                            "delay_type": "Port",
+                            "delay_account": "Port",
+                            "start_time": _format_datetime(d_anchored),
+                            "end_time": _format_datetime(d_pilot),
+                            "hours": _format_duration_hh_mm(diff_sec)
+                        })
 
             # 2) Pilot pick up- along side (Pilot Pickup -> Alongside)
             if d_pilot and d_alongside:
                 diff_sec = (d_alongside - d_pilot).total_seconds()
                 if diff_sec > 0:
-                    raw_rows.append({
-                        "sort_dt": ref_dt,
-                        "delay_dt": d_pilot,
-                        "source_priority": 3,
-                        "fin_year": fy,
-                        "month_idx": m_idx,
-                        "vcn_no": v_vcn,
-                        "vessel_name": v_vessel,
-                        "month": m_str,
-                        "delay_name": "Pilot pick up- along side",
-                        "delay_type": "Pilot",
-                        "delay_account": "Port",
-                        "start_time": _format_datetime(d_pilot),
-                        "end_time": _format_datetime(d_alongside),
-                        "hours": _format_duration_hh_mm(diff_sec)
-                    })
+                    if not is_milestone_duplicate(v_vcn, d_pilot, d_alongside, "pilot_pickup"):
+                        raw_rows.append({
+                            "sort_dt": ref_dt,
+                            "delay_dt": d_pilot,
+                            "source_priority": 3,
+                            "fin_year": fy,
+                            "month_idx": m_idx,
+                            "vcn_no": v_vcn,
+                            "vessel_name": v_vessel,
+                            "month": m_str,
+                            "delay_name": "Pilot pick up- along side",
+                            "delay_type": "Pilot",
+                            "delay_account": "Port",
+                            "start_time": _format_datetime(d_pilot),
+                            "end_time": _format_datetime(d_alongside),
+                            "hours": _format_duration_hh_mm(diff_sec)
+                        })
 
             # 3) cast of time - Pilot disemberd (Cast Off -> Pilot Disembarked)
             if d_cast_off and d_pilot_dis:
                 diff_sec = (d_pilot_dis - d_cast_off).total_seconds()
                 if diff_sec > 0:
-                    raw_rows.append({
-                        "sort_dt": ref_dt,
-                        "delay_dt": d_cast_off,
-                        "source_priority": 4,
-                        "fin_year": fy,
-                        "month_idx": m_idx,
-                        "vcn_no": v_vcn,
-                        "vessel_name": v_vessel,
-                        "month": m_str,
-                        "delay_name": "cast of time - Pilot disemberd",
-                        "delay_type": "Pilot",
-                        "delay_account": "Port",
-                        "start_time": _format_datetime(d_cast_off),
-                        "end_time": _format_datetime(d_pilot_dis),
-                        "hours": _format_duration_hh_mm(diff_sec)
-                    })
+                    if not is_milestone_duplicate(v_vcn, d_cast_off, d_pilot_dis, "cast_off"):
+                        raw_rows.append({
+                            "sort_dt": ref_dt,
+                            "delay_dt": d_cast_off,
+                            "source_priority": 4,
+                            "fin_year": fy,
+                            "month_idx": m_idx,
+                            "vcn_no": v_vcn,
+                            "vessel_name": v_vessel,
+                            "month": m_str,
+                            "delay_name": "cast of time - Pilot disemberd",
+                            "delay_type": "Pilot",
+                            "delay_account": "Port",
+                            "start_time": _format_datetime(d_cast_off),
+                            "end_time": _format_datetime(d_pilot_dis),
+                            "hours": _format_duration_hh_mm(diff_sec)
+                        })
 
         # Deduplicate identical records if any
-        seen_entries = set()
+        seen_times = set()
         deduped_rows = []
         for row in raw_rows:
-            entry_key = (row["vcn_no"], row["start_time"], row["end_time"], row["delay_name"])
-            if entry_key in seen_entries:
+            time_key = (row["vcn_no"], row["start_time"], row["end_time"])
+            if time_key in seen_times:
                 continue
-            seen_entries.add(entry_key)
+            seen_times.add(time_key)
             deduped_rows.append(row)
 
         # =========================================================================
