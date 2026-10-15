@@ -1,7 +1,7 @@
 """Read-only jnpa_* views that reproduce the RP01 Port Overview dashboard.
 
-A third party given role jnpa_dashboard_ro can rebuild the same dashboard
-from these views alone — base tables are never granted. Each view mirrors the
+A third party given SELECT on these views alone (no base tables) can rebuild
+the same dashboard. Access is granted outside migrations. Each view mirrors the
 Python it stands in for (named in its comment), including that code's quirks,
 so the numbers match the live dashboard.
 
@@ -18,11 +18,12 @@ Panel -> view:
   shift in-charge               jnpa_shift_incharge
   raw operational log           jnpa_parcel_log
 
+Helper views (jnpa_cargo_category_map, jnpa_vcn_parcels, jnpa_parcel_op_sources,
+jnpa_parcel_targets) feed the ones above and carry consignee names the
+dashboard never shows — no need to share them.
+
 Time-based views evaluate "now" in Asia/Kolkata whatever the session time zone;
 the operational day runs 07:00 -> 07:00 like the DPR.
-
-Granting access to a third party (run as an admin, not in a migration):
-    CREATE ROLE vendor_x LOGIN PASSWORD '...' IN ROLE jnpa_dashboard_ro;
 
 Revision ID: jnpa74_port_overview_views
 Revises: jnpa73_weather_cache
@@ -36,17 +37,6 @@ down_revision: Union[str, None] = 'jnpa73_weather_cache'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-READER = 'jnpa_dashboard_ro'
-
-# Granted to READER. Helper views (jnpa_cargo_category_map, jnpa_vcn_parcels,
-# jnpa_parcel_op_sources, jnpa_parcel_targets) stay ungranted: they carry
-# consignee names the dashboard never shows.
-PUBLIC_VIEWS = [
-    'jnpa_clock', 'jnpa_berths', 'jnpa_parcel_log', 'jnpa_parcels',
-    'jnpa_vessels_on_berth', 'jnpa_waiting_vessels', 'jnpa_cargo_throughput',
-    'jnpa_fy_targets', 'jnpa_cargo_cards', 'jnpa_pipeline_live', 'jnpa_pipelines',
-    'jnpa_delays_today', 'jnpa_tide', 'jnpa_weather', 'jnpa_shift_incharge',
-]
 # Drop order (dependents first).
 ALL_VIEWS = [
     'jnpa_shift_incharge', 'jnpa_weather', 'jnpa_tide', 'jnpa_delays_today',
@@ -767,15 +757,6 @@ LIMIT 1;
 def upgrade() -> None:
     op.execute(FUNCTIONS_SQL)
     op.execute(VIEWS_SQL)
-    op.execute(f"""
-        DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{READER}') THEN
-                CREATE ROLE {READER} NOLOGIN;
-            END IF;
-        END $$;
-    """)
-    op.execute(f"GRANT USAGE ON SCHEMA public TO {READER}")
-    op.execute(f"GRANT SELECT ON {', '.join(PUBLIC_VIEWS)} TO {READER}")
 
 
 def downgrade() -> None:
@@ -783,5 +764,3 @@ def downgrade() -> None:
         op.execute(f"DROP VIEW IF EXISTS {v}")
     for f in FUNCTIONS:
         op.execute(f"DROP FUNCTION IF EXISTS {f}")
-    op.execute(f"REVOKE USAGE ON SCHEMA public FROM {READER}")
-    op.execute(f"DROP ROLE IF EXISTS {READER}")
