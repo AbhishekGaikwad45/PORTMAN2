@@ -13,7 +13,9 @@ from flask import render_template, session, redirect, url_for, jsonify
 
 from .. import bp
 from database import get_db, get_cursor
-from ..dpr.dpr import _get_section_b, _get_fy_info
+from ..dpr.dpr import (_get_section_b, _get_fy_info, _load_vessel_cargo_map,
+                       _categorize_cargo, _parse_entry_dt)
+from ..report5.report5 import CUTOVER_DATE
 from ..Berth_plan.view import get_berths, get_berthed_vessels, get_expected_waiting_vessels
 from modules.LUEU01.model import get_started_parcels
 from weather_service import get_weather
@@ -54,6 +56,42 @@ def _section_b(cur, selected_date, window_start, window_end):
     """DPR Section B as {row_key: {category: qty}}."""
     rows = _get_section_b(cur, selected_date, window_start, window_end)
     return {k: {c: float(r.get(c) or 0) for c in CATEGORIES} for k, r in zip(_SECTION_B_KEYS, rows)}
+
+
+def _month_by_type(cur, op_date):
+    """Report 5's month total (report5.fetch_month_figures; view
+    jnpa_month_totals), split by liquid category. MIS before the cutover or once
+    MIS has the month; otherwise the LUEU log of vessels that cast off in this
+    calendar month."""
+    mon_yy = op_date.strftime('%b-%y')
+    vc_map = _load_vessel_cargo_map(cur)
+    out = dict.fromkeys(CATEGORIES, 0.0)
+    cur.execute("SELECT 1 FROM mis_vessel_master WHERE TRIM(month) = %s LIMIT 1", [mon_yy])
+    if op_date.replace(day=1) < CUTOVER_DATE or cur.fetchone():
+        cur.execute("""
+            SELECT cargo, new_cat, category1, category, SUM(COALESCE(quantity, 0)) AS qty
+            FROM mis_vessel_master WHERE TRIM(month) = %s
+            GROUP BY cargo, new_cat, category1, category
+        """, [mon_yy])
+        for r in cur.fetchall():
+            cat = _categorize_cargo(r['cargo'], r['new_cat'], r['category1'], r['category'], vc_map=vc_map)
+            out[cat] += float(r['qty'] or 0)
+        return out
+    cur.execute("""
+        SELECT po.cargo_name, h.cast_off_datetime, SUM(l.quantity) AS qty
+        FROM lueu_parcel_log l
+        JOIN ldud_parcel_ops po ON po.id = l.parcel_op_id
+        JOIN ldud_header h ON h.id = po.ldud_id
+        WHERE l.is_deleted IS NOT TRUE AND h.is_deleted IS NOT TRUE
+          AND l.is_shortclose IS NOT TRUE AND l.quantity IS NOT NULL
+          AND NULLIF(TRIM(h.cast_off_datetime), '') IS NOT NULL
+        GROUP BY po.cargo_name, h.cast_off_datetime
+    """)
+    for r in cur.fetchall():
+        cast_off = _parse_entry_dt(r['cast_off_datetime'])
+        if cast_off and (cast_off.year, cast_off.month) == (op_date.year, op_date.month):
+            out[_categorize_cargo(r['cargo_name'], vc_map=vc_map)] += float(r['qty'])
+    return out
 
 
 def _target_totals(targets_json, month_abbr):
@@ -338,6 +376,7 @@ def port_overview_data():
         cur = get_cursor(conn)
         live = _section_b(cur, op_date, day_start, now)
         yday = _section_b(cur, op_date, day_start - timedelta(days=1), day_start)['day']
+        month = _month_by_type(cur, op_date)
 
         cur.execute("SELECT targets FROM financial_year_targets WHERE financial_year = %s", [fy_label])
         row = cur.fetchone()
@@ -357,13 +396,13 @@ def port_overview_data():
 
     fy_end = date(fy_start.year + 1, 3, 31)
     month_days_left = calendar.monthrange(op_date.year, op_date.month)[1] - op_date.day + 1
-    month_total = sum(live['month'].values())
+    month_total = sum(month.values())
     fy_total = sum(live['fy'].values())
 
     cards = {
         'today':         {'label': 'Today', 'by_type': live['day']},
         'yesterday':     {'label': 'Yesterday', 'by_type': yday},
-        'current_month': {'label': op_date.strftime('%b %Y'), 'by_type': live['month'],
+        'current_month': {'label': op_date.strftime('%b %Y'), 'by_type': month,
                           'target': month_target,
                           'required_daily': _required_daily(month_target, month_total, month_days_left)},
         'current_fy':    {'label': f'FY {fy_label}', 'by_type': live['fy'],
