@@ -318,10 +318,11 @@ MIN_HOURS_FOR_ACTUAL = 4      # must match MIN_HOURS_FOR_ACTUAL in lueu01.html
 MAX_REASONABLE_DAYS = 90      # if the actual-rate ETC projects beyond this, treat it as unreliable
 def _per_parcel_completion(cur, ldud_id, window_end):
     """ETC per parcel_op (= per discharge line running in parallel), computed
-    the same way LUEU01 shows it: start_dt + (target_qty / actual_rate),
-    using ALL logged entries (no window cutoff, no minimum-hours gate) so it
-    matches LUEU01's live ETC exactly. Falls back to Expected Start/Rate only
-    when there's no actual logged data at all yet."""
+    the same way LUEU01 shows it: LUEU01.current_etc (last log end + balance /
+    current flow rate), using ALL logged entries (no window cutoff, no
+    minimum-hours gate) so it matches LUEU01's live ETC exactly. Falls back to
+    Expected Start/Rate only when there's no actual logged data at all yet."""
+    from modules.LUEU01.model import current_etc
     cur.execute('''
         SELECT id, quantity, start_dt, expected_start, expected_flow_rate
         FROM ldud_parcel_ops
@@ -335,37 +336,22 @@ def _per_parcel_completion(cur, ldud_id, window_end):
         target = float(po['quantity'] or 0)
 
         cur.execute('''
-            SELECT COALESCE(SUM(quantity), 0) AS qty,
-                   COALESCE(SUM(
-                     EXTRACT(EPOCH FROM (
-                       COALESCE(NULLIF(to_time,'')::time, '00:00'::time)
-                       - COALESCE(NULLIF(from_time,'')::time, '00:00'::time)
-                       + CASE WHEN NULLIF(to_time,'')::time < NULLIF(from_time,'')::time
-                              THEN INTERVAL '24 hours' ELSE INTERVAL '0' END
-                     )) / 3600.0
-                   ), 0) AS hrs
+            SELECT entry_date, from_time, to_time, COALESCE(quantity, 0) AS quantity
             FROM lueu_parcel_log
             WHERE parcel_op_id = %s
               AND is_deleted IS NOT TRUE
               AND is_shortclose IS NOT TRUE
               AND COALESCE(UPPER(TRIM(remarks)), '') != 'SHORT CLOSE'
               AND (remarks IS NULL OR remarks NOT ILIKE '%%short%%close%%')
+            ORDER BY entry_date, from_time NULLS LAST, id
         ''', [po_id])
-        row = cur.fetchone()
-        logged_qty = float(row['qty'] or 0)
-        hours = float(row['hrs'] or 0)
+        rows = cur.fetchall()
+        logged_qty = sum(float(r['quantity'] or 0) for r in rows)
         balance = target - logged_qty
 
         etc, planned = None, False
         if balance > 0:
-            if hours > 0 and logged_qty > 0 and po.get('start_dt'):
-                rate = logged_qty / hours
-                try:
-                    start_dt = datetime.strptime(
-                        str(po['start_dt']).replace('T', ' ')[:16], '%Y-%m-%d %H:%M')
-                    etc = start_dt + timedelta(hours=target / rate)
-                except ValueError:
-                    pass
+            _, etc = current_etc(rows, balance)
             if etc is None:
                 exp_rate = float(po.get('expected_flow_rate') or 0)
                 exp_start = po.get('expected_start')

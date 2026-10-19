@@ -89,13 +89,11 @@ def test_merge_keeps_a_zero_gst_line_off_a_taxed_one():
 # ── A2: Invoice_Amount rebuilt from components ───────────────────────────────
 
 def test_total_invoice_amount_is_built_from_components_not_total_amount():
-    """Invoice_Amount = taxable + GST + TCS + round-off.
+    """Invoice_Amount = taxable + GST + TDS - TCS + round-off.
 
-    TCS is collected *from* the customer, so it is part of what they owe and is
-    added. TDS does not move it at all: the customer is invoiced gross and
-    withholds at payment time. Both match einvoice_builder's TotInvVal, which
-    the IRP validates against the same figure. See test_sap_invoice_amount for
-    the production documents that pinned this down.
+    That is what SAP's FIIF059 debit/credit check balances against — not the
+    printed face value. See test_sap_invoice_amount for the SAP responses that
+    pinned this down.
     """
     header = {
         'subtotal': 10000, 'cgst_amount': 900, 'sgst_amount': 900, 'igst_amount': 0,
@@ -104,7 +102,7 @@ def test_total_invoice_amount_is_built_from_components_not_total_amount():
         'total_amount': 999999,
     }
     total = sap_builder._total_invoice_amount(header, [])
-    assert round(total, 2) == round(10000 + 900 + 900 + 118 + 0.18, 2)
+    assert round(total, 2) == round(10000 + 900 + 900 + 200 - 118 + 0.18, 2)
 
 
 def test_total_invoice_amount_falls_back_to_the_lines():
@@ -113,7 +111,7 @@ def test_total_invoice_amount_falls_back_to_the_lines():
         {'line_amount': 4000, 'cgst_amount': 360, 'sgst_amount': 360, 'tcs_amount': 40},
     ]
     total = sap_builder._total_invoice_amount({}, lines)
-    assert round(total, 2) == round(10000 + 900 + 900 + 100, 2)
+    assert round(total, 2) == round(10000 + 900 + 900 - 100, 2)
 
 
 # ── A4: IRP rejects a ValDtls that does not balance ──────────────────────────
