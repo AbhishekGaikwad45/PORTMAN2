@@ -823,6 +823,52 @@ def approve_record(record_id, username):
     conn.close()
 
 
+PARCEL_TABLES = {'consigners': 'vcn_consigners', 'export_cargo': 'vcn_export_cargo_declaration'}
+_ROUTE_FIELDS = (('pipeline_name', 'Pipeline'), ('unload_terminal', 'Terminal'))
+
+
+def amend_parcel_route(kind, row_id, data, reason, username):
+    """Change Pipeline / Terminal on a parcel of an Approved VCN — the only
+    parcel edit allowed after approval (quantity etc. stay locked). Needs a
+    reason; the old -> new values and the reason go to approval_log, which is
+    the VCN's audit trail (Approval History). Returns the vcn_id."""
+    table = PARCEL_TABLES.get(kind)
+    if not table:
+        raise ValueError('Unknown parcel type')
+    reason = (reason or '').strip()
+    if not reason:
+        raise ValueError('A reason is required to change Pipeline / Terminal')
+    new = {f: (data.get(f) or '').strip() for f, _ in _ROUTE_FIELDS}
+    if not new['pipeline_name'] or not new['unload_terminal']:
+        raise ValueError('Pipeline and Terminal are both required')
+
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute(f'''SELECT p.vcn_id, p.parcel_no, p.pipeline_name, p.unload_terminal, h.doc_status
+                        FROM {table} p JOIN vcn_header h ON h.id = p.vcn_id
+                        WHERE p.id = %s FOR UPDATE OF p''', [row_id])
+        old = cur.fetchone()
+        if not old:
+            raise ValueError('Parcel not found')
+        if old['doc_status'] != 'Approved':
+            raise ValueError('Only parcels of an Approved VCN are amended here — save the draft normally')
+        changes = [f"{label}: {old[f] or '—'} → {new[f]}"
+                   for f, label in _ROUTE_FIELDS if (old[f] or '').strip() != new[f]]
+        if not changes:
+            raise ValueError('No change to Pipeline / Terminal')
+        cur.execute(f'UPDATE {table} SET pipeline_name=%s, unload_terminal=%s WHERE id=%s',
+                    [new['pipeline_name'], new['unload_terminal'], row_id])
+        cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('VCN01', %s, 'Parcel Route Changed', %s, %s)""",
+                    [old['vcn_id'], f"{reason} [{old['parcel_no'] or '#' + str(row_id)}: {'; '.join(changes)}]",
+                     username])
+        conn.commit()
+        return old['vcn_id']
+    finally:
+        conn.close()
+
+
 def get_approval_log(record_id):
     conn = get_db()
     cur = get_cursor(conn)
@@ -831,7 +877,8 @@ def get_approval_log(record_id):
                           to_char(actioned_at, 'DD-MM-YYYY HH24:MI') AS actioned_at,
                           (proof_bytes IS NOT NULL) AS has_proof
                    FROM approval_log WHERE module_code='VCN01' AND record_id=%s
-                   ORDER BY actioned_at DESC""", (record_id,))
+                   ORDER BY approval_log.actioned_at DESC, id DESC""", (record_id,))
+    # (qualified: a bare actioned_at here sorts the DD-MM-YYYY text alias, not the timestamp)
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
