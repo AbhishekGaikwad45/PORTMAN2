@@ -57,17 +57,18 @@ def test_lines_without_tax_flags_are_zero():
 
 # ── The three documents must agree ───────────────────────────────────────────
 
-def test_bill_total_matches_sap_and_the_irp():
-    """The printed total, SAP's Invoice_Amount and the IRP's TotInvVal are the
-    same number. They are computed by three different code paths, so this is
-    the check that actually catches a convention drifting."""
+def test_bill_total_matches_the_irp_and_sap_nets_tcs():
+    """The printed total and the IRP's TotInvVal include TCS. SAP's
+    Invoice_Amount does not: its FIIF059 check balances it as base - TCS
+    (see test_sap_invoice_amount), so it sits exactly 2x TCS below them."""
     header = {'subtotal': 502000.00, 'cgst_amount': 45180.00, 'sgst_amount': 45180.00,
               'igst_amount': 0.0, 'tds_amount': 0.0, 'tcs_amount': 11847.20,
               'round_off': 0.0}
     printed = bill_totals([LINE_101])['total_amount']
     sap = round(sap_builder._total_invoice_amount(header, [LINE_101]), 2)
     irp = round(502000.00 + 45180.00 + 45180.00 + 11847.20, 2)  # TotInvVal
-    assert printed == sap == irp == 604207.20
+    assert printed == irp == 604207.20
+    assert sap == round(irp - 2 * 11847.20, 2) == 580512.80
 
 
 # ── Aggregate-per-rate GST (what lets SAP auto-post) ─────────────────────────

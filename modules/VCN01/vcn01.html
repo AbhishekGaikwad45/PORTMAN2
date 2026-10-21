@@ -1254,12 +1254,35 @@
     const QTY_TOTAL = {topCalc: qtyTopCalc, topCalcFormatter: "money",
                        topCalcFormatterParams: {precision: 3, thousand: ","}};
 
+    // Approved VCN: a Pipeline/Terminal change saves straight away with a mandatory
+    // reason (server logs it to the Approval History). Waits while the pipeline
+    // has no terminal yet — changing the pipeline drops terminals it doesn't serve.
+    async function amendRoute(type, row, vcnId) {
+        const d = row.getData();
+        if (!_splitMulti(d.pipeline_name).length || !_splitMulti(d.unload_terminal).length) {
+            alert('Select both Pipeline and Terminal — the change saves once both are set.');
+            return;
+        }
+        const reason = (prompt(`Reason for changing Pipeline / Terminal on ${d.parcel_no || 'this parcel'}:`) || '').trim();
+        if (!reason) { alert('Reason required — change discarded.'); row.getTable().replaceData(); return; }
+        const res = await fetch('/api/module/VCN01/parcel/amend', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type, id: d.id, pipeline_name: d.pipeline_name,
+                                  unload_terminal: d.unload_terminal, reason})
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!out.success) { alert(out.error || 'Could not save the change'); row.getTable().replaceData(); return; }
+        showSubStatus(type, vcnId, 'Pipeline / Terminal updated');
+    }
+
     async function initSubTables(vcnId, operationType = 'Import') {
         const _vcnRow = table.getRows().find(r => r.getData().id === vcnId);
         const _vcnData = _vcnRow ? _vcnRow.getData() : {};
         const _isApproved = _vcnData.doc_status === 'Approved';
         const _isUnlocked = isDraftRow(_vcnData.doc_status) || (editMode && (_vcnRow?.isSelected() ?? false));
         const canEdit = (permissions.can_edit || permissions.can_add) && _isUnlocked;
+        // Approved: only Pipeline / Terminal stay editable (with a reason, via amendRoute)
+        const canRoute = !canEdit && _isApproved && !!(permissions.can_edit || permissions.can_add);
         const canDelays = !!(permissions.can_edit || permissions.can_add);  // delays ignore the lock
         const isDark = localStorage.getItem('theme') === 'dark';
 
@@ -1285,7 +1308,7 @@
             columnDefaults: { headerSort: true },   // click header to sort asc/desc
             dataLoaded: function() { renderCargoQuotas(vcnId); },
             rowFormatter: removedRowFormatter,
-            cellEdited: () => markDirty('consigners'),
+            cellEdited: () => { if (canEdit) markDirty('consigners'); },
             columns: [
                 {title: "Parcel No", field: "parcel_no", width: 130},
                 {title: "Ln", field: "igm_line_no", width: 70, widthGrow: 0, hozAlign: "center",
@@ -1316,7 +1339,7 @@
                     editorParams: {values: consignerOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                 },
                 {title: "Pipeline", field: "pipeline_name", widthGrow: 1, formatter: cargoPillFormatter,
-                    editor: canEdit ? "list" : false,
+                    editor: (canEdit || canRoute) ? "list" : false,
                     editorParams: {values: pipelineNames, autocomplete: true, allowEmpty: true, listOnEmpty: true},
                     cellEdited: function(cell) {
                         // one pipeline per parcel — drop terminals no longer mapped to it
@@ -1324,6 +1347,7 @@
                         const allowed = terminalsForRow(row.getData());
                         const kept = _splitMulti(row.getData().unload_terminal).filter(t => allowed.includes(t));
                         row.update({unload_terminal: kept.join(', ')});
+                        if (canRoute) amendRoute('consigners', row, vcnId);
                     }
                 },
                 {title: "Terminal", field: "unload_terminal", widthGrow: 1.2,
@@ -1332,9 +1356,10 @@
                             return '<span style="color:#cbd5e1;font-style:italic;">select pipeline first</span>';
                         return cargoPillFormatter(cell);
                     },
-                    editor: canEdit ? makeMultiSelectEditor(cell => terminalsForRow(cell.getRow().getData())) : false,
+                    editor: (canEdit || canRoute) ? makeMultiSelectEditor(cell => terminalsForRow(cell.getRow().getData())) : false,
                     // terminal is only selectable once a pipeline is chosen (PLTM01 mapping drives the options)
-                    editable: function(cell) { return canEdit && _splitMulti(cell.getRow().getData().pipeline_name).length > 0; }
+                    editable: function(cell) { return (canEdit || canRoute) && _splitMulti(cell.getRow().getData().pipeline_name).length > 0; },
+                    cellEdited: function(cell) { if (canRoute) amendRoute('consigners', cell.getRow(), vcnId); }
                 },
                 {title: "Toll", field: "toll_applicable", width: 70, widthGrow: 0, hozAlign: "center",
                     formatter: "tickCross", formatterParams: {allowEmpty: true},
@@ -1456,7 +1481,7 @@
                 ajaxURL: `/api/module/VCN01/export_cargo/${vcnId}`,
                 columnDefaults: { headerSort: false },
                 rowFormatter: removedRowFormatter,
-                cellEdited: () => markDirty('export_cargo'),
+                cellEdited: () => { if (canEdit) markDirty('export_cargo'); },
                 columns: [
                     {title: "Parcel No", field: "parcel_no", width: 130, headerSort: false},
                     {title: "Ln", field: "igm_line_no", width: 70, widthGrow: 0, hozAlign: "center",
@@ -1482,13 +1507,14 @@
                         editorParams: {values: consignerOptions, autocomplete: true, allowEmpty: true, listOnEmpty: true}
                     },
                     {title: "Pipeline", field: "pipeline_name", widthGrow: 1, formatter: cargoPillFormatter,
-                        editor: canEdit ? "list" : false,
+                        editor: (canEdit || canRoute) ? "list" : false,
                         editorParams: {values: pipelineNames, autocomplete: true, allowEmpty: true, listOnEmpty: true},
                         cellEdited: function(cell) {
                             const row = cell.getRow();
                             const allowed = terminalsForRow(row.getData());
                             const kept = _splitMulti(row.getData().unload_terminal).filter(t => allowed.includes(t));
                             row.update({unload_terminal: kept.join(', ')});
+                            if (canRoute) amendRoute('export_cargo', row, vcnId);
                         }
                     },
                     {title: "Terminal", field: "unload_terminal", widthGrow: 1.2,
@@ -1497,8 +1523,9 @@
                                 return '<span style="color:#cbd5e1;font-style:italic;">select pipeline first</span>';
                             return cargoPillFormatter(cell);
                         },
-                        editor: canEdit ? makeMultiSelectEditor(cell => terminalsForRow(cell.getRow().getData())) : false,
-                        editable: function(cell) { return canEdit && _splitMulti(cell.getRow().getData().pipeline_name).length > 0; }
+                        editor: (canEdit || canRoute) ? makeMultiSelectEditor(cell => terminalsForRow(cell.getRow().getData())) : false,
+                        editable: function(cell) { return (canEdit || canRoute) && _splitMulti(cell.getRow().getData().pipeline_name).length > 0; },
+                        cellEdited: function(cell) { if (canRoute) amendRoute('export_cargo', cell.getRow(), vcnId); }
                     },
                     {title: "Toll", field: "toll_applicable", width: 70, widthGrow: 0, hozAlign: "center",
                         formatter: "tickCross", formatterParams: {allowEmpty: true},

@@ -228,7 +228,7 @@
     const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${p(dt.getDate())} ${mon[dt.getMonth()]} ${dt.getFullYear()}, ${p(dt.getHours())}:${p(dt.getMinutes())}`;
   }
-  // ETC = parcel Start + total time to discharge the full target at the avg rate.
+  // Planned ETC = Start + total time to discharge the full target at the given rate.
   function etcText(rate, target, startDt) {
     if (!(rate > 0) || !startDt) return '';
     const start = new Date(startDt);
@@ -240,10 +240,12 @@
       + `padding:1px 9px;margin-right:5px;font-size:11px;"><span style="color:#64748b;">${label}</span>`
       + `<b style="color:#0f172a;">${val}</b></span>`;
   }
-  function metricsHTML(rate, hours, remaining, startDt, target) {
+  // Actual ETC runs at the current flow (curRate = latest row that moved cargo),
+  // not the Avg — a slow start would hold it days out. Same rule as model.current_etc.
+  function metricsHTML(rate, hours, remaining, curRate, etc) {
     let html = metricsChip('Avg', `${(+rate).toFixed(1)} MT/Hr`) + metricsChip('Run', `${(+hours).toFixed(1)} h`);
-    const etc = (remaining > 0) ? etcText(rate, target, startDt) : '';
-    if (etc) html += metricsChip('ETC', etc);
+    if (remaining > 0 && curRate > 0) html += metricsChip('Now', `${(+curRate).toFixed(1)} MT/Hr`);
+    if (remaining > 0 && etc && !isNaN(etc)) html += metricsChip('ETC', fmtDateTime(etc));
     if (remaining < 0) html += `<span style="color:#dc2626;font-weight:600;font-size:11px;">over by ${r3(Math.abs(remaining))}</span>`;
     return html;
   }
@@ -254,17 +256,25 @@
     const t = subTables[pid];
     if (!t) return;
     const target = parcelTargets[pid] || 0;
-    let cum = 0, hours = 0;
+    let cum = 0, hours = 0, curRate = 0, lastEnd = null;
     t.getRows().forEach(row => {
       const d = row.getData();
       // ponytail: once the parcel qty is complete, later rows add no Run hours/ETC
       const complete = target > 0 && cum >= target - 1e-6;
-      cum += parseFloat(d.quantity || 0) || 0;
-      if (!complete) hours += rowHours(d.from_time, d.to_time);
+      const q = parseFloat(d.quantity || 0) || 0, h = rowHours(d.from_time, d.to_time);
+      cum += q;
+      if (!complete) hours += h;
+      if (!complete && !d.is_shortclose) {
+        if (q > 0 && h > 0) curRate = q / h;
+        const s = toDT(d.entry_date, d.from_time);
+        if (s) { const e = new Date(s.getTime() + h * 3600e3); if (!lastEnd || e > lastEnd) lastEnd = e; }
+      }
     });
     t.getRows().forEach(r => r.reformat());   // refresh self-computing Total/Rem cells
+    const rem = target - cum;
+    const etc = (lastEnd && curRate > 0 && rem > 0) ? new Date(lastEnd.getTime() + rem / curRate * 3600e3) : null;
     const m = document.getElementById(`metrics-${pid}`);
-    if (m) m.innerHTML = metricsHTML(hours > 0 ? cum / hours : 0, hours, target - cum, parcelStart[pid], target);
+    if (m) m.innerHTML = metricsHTML(hours > 0 ? cum / hours : 0, hours, rem, curRate, etc);
   }
 
   // When a parcel's logged total reaches its target, auto-set its End to the last
@@ -429,7 +439,7 @@
         <div class="parcel-head" onclick="toggleParcel(${p.parcel_op_id})">
           <div><b>${p.parcel_no}</b> — ${p.cargo_name}${term}${pipe}
             <span id="status-${p.parcel_op_id}" style="font-size:11px;font-weight:600;color:${statusColor};margin-left:6px;">● ${p.status}</span>${lockBadge}
-            <span id="metrics-${p.parcel_op_id}" style="margin-left:10px;">${metricsHTML(p.avg_rate, p.op_hours, p.remaining_qty, p.start_dt, p.target_qty)}</span></div>
+            <span id="metrics-${p.parcel_op_id}" style="margin-left:10px;">${metricsHTML(p.avg_rate, p.op_hours, p.remaining_qty, p.cur_rate, p.etc ? new Date(p.etc) : null)}</span></div>
           <div class="progress-pill">${p.logged_qty} / ${p.target_qty} ${p.uom} (${pct}%)</div>
         </div>
         <div id="log-wrap-${p.parcel_op_id}" style="display:${open ? 'block' : 'none'};padding:0 8px 8px;">

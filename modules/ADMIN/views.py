@@ -4,6 +4,7 @@ from flask import (Blueprint, render_template, request, jsonify, session,
                    redirect, url_for, send_file)
 from functools import wraps
 from database import get_db, get_cursor, get_module_config, save_module_config
+import sap_sandbox
 import json
 import os
 import re
@@ -471,6 +472,34 @@ def test_sap_connection():
         return jsonify({'success': False, 'message': f'HTTP {resp.status_code}: {resp.text[:200]}'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
+# ── SAP Sandbox (send a hand-edited payload; logged in sap_sandbox_log) ───────
+
+@bp.route('/api/sap-sandbox/envs')
+@admin_required
+def sap_sandbox_envs():
+    return jsonify(sap_sandbox.environments())
+
+
+@bp.route('/api/sap-sandbox/send', methods=['POST'])
+@admin_required
+def sap_sandbox_send():
+    d = request.json or {}
+    try:
+        payload = json.loads(d.get('payload') or '')
+    except ValueError as e:
+        return jsonify({'error': f'Payload is not valid JSON: {e}'}), 400
+    try:
+        return jsonify(sap_sandbox.send(d.get('config_id'), payload, session.get('username'),
+                                        confirm_production=bool(d.get('confirm_production'))))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@bp.route('/api/sap-sandbox/log')
+@admin_required
+def sap_sandbox_log():
+    return jsonify(sap_sandbox.history())
 
 # ── Port Bank Accounts ────────────────────────────────────────────────────────
 

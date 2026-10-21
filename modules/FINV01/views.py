@@ -1284,7 +1284,6 @@ def _build_sample_payload(invoice, lines, cancel=False):
         except ValueError:
             pass
 
-    total = float(invoice.get('total_amount') or 0)
     gstin = invoice.get('customer_gstin') or ''
 
     cust_info = sap_builder._get_customer_sap_info(
@@ -1300,7 +1299,8 @@ def _build_sample_payload(invoice, lines, cancel=False):
     reference = inv_num
 
     items = []
-    if not cancel:
+    # Reversal payload uses the same items as the original invoice, only Cancellation_Flag changes.
+    if True:
         for l in lines:
             svc = svc_map.get(l.get('service_code') or '', {})
             cgst = float(l.get('cgst_amount') or 0)
@@ -1310,9 +1310,9 @@ def _build_sample_payload(invoice, lines, cancel=False):
             qty = l.get('quantity')
             items.append({
                 'Reference':        reference[:16],
-                'GL_account':       (svc.get('sap_gl_account') or l.get('service_code') or l.get('gl_code') or '')[:10],
+                'GL_account':       (svc.get('sap_gl_account') or l.get('gl_code') or '')[:10],
                 'Amount':           f'{float(l.get("line_amount") or 0):.2f}',
-                'Tax_Code':         l.get('sap_tax_code') or svc.get('sap_tax_code') or '',
+                'Tax_Code':         '',
                 'Cost_Center':      l.get('cost_center') or svc.get('sap_cost_center') or '',
                 'Plant':            company,
                 'Text':             (l.get('service_name') or '')[:25],
@@ -1327,9 +1327,9 @@ def _build_sample_payload(invoice, lines, cancel=False):
                 'UOM':              l.get('uom') or svc.get('uom') or '',
                 'Unit_Price':       f'{float(unit_price):.2f}' if unit_price is not None else '',
                 'Quantity':         f'{float(qty):.3f}' if qty is not None else '',
-                'TDS_GL':           svc.get('sap_tds_gl') or '',
+                'TDS_GL':           (svc.get('sap_tds_gl') or '') if (int(l.get('tds_applicable') or 0) or float(l.get('tds_amount') or 0) > 0) else '',
                 'TDS_amount':       f'{float(l.get("tds_amount") or 0):.2f}' if l.get('tds_amount') else '',
-                'TCS_GL':           svc.get('sap_tcs_gl') or '',
+                'TCS_GL':           (svc.get('sap_tcs_gl') or '') if (int(l.get('tcs_applicable') or 0) or float(l.get('tcs_amount') or 0) > 0) else '',
                 'TCS_amount':       f'{float(l.get("tcs_amount") or 0):.2f}' if l.get('tcs_amount') else '',
                 'Round_off_GL':     '',
                 'Round_off_Value':  '',
@@ -1341,25 +1341,27 @@ def _build_sample_payload(invoice, lines, cancel=False):
         'Invoice_date':          inv_date,
         'Posting_Date':          inv_date,
         'Reference':             (reference if not cancel else reference)[:16],
-        'Document_type':         'INV',
+        'Document_type':         'DR',
         'Customer_Code':         customer_code[:10],
-        'Invoice_Amount':        f'{total:.2f}',
+        'Invoice_Amount':        '',
         'Business_place':        company,
         'Section_code':          company,
         'Text':                  reference[:25],
         'Document_Header_Text':  (f"REV {inv_num}" if cancel else inv_num)[:25],
         'Payment_Term':          '',
         'Credit_Control_Area':   company,
-        'Cancellation_Flag':     'F' if cancel else '',
+        'Cancellation_Flag':     'X' if cancel else '',
         'Nature_of_transaction': 'B2B' if gstin else 'B2C',
         'Service_Sale':          sap_builder._service_sale_flag(lines, svc_map),
         'Currency':              invoice.get('currency_code') or 'INR',
         'Payment_term':          '',
         'Baseline_Date':         inv_date,
     }
-    if not cancel:
-        record['ITEM'] = items
-    return {'Record_Header': [record]}
+    record['ITEM'] = items
+    # Invoice_Amount derived from the items, same rule as the live builder.
+    record['Invoice_Amount'] = sap_builder._fmt_amount_required(
+        sap_builder._total_invoice_amount(invoice, lines))
+    return {'Record_Header': [sap_builder._balance_invoice_amount(record)]}
 
 
 # ===== SAP JSON Export (temporary — for SAP team review) =====

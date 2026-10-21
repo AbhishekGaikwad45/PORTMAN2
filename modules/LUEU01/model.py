@@ -1,5 +1,5 @@
 from database import get_db, get_cursor
-from datetime import datetime
+from datetime import datetime, timedelta
 # Target resolution lives in LDUD01 (owner of ldud_parcel_ops) so every
 # screen computes the BL/target figure the same way.
 from modules.LDUD01.model import (parcel_source_table, source_quantities,
@@ -28,6 +28,32 @@ def _hours(f, t):
     if mins < 0:
         mins += 1440
     return mins / 60.0
+
+
+def current_etc(rows, remaining):
+    """ETC at the current flow: end of the last log row + remaining / rate of
+    the latest row that moved cargo. The cumulative avg is NOT used — a slow
+    ramp-up at the start would hold the ETC days out long after the line is
+    at full rate. `rows`: real (non-short-close) log rows in log order, with
+    entry_date / from_time / to_time / quantity. Returns (rate, etc|None).
+    ponytail: one-row rate, swap for a rolling few-hour window if it proves jumpy.
+    Mirrored in lueu01.html (recomputeTotals) and the jnpa_vessels_on_berth view."""
+    rate, end = 0.0, None
+    for r in rows:
+        h = _hours(r.get('from_time'), r.get('to_time'))
+        q = float(r.get('quantity') or 0)
+        if q > 0 and h > 0:
+            rate = q / h
+        try:
+            start = datetime.strptime(f"{str(r.get('entry_date'))[:10]} {r.get('from_time')}"[:16],
+                                      '%Y-%m-%d %H:%M')
+        except ValueError:
+            continue
+        row_end = start + timedelta(hours=h)
+        end = max(end, row_end) if end else row_end
+    if remaining <= 1e-6 or rate <= 0 or end is None:
+        return rate, None
+    return rate, end + timedelta(hours=remaining / rate)
 
 
 def get_vessels_with_started_parcels():
@@ -112,8 +138,9 @@ def get_started_parcels(vcn_id):
     # can't drag the actual ETC out. Rows must be ordered for the cap to apply.
     pop_ids = [p['parcel_op_id'] for p in parcels]
     agg = {}  # parcel_op_id -> [logged_qty, hours]
+    real_rows = {}  # parcel_op_id -> counted real rows, for current_etc
     if pop_ids:
-        cur.execute('''SELECT parcel_op_id, from_time, to_time, COALESCE(quantity,0) AS q, is_shortclose
+        cur.execute('''SELECT parcel_op_id, entry_date, from_time, to_time, COALESCE(quantity,0) AS q, is_shortclose
                        FROM lueu_parcel_log
                        WHERE parcel_op_id = ANY(%s) AND is_deleted IS NOT TRUE
                        ORDER BY parcel_op_id, entry_date, from_time NULLS LAST, id''', [pop_ids])
@@ -127,6 +154,7 @@ def get_started_parcels(vcn_id):
             else:
                 a[0] += float(r['q'] or 0)
                 a[1] += _hours(r['from_time'], r['to_time'])
+                real_rows.setdefault(r['parcel_op_id'], []).append(dict(r, quantity=r['q']))
     conn.close()
 
     out = []
@@ -147,6 +175,7 @@ def get_started_parcels(vcn_id):
         # terminal from the live VCN consigner (unload_terminal); fall back to the
         # op snapshot (covers export parcels + legacy rows without a source terminal)
         terminals = _distinct(src_term)
+        cur_rate, etc = current_etc(real_rows.get(p['parcel_op_id'], []), target - logged)
         out.append({
             'parcel_op_id': p['parcel_op_id'],
             'parcel_no': ', '.join(labels.get(i, f"#{i}") for i in ids) or '—',
@@ -157,6 +186,8 @@ def get_started_parcels(vcn_id):
             'remaining_qty': round(target - logged, 3),
             'op_hours': round(hours, 2),
             'avg_rate': round(logged_real / hours, 2) if hours > 0 else 0,
+            'cur_rate': round(cur_rate, 2),
+            'etc': etc.strftime('%Y-%m-%dT%H:%M') if etc else '',
             'is_shortclosed': shortclosed > 1e-6,
             'additional_qty': round(_num(p['additional_qty']) or 0, 3),
             'additional_reason': p['additional_reason'] or '',

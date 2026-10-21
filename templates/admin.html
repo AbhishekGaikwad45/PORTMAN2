@@ -17,6 +17,7 @@
     <button class="tab-btn" onclick="showTab('services')">Services</button>
     <button class="tab-btn" onclick="showTab('sap')">SAP Config</button>
     <button class="tab-btn" onclick="showTab('saptokens')">SAP Tokens</button>
+    <button class="tab-btn" onclick="showTab('sapsandbox')">SAP Sandbox</button>
     <button class="tab-btn" onclick="showTab('banks')">Bank Accounts</button>
     <button class="tab-btn" onclick="showTab('mail')">Mail</button>
     <button class="tab-btn" onclick="showTab('cutover')">Cutover</button>
@@ -301,6 +302,34 @@
                 </div>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- SAP Sandbox Tab — send a hand-edited payload; every send kept in sap_sandbox_log -->
+<div id="sapsandbox-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>SAP Sandbox</h3>
+        <p style="font-size:12px;color:#666;">Paste a DynaportInvoice payload (<code>{"Record_Header": [...]}</code>) and send it to the chosen SAP environment. Separate from live posting: nothing here touches invoices or the integration log.</p>
+        <div class="toolbar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <label>Environment: <select id="sandboxEnv" style="padding:5px;"></select></label>
+            <button class="btn btn-save" id="sandboxSendBtn" onclick="sendSandbox()">Send to SAP</button>
+            <button class="btn" onclick="formatSandboxPayload()" style="background:#718096;color:#fff;">Format JSON</button>
+            <span id="sandboxStatus" style="font-size:12px;"></span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-top:8px;">
+            <label style="font-size:12px;">Payload sent<br>
+                <textarea id="sandboxPayload" rows="22" spellcheck="false" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:8px;"></textarea></label>
+            <label style="font-size:12px;">Response from SAP<br>
+                <pre id="sandboxResponse" style="margin:0;height:100%;min-height:360px;max-height:360px;overflow:auto;background:#f7fafc;border:1px solid #cbd5e0;padding:8px;font-size:12px;white-space:pre-wrap;"></pre></label>
+        </div>
+    </div>
+    <div class="admin-section" style="margin-top:12px;">
+        <h3>Previously sent</h3>
+        <div class="toolbar"><button class="btn" onclick="loadSandboxLog()" style="background:#3498db;color:#fff;">Refresh</button></div>
+        <table class="admin-table" id="sandboxLogTable">
+            <thead><tr><th>#</th><th>Sent</th><th>By</th><th>Environment</th><th>Reference</th><th>HTTP</th><th>Status</th><th>ms</th><th></th></tr></thead>
+            <tbody></tbody>
+        </table>
     </div>
 </div>
 
@@ -678,6 +707,7 @@
 .btn-danger { background: linear-gradient(135deg, #fc8181 0%, #e53e3e 100%); color: white; }
 
 body.dark-theme .admin-section { background: #2d3748; }
+body.dark-theme #sandboxResponse, body.dark-theme #sandboxPayload { background: #1a202c; color: #e2e8f0; border-color: #4a5568; }
 body.dark-theme .admin-table th { background: #1a202c; }
 body.dark-theme .admin-table td { border-color: #4a5568; }
 body.dark-theme .config-panel { background: #1a202c; }
@@ -815,6 +845,7 @@ function showTab(tab) {
     if (tab === 'services') loadServiceConfig();
     if (tab === 'sap') loadSapConfig();
     if (tab === 'saptokens') loadSapTokens();
+    if (tab === 'sapsandbox') { loadSandboxEnvs(); loadSandboxLog(); }
     if (tab === 'banks') loadBankAccounts();
     if (tab === 'config') loadAllConfigs();
     if (tab === 'mail') { loadSmtpConfig(); loadMailQueue(); }
@@ -1989,6 +2020,71 @@ loadModules();
 
 // ===== SAP Inbound Tokens =====
 const escTok = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// ── SAP Sandbox ──────────────────────────────────────────────────────────────
+let _sandboxEnvs = [], _sandboxLog = [];
+
+async function loadSandboxEnvs() {
+    _sandboxEnvs = await (await fetch('/admin/api/sap-sandbox/envs')).json();
+    const sel = document.getElementById('sandboxEnv'), keep = sel.value;
+    // non-production first, so the default pick is never production
+    sel.innerHTML = _sandboxEnvs.map(e => `<option value="${e.id}">${escTok(e.environment)} — ${escTok(e.base_url)}${e.is_active ? ' (active)' : ''}</option>`).join('');
+    if (keep) sel.value = keep;
+}
+
+function formatSandboxPayload() {
+    const ta = document.getElementById('sandboxPayload');
+    try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2); }
+    catch (e) { alert('Not valid JSON: ' + e.message); }
+}
+
+async function sendSandbox() {
+    const env = _sandboxEnvs.find(e => String(e.id) === document.getElementById('sandboxEnv').value);
+    if (!env) { alert('Pick an environment'); return; }
+    const isProd = env.environment === 'production';
+    if (isProd && !confirm('PRODUCTION: this posts a real accounting document in SAP.\n\nSend anyway?')) return;
+    const btn = document.getElementById('sandboxSendBtn'), st = document.getElementById('sandboxStatus');
+    btn.disabled = true; st.textContent = `Sending to ${env.environment}…`; st.style.color = '#718096';
+    try {
+        const res = await fetch('/admin/api/sap-sandbox/send', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({config_id: env.id, payload: document.getElementById('sandboxPayload').value,
+                                  confirm_production: isProd})
+        });
+        const out = await res.json();
+        if (out.error && !out.log_id) { st.textContent = out.error; st.style.color = '#c0392b'; return; }
+        st.textContent = `${out.status} · HTTP ${out.http_status ?? '—'} · ${out.duration_ms} ms (log #${out.log_id})`;
+        st.style.color = out.status === 'Success' ? '#27ae60' : '#c0392b';
+        document.getElementById('sandboxResponse').textContent =
+            (out.error ? out.error + '\n\n' : '') + JSON.stringify(out.response_body, null, 2);
+        loadSandboxLog();
+    } finally { btn.disabled = false; }
+}
+
+async function loadSandboxLog() {
+    _sandboxLog = await (await fetch('/admin/api/sap-sandbox/log')).json();
+    const tbody = document.querySelector('#sandboxLogTable tbody');
+    if (!_sandboxLog.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999;">Nothing sent yet.</td></tr>'; return; }
+    tbody.innerHTML = _sandboxLog.map(r => `<tr>
+        <td>${r.id}</td><td style="font-size:11px;">${escTok(r.sent_at)}</td><td>${escTok(r.sent_by)}</td>
+        <td>${escTok(r.environment)}</td><td>${escTok(r.reference || '—')}</td><td>${r.http_status ?? '—'}</td>
+        <td style="color:${r.status === 'Success' ? '#27ae60' : '#c0392b'};font-weight:700;" title="${escTok(r.error_message || '')}">${escTok(r.status)}</td>
+        <td>${r.duration_ms ?? ''}</td>
+        <td><button class="btn" style="background:#3498db;color:#fff;padding:2px 8px;font-size:10px;" onclick="openSandboxEntry(${r.id})">Open</button></td>
+    </tr>`).join('');
+}
+
+// Load a past send back into the editor (to resend or tweak) with what SAP returned.
+function openSandboxEntry(id) {
+    const r = _sandboxLog.find(x => x.id === id);
+    if (!r) return;
+    document.getElementById('sandboxPayload').value = JSON.stringify(r.request_body, null, 2);
+    document.getElementById('sandboxResponse').textContent =
+        (r.error_message ? r.error_message + '\n\n' : '') + JSON.stringify(r.response_body, null, 2);
+    const st = document.getElementById('sandboxStatus');
+    st.textContent = `Log #${r.id} · ${r.environment} · ${r.sent_at}`; st.style.color = '#718096';
+    window.scrollTo({top: 0, behavior: 'smooth'});
+}
 
 async function loadSapTokens() {
     const rows = await (await fetch('/admin/api/sap-tokens')).json();

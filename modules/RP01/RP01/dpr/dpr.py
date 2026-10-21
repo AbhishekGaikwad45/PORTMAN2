@@ -14,6 +14,7 @@ from datetime import datetime, time, timedelta
 import re
 from io import BytesIO
 from database import get_db, get_cursor, get_user_permissions
+from modules.LUEU01.model import current_etc
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -357,11 +358,12 @@ def _get_section_a(cur, window_start, window_end):
         pid = r.get('parcel_op_id')
         real_qty = 0.0
         hours = 0.0
+        real_rows = []
 
         if pid:
             try:
                 cur.execute("""
-                    SELECT from_time, to_time, COALESCE(quantity, 0) AS q, is_shortclose, remarks
+                    SELECT entry_date, from_time, to_time, COALESCE(quantity, 0) AS q, is_shortclose, remarks
                     FROM lueu_parcel_log
                     WHERE parcel_op_id = %s AND is_deleted IS NOT TRUE
                     ORDER BY entry_date, from_time NULLS LAST, id
@@ -370,6 +372,7 @@ def _get_section_a(cur, window_start, window_end):
                 for lr in log_rows:
                     if lr.get('is_shortclose') or 'short' in str(lr.get('remarks') or '').lower():
                         continue
+                    real_rows.append(dict(lr, quantity=lr.get('q')))
                     real_qty += float(lr.get('q') or 0)
                     try:
                         fh, fm = (int(x) for x in str(lr['from_time']).split(':')[:2])
@@ -391,10 +394,9 @@ def _get_section_a(cur, window_start, window_end):
                 g['completed_times'].append(comp_time)
         else:
             g['parcel_statuses'].append('Operations')
-            if start_time and hours > 0 and real_qty > 0 and p_qty > 0:
-                avg_rate = real_qty / hours
-                if avg_rate > 0:
-                    comp_time = start_time + timedelta(hours=(p_qty / avg_rate))
+            if real_qty > 0 and p_qty > 0:
+                # current flow, not the cumulative avg — see LUEU01.current_etc
+                comp_time = current_etc(real_rows, remaining)[1]
             elif exp_start and r.get('expected_flow_rate') and float(r['expected_flow_rate']) > 0 and p_qty > 0:
                 comp_time = exp_start + timedelta(hours=(p_qty / float(r['expected_flow_rate'])))
             if comp_time:

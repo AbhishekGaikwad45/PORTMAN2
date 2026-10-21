@@ -46,7 +46,7 @@ Debit Note uses `DR` — same as a regular invoice. Credit Note uses `DG`. Invoi
 | `Document_Type` | | `"DR"` / `"DG"` | `DR`=Invoice/Debit Note/Reversal, `DG`=Credit Note — **unique primary field** |
 | `Cancellation_Flag` | 3 | `""` / `"X"` | `"X"` only for invoice reversals — **unique primary field** |
 | `Customer_Code` | 10 | | Customer SAP GL code from `customer_gl_code` |
-| `Invoice_Amount` | 13 | `"118000.00"` | Total incl. GST, minus TDS, plus TCS |
+| `Invoice_Amount` | 13 | `"118000.00"` | taxable + GST + TDS − TCS + round-off (what SAP balances against). Rebuilt from header components, not from `total_amount` |
 | `Currency` | | `"INR"` | Always INR |
 | `Business_Place` | | | From SAP config `business_place`; overridden by customer company code |
 | `Section_Code` | | | From SAP config `section_code`; overridden by customer company code |
@@ -122,12 +122,18 @@ GL accounts are **not** on the invoice line. They come from two places:
 ### Invoice_Amount Calculation
 
 ```text
-Invoice_Amount = total_amount (from header)
-               - TDS
-               + TCS
+Invoice_Amount = subtotal + CGST + SGST + IGST   (header components)
+               + TDS
+               - TCS
+               + round-off
 ```
 
-If `total_amount` is zero or null, it is computed by summing `line_amount + cgst + sgst + igst` across all lines before applying TDS/TCS.
+Verified against SAP's responses: `+TCS` or omitting TDS gets "Total Debit and
+Credit amount is not matching". `total_amount` is never read (it already
+includes TCS). If the header components are all zero, the base is summed from
+the lines (`line_amount + cgst + sgst + igst`) instead. The value sent is then
+re-derived from the ITEM rows (`_balance_invoice_amount`) so it always balances
+`sum(Amount + GST + TDS + Round_off) - sum(TCS)`.
 
 ---
 

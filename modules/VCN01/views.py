@@ -230,6 +230,27 @@ def delete_consigner():
     vcn_id = model.delete_consigner(request.json.get('id'))
     return jsonify({'success': True, 'cargo_type': model.get_header_cargo_type(vcn_id)})
 
+@bp.route('/api/module/VCN01/parcel/amend', methods=['POST'])
+@login_required
+def amend_parcel():
+    """Approved VCN: change a parcel's Pipeline / Terminal with a reason
+    (audited in approval_log). Every other parcel field stays locked."""
+    perms = get_perms()
+    if not perms.get('can_add') and not perms.get('can_edit'):
+        return jsonify({'error': 'No permission'}), 403
+    d = request.json or {}
+    kind, row_id = d.get('type'), d.get('id')
+    vcn_id = (model.get_consigner_vcn_id(row_id) if kind == 'consigners'
+              else model.get_export_parcel_vcn_id(row_id))
+    locked = _billed_locked(vcn_id)
+    if locked:
+        return locked
+    try:
+        model.amend_parcel_route(kind, row_id, d, d.get('reason'), session.get('username'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'success': True})
+
 @bp.route('/api/module/VCN01/parcels/export')
 @login_required
 def export_parcels_master():
